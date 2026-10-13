@@ -1,0 +1,18 @@
+{
+  "binary_name": "benchmark_arm64_novec",
+  "architecture": "AARCH64",
+  "functions": [
+    {
+      "name": "_start_main",
+      "entry_point": "00104784",
+      "instruction_count": 22,
+      "decompiled_c": "\r\nvoid _start_main(undefined8 param_1)\r\n\r\n{\r\n  code *UNRECOVERED_JUMPTABLE;\r\n  undefined8 local_40;\r\n  undefined8 uStack_38;\r\n  undefined1 *local_30;\r\n  undefined8 uStack_28;\r\n  undefined8 uStack_20;\r\n  undefined8 uStack_18;\r\n  \r\n  uStack_28 = 0;\r\n  local_30 = (undefined1 *)0x0;\r\n  uStack_18 = 0;\r\n  uStack_20 = 0;\r\n  uStack_38 = 0;\r\n  local_40 = 0;\r\n  if (0 < (long)PTR__start_00108b28 - (long)PTR__start_00108b20) {\r\n    local_30 = &fini_array_with_sentinels;\r\n  }\r\n  UNRECOVERED_JUMPTABLE = (code *)__libc_init(param_1,0,PTR_main_00108b30,&local_40);\r\n  if (UNRECOVERED_JUMPTABLE != (code *)0x0) {\r\n                    /* WARNING: Could not recover jumptable at 0x001047e8. Too many branches */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    (*UNRECOVERED_JUMPTABLE)();\r\n    return;\r\n  }\r\n  return;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "main",
+      "entry_point": "00104870",
+      "instruction_count": 42,
+      "decompiled_c": "\r\nundefined8 main(void)\r\n\r\n{\r\n  uint uVar1;\r\n  clock_t cVar2;\r\n  clock_t cVar3;\r\n  uint uVar4;\r\n  long lVar5;\r\n  \r\n  puts(\"[+] Execucao nativa ARM64 iniciada no Android!\");\r\n  cVar2 = clock();\r\n  lVar5 = 0;\r\n  uVar4 = 0;\r\n  do {\r\n    uVar1 = uVar4 ^ uVar4 >> 3;\r\n    uVar4 = uVar4 + 1;\r\n    lVar5 = lVar5 + (ulong)(uVar1 * 3);\r\n  } while (uVar4 != 10000000);\r\n  cVar3 = clock();\r\n  printf(\"[+] Resultado: %lld\\n\",(double)(cVar3 - cVar2),lVar5);\r\n  printf(\"[+] Tempo decorrido: %.4f s\\n\",(double)(cVar3 - cVar2) / 1000000.0);\r\n  puts(\"[+] Executado nativamente no hardware AArch64.\");\r\n  return 0;\r\n}\r\n\r\n"
+    }
+  ]
+}

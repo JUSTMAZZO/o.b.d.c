@@ -1,0 +1,26 @@
+# Binários AArch64 compilados (regenerar com o Clang do NDK)
+benchmark_arm64
+benchmark_arm64_novec
+benchmark_array_neon
+*.o
+*.so
+
+# Projeto temporário do Ghidra headless
+temp_ghidra_proj/
+*.gpr
+*.rep/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Saídas locais do LLM
+*.prompt.txt
+qwen_response*.md
+
+# Editor / SO
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
