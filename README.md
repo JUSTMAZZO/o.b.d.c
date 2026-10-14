@@ -5,9 +5,9 @@
 
 ### Recompilação estática AArch64 → AArch64: binários de Nintendo Switch rodando nativamente no Android
 
-![Endgame](https://img.shields.io/badge/Endgame-45%25-orange?style=for-the-badge) ![Fase atual](https://img.shields.io/badge/Fase%20atual-2%20%E2%80%93%20Em%20andamento-yellow?style=for-the-badge) ![ISA](https://img.shields.io/badge/ISA-AArch64%20%E2%86%92%20AArch64-informational?style=for-the-badge&logo=arm&logoColor=white) ![Alvo](https://img.shields.io/badge/Alvo-Galaxy%20A56%20%C2%B7%20Exynos%201580-1428A0?style=for-the-badge&logo=samsung&logoColor=white)
+![Endgame](https://img.shields.io/badge/Endgame-49%25-orange?style=for-the-badge) ![Fase atual](https://img.shields.io/badge/Fase%20atual-2%20%E2%80%93%20Em%20andamento-yellow?style=for-the-badge) ![ISA](https://img.shields.io/badge/ISA-AArch64%20%E2%86%92%20AArch64-informational?style=for-the-badge&logo=arm&logoColor=white) ![Alvo](https://img.shields.io/badge/Alvo-Galaxy%20A56%20%C2%B7%20Exynos%201580-1428A0?style=for-the-badge&logo=samsung&logoColor=white)
 
-![Validação](https://img.shields.io/badge/Valida%C3%A7%C3%A3o-14%2F14%20OK-brightgreen?style=for-the-badge) ![Benchmarks](https://img.shields.io/badge/Benchmarks-3%20no%20A56-teal?style=for-the-badge&logo=android&logoColor=white) ![Instruções](https://img.shields.io/badge/Instru%C3%A7%C3%B5es-20%20suportadas-blueviolet?style=for-the-badge) ![LLM](https://img.shields.io/badge/LLM-qwen2.5--coder%207b-black?style=for-the-badge&logo=ollama&logoColor=white) ![Atualizado](https://img.shields.io/badge/Atualizado-2026--10--14-lightgrey?style=for-the-badge) [![Licença](https://img.shields.io/badge/Licen%C3%A7a-MIT-green?style=for-the-badge)](LICENSE)
+![Validação](https://img.shields.io/badge/Valida%C3%A7%C3%A3o-17%2F17%20OK-brightgreen?style=for-the-badge) ![Benchmarks](https://img.shields.io/badge/Benchmarks-3%20no%20A56-teal?style=for-the-badge&logo=android&logoColor=white) ![Instruções](https://img.shields.io/badge/Instru%C3%A7%C3%B5es-20%20suportadas-blueviolet?style=for-the-badge) ![LLM](https://img.shields.io/badge/LLM-qwen2.5--coder%207b-black?style=for-the-badge&logo=ollama&logoColor=white) ![Atualizado](https://img.shields.io/badge/Atualizado-2026--10--14-lightgrey?style=for-the-badge) [![Licença](https://img.shields.io/badge/Licen%C3%A7a-MIT-green?style=for-the-badge)](LICENSE)
 
 </div>
 
@@ -30,15 +30,15 @@ Switch ELF/NSO ──► Ghidra (ASM + CFG + .rodata) ──► Lifter simbólic
 Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── shim ABI/svc ◄──┘
 ```
 
-## 📈 Progresso até o Endgame: `█████████░░░░░░░░░░░ 45%`
+## 📈 Progresso até o Endgame: `██████████░░░░░░░░░░ 49%`
 
 ## 🧩 Módulos atuais
 
 | Módulo | Status | Progresso | O que faz hoje | Próximo |
 |---|---|---|---|---|
-| **Ghidra Extractor**<br>`ExtractMain.java` | ✅ Concluído | `████████░░ 75%` | C descompilado + ASM AArch64 + .rodata resolvido + isolamento de múltiplos loops (corpo e pré-cabeçalho) | CFG completo por bloco básico, múltiplos loops aninhados, tipos de ponteiro |
-| **NEON Symbolic Lifter**<br>`neon_lifter.py` | 🟡 Em andamento | `██████░░░░ 60%` | Propagação simbólica por lane, memória (ldp/stp, ldr/str q pós-incremento), stores dependentes em ordem sequencial, boost simbólico por frame, validação concreta + 60 frames | ld1/st1, orr/bic/sshr, umull/smull, CFG genérico (csel/cbz) em vez de esqueleto por binário |
-| **Local LLM Qwen 2.5 7B**<br>`qwen2.5-coder:7b (Ollama, CUDA parcial)` | 🟡 Em andamento | `██████░░░░ 65%` | Gera C escalar a partir do resumo do lifter + esqueleto; posição de cada loop conferida por profundidade de chaves, com 1 nova tentativa guiada | Conferir a semântica do C gerado (execução no host) antes de ir ao aparelho |
+| **Ghidra Extractor**<br>`ExtractMain.java` | ✅ Concluído | `████████░░ 80%` | C descompilado + ASM AArch64 + .rodata + isolamento de loops + nomes dos alvos de bl e strings carregadas (formatos de printf) | Tipos de ponteiro/structs, várias funções além do main |
+| **NEON Symbolic Lifter**<br>`neon_lifter.py` | 🟡 Em andamento | `███████░░░ 70%` | Elevação simbólica NEON + esqueleto do main gerado do CFG (cfg_skeleton.py: dominadores, loops naturais, definições alcançantes, webs, estruturação while/if/break/return); --emit-c gera C de referência sem LLM | ld1/st1, orr/bic/sshr, umull/smull, if/else e switch no estruturador, tipagem de objetos de pilha |
+| **Local LLM Qwen 2.5 7B**<br>`qwen2.5-coder:7b (Ollama, CUDA parcial)` | 🟡 Em andamento | `██████░░░░ 65%` | Nomeia/limpa o C a partir do resumo do lifter + esqueleto do CFG; posição de cada loop conferida por profundidade e pela ordem das chamadas, com 1 nova tentativa guiada | Fazer o Qwen renomear variáveis de registrador (w21, x23, sp_0x10) e tipar PadState |
 | **Android AArch64 Runner**<br>`Galaxy A56 via ADB` | 🟡 Em andamento | `████░░░░░░ 45%` | push + chmod + execução em /data/local/tmp, medições intercaladas (15×) | Script único de round-trip (compilar → push → rodar → comparar), afinidade de núcleo (taskset) |
 | **Switch HLE Shim**<br>`switch_hle_shim.h` | 🟡 Em andamento | `██░░░░░░░░ 15%` | Tipos e primitivas libnx (console, appletMainLoop, pad/hid determinístico, armGetSystemTick a 19,2 MHz) sobre Bionic/POSIX | Shim de fs/time/sync, entrada real (toque/gamepad), loader ELF/NRO e tradução de svc |
 
@@ -47,7 +47,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | Fase | Subsistema | Status | Progresso |
 |:---:|---|---|---|
 | **1** | Lifter NEON Aritmético | ✅ Concluído | `██████████ 100%` |
-| **2** | Memória, Arrays e Ponteiros | 🟡 Em andamento | `██████░░░░ 65%` |
+| **2** | Memória, Arrays e Ponteiros | 🟡 Em andamento | `████████░░ 80%` |
 | **3** | Loader ELF e Tradução de ABI / Syscalls | 🟡 Em andamento | `██░░░░░░░░ 15%` |
 | **4** | Subsistema de Áudio, Threads e Vulkan Mobile | ⚪ Planejado | `░░░░░░░░░░ 0%` |
 
@@ -63,7 +63,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 </details>
 
 <details open>
-<summary><b>Fase 2 — Memória, Arrays e Ponteiros</b> (8/11)</summary>
+<summary><b>Fase 2 — Memória, Arrays e Ponteiros</b> (10/12)</summary>
 
 - [x] Modelo de memória simbólico (base + índice × escala)
 - [x] ldp/stp de registradores Q
@@ -74,7 +74,8 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 - [x] C reconstruído do benchmark_array_neon executado no A56
 - [x] ldr/str de registradores Q com pós-incremento
 - [ ] ld1/st1
-- [ ] CFG completo e loops aninhados
+- [x] C de referência sem LLM (esqueleto do CFG + loops do lifter) validado no A56 nos 3 benchmarks
+- [x] CFG do main e loops aninhados: esqueleto C gerado automaticamente (cfg_skeleton.py)
 - [ ] Recuperação de structs e tipos de ponteiro
 
 </details>
@@ -144,6 +145,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | Lifter: execução concreta (2000 voltas) vs fórmula simbólica | `96467232 = 96467232` | ✅ |
 | Lifter: fórmula sobre 10.000.000 iterações vs aparelho | `151550809095744` | ✅ |
 | C do Qwen recompilado (NDK) e executado no A56 | `151550809095744` | ✅ |
+| C de referência sem LLM (esqueleto do CFG + lifter, ref_hybrid) no A56, 3× | `151550809095744` | ✅ |
 
 ### `benchmark_array_neon` — Loop duplo com arrays in_buf/out_buf
 
@@ -173,10 +175,11 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | Lifter: checksum sobre 1.000.000 elementos vs aparelho | `12249998500128` | ✅ |
 | Último elemento out_buf[N-1] (Python) | `24500040` | ✅ |
 | C reconstruído executado no A56 (15×, checksum + último elemento) | `12249998500128 / 24500040` | ✅ |
+| C de referência sem LLM (esqueleto do CFG + lifter, ref_array) no A56, 3× | `12249998500128 / 24500040` | ✅ |
 
 ### `switch_particle_bench` — Homebrew libnx: física de 100.000 partículas × 60 frames (shim HLE)
 
-> 📱 Round-trip completo: binário com shim libnx → Ghidra → lifter → Qwen → NDK r28 -O2 → A56 (15×, taskset 80) com checksum e última partícula idênticos. O fonte original também roda via shim HLE (switch_particle_bench).
+> 📱 Round-trip completo: binário com shim libnx → Ghidra → lifter + esqueleto do main gerado do CFG → Qwen → NDK r28 -O2 → A56 (15×, taskset 80) com checksum e última partícula idênticos. O C de referência sem LLM também confere. Tempos de 4,5–7 ms variam com o estado do aparelho.
 
 **Round-trip binário → LLM → C**
 
@@ -185,6 +188,8 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | 1 | Lifter (fórmulas sobre valores carregados) + esqueleto | `switch_particle_bench` | ❌ | ✅ | —<br><sub>pos_x reaplicava a atualização de vel_x já escrita; resumo do lifter passou a ordem sequencial</sub> | — |
 | 2 | Resumo sequencial + esqueleto | `switch_particle_bench` | ✅ | ❌ | —<br><sub>Qwen moveu o loop de inicialização para dentro do while (detectado pela checagem de profundidade, inclusive na nova tentativa)</sub> | 49.1 |
 | 3 | Resumo sequencial + esqueleto + posição de cada loop | `switch_particle_bench` | ✅ | ✅ | `88196450180` 📱 | 43.6 |
+| 4 | Esqueleto gerado do CFG + resumo sequencial + posição | `switch_particle_bench` | ✅ | ❌ | `88196450180` 🐍<br><sub>valores certos, mas armGetSystemTick() foi movido para antes do loop de inicialização (tempo errado); pego pela nova checagem de ordem das chamadas</sub> | 65.0 |
+| 5 | Esqueleto do CFG + posição com linha anterior/seguinte | `switch_particle_bench` | ✅ | ✅ | `88196450180` 📱<br><sub>estrutura fiel ao binário; o Qwen não renomeou as variáveis de registrador</sub> | 59.0 |
 
 📱 = recompilado e executado no Galaxy A56 · 🐍 = verificado em Python · ❌ = diverge do esperado
 
@@ -195,6 +200,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | switch_particle_bench (sem afinidade) | 15 | 0.0054 s | 0.0044 s | `88196450180` ✅ |
 | switch_particle_bench (taskset cpu7, 2,91 GHz) | 15 | 0.0044 s | 0.0044 s | `88196450180` ✅ |
 | reconstructed_switch_bin (C do Qwen, taskset cpu7) | 15 | 0.0047 s | 0.0042 s | `88196450180` ✅ |
+| reconstructed_switch_bin (C do Qwen sobre o esqueleto do CFG, taskset cpu7) | 15 | 0.0070 s | 0.0045 s | `88196450180` ✅ |
 
 **Validação**
 
@@ -207,6 +213,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | Lifter: execução concreta NEON (500 voltas) vs fórmula simbólica | `27777460 = 27777460` | ✅ |
 | Lifter: 60 frames sobre 100.000 partículas vs aparelho | `88196450180` | ✅ |
 | C reconstruído executado no A56 (15×, frames + checksum + última partícula) | `60 / 88196450180 / 1734747` | ✅ |
+| C de referência sem LLM (esqueleto do CFG + lifter, ref_switch) no A56, 3× | `60 / 88196450180 / 1734747` | ✅ |
 
 ## 🧮 Instruções ARM64/NEON no lifter
 
