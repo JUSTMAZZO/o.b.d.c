@@ -32,6 +32,7 @@
       ],
       "resolved_data": {
       },
+      "calls": {"0x104aa0": "__libc_init"},
       "loops": [
 
       ]
@@ -146,6 +147,7 @@
       "resolved_data": {
         "DAT_100640": "00 00 00 00 01 00 00 00 02 00 00 00 03 00 00 00"
       },
+      "calls": {"0x104ae0": "malloc", "0x104af0": "clock", "0x104b00": "printf", "0x104b10": "free", "0x104ad0": "puts"},
       "loops": [
         {
           "start": "00104958",
@@ -161,5 +163,6 @@
         }
       ]
     }
-  ]
+  ],
+  "strings": {"0x1004d6": "__register_atfork", "0x1006b2": "[+] Ultimo elemento: %u\n", "0x1004e8": "puts", "0x1004f4": "clock", "0x1002e0": "/system/bin/linker64", "0x100506": "libc.so", "0x1004bd": "__libc_init", "0x100501": "free", "0x100513": "libdl.so", "0x100711": "zR", "0x100650": "[+] Teste NEON Memory/Array iniciado no Android!", "0x100695": "[+] Tempo decorrido: %.4f s\n", "0x1004ed": "malloc", "0x1004fa": "printf", "0x100681": "[+] Checksum: %llu\n", "0x1004c9": "__cxa_atexit", "0x10050e": "LIBC"}
 }

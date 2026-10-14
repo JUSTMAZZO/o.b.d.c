@@ -5,6 +5,9 @@ Uso:
 """
 import argparse, json, re, sys, urllib.request
 
+import cfg_skeleton
+from collections import Counter
+
 M32, M64 = 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF
 BT3 = chr(96) * 3
 
@@ -377,7 +380,7 @@ def lift_single_loop(loop, resolved_data, idx, is_switch=False):
         acc_str, uses = next(iter(templates.items()))
         acc_tmpl = uses[0][3]
 
-    return dict(idx=idx, notes=notes, ind=ind, i0=i0, stride=stride, trips=trips, total=total,
+    return dict(idx=idx, start=loop['start'], end=loop['end'], notes=notes, ind=ind, i0=i0, stride=stride, trips=trips, total=total,
                 stores=store_list, tmpl=acc_tmpl, tmpl_str=acc_str, uses=uses,
                 accs=sorted({u[0] for u in uses}), scal=scal, vec=vec, ptr_names=ptr_names,
                 sym_vecs=sym_vecs, body=body)
@@ -470,50 +473,22 @@ def summary_all(loops):
     return '\n\n'.join(blocks)
 
 
-def skeleton(fn, is_switch=False):
-    c = fn['decompiled_c']
-    if is_switch:
-        return (
-            '#include <stdio.h>\n#include <stdlib.h>\n#include <stdint.h>\n#include "switch_hle_shim.h"\n\n'
-            'int main(void) {\n'
-            '  PadState pad;\n'
-            '  consoleInit(NULL);\n'
-            '  padConfigureInput(1, HidNpadStyleSet_NpadStandard);\n'
-            '  padInitializeDefault(&pad);\n'
-            '  puts("[+] Switch Particle Bench (libnx HLE shim) iniciado no Android!");\n'
-            '  uint32_t *pos_x = (uint32_t *)malloc(100000 * sizeof(uint32_t));\n'
-            '  uint32_t *vel_x = (uint32_t *)malloc(100000 * sizeof(uint32_t));\n'
-            '  if (!pos_x || !vel_x) return 1;\n'
-            '  /* <LOOP_NEON_1> */\n'
-            '  u64 start_tick = armGetSystemTick();\n'
-            '  uint32_t frames = 0;\n'
-            '  while (appletMainLoop()) {\n'
-            '    padUpdate(&pad);\n'
-            '    u64 kDown = padGetButtonsDown(&pad);\n'
-            '    uint32_t boost = (kDown & HidNpadButton_A) ? 65 : 1;\n'
-            '    /* <LOOP_NEON_2> */\n'
-            '    frames++;\n'
-            '    consoleUpdate(NULL);\n'
-            '    if (kDown & HidNpadButton_Plus) break;\n'
-            '  }\n'
-            '  u64 end_tick = armGetSystemTick();\n'
-            '  uint64_t checksum = 0;\n'
-            '  /* <LOOP_NEON_3> */\n'
-            '  printf("[+] Frames: %u\\n", frames);\n'
-            '  printf("[+] Checksum: %llu\\n", (unsigned long long)checksum);\n'
-            '  printf("[+] Ultima particula: %u\\n", pos_x[100000 - 1]);\n'
-            '  printf("[+] Tempo (60 frames): %.4f ms\\n", (double)armTicksToNs(end_tick - start_tick) / 1000000.0);\n'
-            '  free(pos_x);\n  free(vel_x);\n  consoleExit(NULL);\n  return 0;\n}'
-        )
-    loop_idx = 0
-    def repl_loop(_):
-        nonlocal loop_idx
-        loop_idx += 1
-        return f"\n  /* <LOOP_NEON_{loop_idx}> */"
-    c = re.sub(r'\n\s*do \{.*?\} while \([^)]*\);', repl_loop, c, flags=re.S)
-    c = c.replace('__ptr_00', 'out_buf').replace('__ptr', 'in_buf')
-    c = c.replace('cVar7', 'start_time').replace('cVar8', 'end_time')
-    return c
+def fill_loops(skel, loops):
+    """Preenche os placeholders com os loops escalares do proprio lifter (C de referencia, sem LLM)."""
+    for L in loops:
+        ph = f"/* <LOOP_NEON_{L['idx']}> */"
+        m = re.search(r'^( *)' + re.escape(ph), skel, re.M)
+        if not m:
+            raise LiftError(f"placeholder ausente no esqueleto: {ph}")
+        if L['stores'] and L['i0'] != 0:
+            raise LiftError(f"loop {L['idx']}: stores com inducao deslocada (i0={L['i0']}) nao suportados")
+        body = [f"for (uint32_t i = {L['i0']}; i < {L['i0'] + L['total']}u; i++) {{"]
+        body += [f"  {arr}[i] = {expr};" for arr, expr in sequential_stores(L['stores'])]
+        if L['tmpl'] is not None:
+            body.append(f"  checksum += {L['tmpl_str']};")
+        body.append("}")
+        skel = skel.replace(m.group(0), '\n'.join(m.group(1) + line for line in body), 1)
+    return skel
 
 
 def brace_depth(code, pos):
@@ -522,7 +497,10 @@ def brace_depth(code, pos):
 
 def check_placement(skel, code, loops):
     """Cada loop gerado precisa ficar na mesma profundidade de chaves do seu placeholder."""
-    squash = lambda t: re.sub(r'\s+', '', t)
+    # sem comentarios (exceto os placeholders) e sem espacos
+    strip = lambda t: re.sub(r'//[^\n]*|/\*.*?\*/', lambda m: m.group(0) if '<LOOP_NEON_' in m.group(0) else '',
+                             t, flags=re.S)
+    squash = lambda t: re.sub(r'\s+', '', strip(t))
     flat = squash(code)
     problems = []
     for L in loops:
@@ -541,20 +519,38 @@ def check_placement(skel, code, loops):
         if got != want:
             problems.append(f"LOOP_NEON_{L['idx']} esta em profundidade {got}, mas o placeholder esta em {want} "
                             f"(o loop foi movido para {'dentro' if got > want else 'fora'} de um bloco)")
+        # chamadas antes do loop: mesmas, e na mesma quantidade, que antes do placeholder
+        ph_pos = squash(skel).find(squash(f"/* <LOOP_NEON_{L['idx']}> */"))
+        want_calls, got_calls = calls_before(squash(skel), ph_pos), calls_before(flat, min(hits))
+        if want_calls != got_calls:
+            moved = sorted(set(want_calls.elements()) ^ set(got_calls.elements()))
+            problems.append(f"LOOP_NEON_{L['idx']} mudou de posicao em relacao as chamadas {moved}: "
+                            f"no esqueleto elas ficam {'antes' if (want_calls - got_calls) else 'depois'} do loop")
     return problems
+
+
+def calls_before(flat, pos):
+    """Contagem das chamadas de funcao (sem palavras-chave nem casts) em flat[:pos]."""
+    names = re.findall(r'([A-Za-z_]\w*)\(', flat[:pos])
+    return Counter(n for n in names if n not in ('if', 'while', 'for', 'return', 'sizeof', 'main', 'switch'))
 
 
 def placement_hints(skel):
     """Descreve, para cada placeholder, se ele roda uma vez ou dentro de qual bloco do esqueleto."""
     hints = []
+    lines = skel.split('\n')
     for m in re.finditer(r'/\* <LOOP_NEON_(\d+)> \*/', skel):
         depth = brace_depth(skel, m.start())
         if depth <= 1:
-            hints.append(f"- LOOP_NEON_{m.group(1)}: no corpo de `main`, FORA de qualquer `while`; executa uma unica vez.")
+            where = "no corpo de `main`, FORA de qualquer `while`; executa uma unica vez"
         else:
             opener = skel[:m.start()].rfind('{')
             head = skel[skel.rfind('\n', 0, opener) + 1:opener].strip()
-            hints.append(f"- LOOP_NEON_{m.group(1)}: DENTRO de `{head}`; executa a cada volta desse bloco.")
+            where = f"DENTRO de `{head}`; executa a cada volta desse bloco"
+        n = skel.count('\n', 0, m.start())
+        prev = next((l.strip() for l in reversed(lines[:n]) if l.strip() and l.strip() != 'checksum = 0;'), '')
+        nxt = next((l.strip() for l in lines[n + 1:] if l.strip()), '')
+        hints.append(f"- LOOP_NEON_{m.group(1)}: {where}; logo depois de `{prev}` e antes de `{nxt}`.")
     return '\n'.join(hints)
 
 
@@ -586,8 +582,11 @@ def ask_qwen(summ, skel, out, loops, retries=1):
         "Regras obrigatorias:\n"
         "1. Substitua cada `/* <LOOP_NEON_N> */` pelo loop `for (uint32_t i = 0; i < N; i++)` escalar correspondente, "
         "exatamente na posicao do placeholder: nao mova loops para dentro ou para fora de outros blocos.\n"
-        "2. Mantenha todas as chamadas do shim `libnx` (`consoleInit`, `appletMainLoop`, `padUpdate`, `padGetButtonsDown`, `armGetSystemTick`, `armTicksToNs`, `consoleUpdate`, `consoleExit`) intactas.\n"
-        f"3. Responda apenas com o bloco {BT3}c contendo o codigo final compilavel."
+        "2. Mantenha todas as chamadas de funcao do esqueleto, com os mesmos argumentos e na mesma ordem.\n"
+        "3. O esqueleto foi gerado do CFG: variaveis com nome de registrador (`w21`, `x23`, `p0`...) e objetos de "
+        "pilha (`sp_0x10`) devem ganhar nomes e tipos semanticos coerentes com as funcoes chamadas, "
+        "sem mudar o comportamento.\n"
+        f"4. Responda apenas com o bloco {BT3}c contendo o codigo final compilavel."
     )
     messages = [{"role": "user", "content": prompt}]
     for attempt in range(retries + 1):
@@ -611,6 +610,8 @@ def main():
     ap.add_argument('json')
     ap.add_argument('--expected', type=int, help='resultado observado no aparelho')
     ap.add_argument('--qwen', metavar='OUT', help='envia ao Qwen e grava o codigo C em OUT')
+    ap.add_argument('--emit-c', metavar='OUT', help='grava o C de referencia: esqueleto do CFG + loops do lifter, sem LLM')
+    ap.add_argument('--skip-validation', action='store_true', help='pula a validacao deterministica (lenta no caso Switch)')
     args = ap.parse_args()
 
     with open(args.json, encoding='utf-8') as f:
@@ -625,17 +626,25 @@ def main():
     summ = summary_all(loops)
     print(summ)
 
-    concrete, symbolic, full = validate_all(loops, is_switch)
-    print("\n## Validacao Deterministica")
-    print(f"- Execucao concreta NEON (500 voltas): {concrete}")
-    print(f"- Formula simbolica nos mesmos i:      {symbolic}  -> {'OK' if concrete == symbolic else 'DIVERGE'}")
-    print(f"- Checksum total ({loops[-1]['total']} elementos):   {full}"
-          + (f"  -> aparelho {args.expected}: {'OK' if full == args.expected else 'DIVERGE'}" if args.expected else ''))
-    if concrete != symbolic or (args.expected and full != args.expected):
-        sys.exit("[lifter] validacao falhou; abortando.")
+    if not args.skip_validation:
+        concrete, symbolic, full = validate_all(loops, is_switch)
+        print("\n## Validacao Deterministica")
+        print(f"- Execucao concreta NEON (500 voltas): {concrete}")
+        print(f"- Formula simbolica nos mesmos i:      {symbolic}  -> {'OK' if concrete == symbolic else 'DIVERGE'}")
+        print(f"- Checksum total ({loops[-1]['total']} elementos):   {full}"
+              + (f"  -> aparelho {args.expected}: {'OK' if full == args.expected else 'DIVERGE'}" if args.expected else ''))
+        if concrete != symbolic or (args.expected and full != args.expected):
+            sys.exit("[lifter] validacao falhou; abortando.")
 
-    skel = skeleton(fn, is_switch)
-    print("\n## Esqueleto Limpo\n" + skel)
+    try:
+        skel = cfg_skeleton.build(fn, data, loops)
+    except cfg_skeleton.SkeletonError as e:
+        sys.exit(f"[esqueleto] {e}")
+    print("\n## Esqueleto do CFG\n" + skel)
+    if args.emit_c:
+        with open(args.emit_c, 'w', encoding='utf-8', newline='\n') as f:
+            f.write(fill_loops(skel, loops) + '\n')
+        print(f"\n[lifter] C de referencia (sem LLM) -> {args.emit_c}")
     if args.qwen:
         ask_qwen(summ, skel, args.qwen, loops)
 

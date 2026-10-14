@@ -32,6 +32,7 @@
       ],
       "resolved_data": {
       },
+      "calls": {"0x104f00": "__libc_init"},
       "loops": [
 
       ]
@@ -53,6 +54,7 @@
       ],
       "resolved_data": {
       },
+      "calls": {},
       "loops": [
 
       ]
@@ -221,6 +223,7 @@
       "resolved_data": {
         "DAT_1006c0": "00 00 00 00 01 00 00 00 02 00 00 00 03 00 00 00"
       },
+      "calls": {"0x104f50": "puts", "0x104c20": "armTicksToNs", "0x104f60": "malloc", "0x104b30": "padConfigureInput", "0x104f70": "printf", "0x104f80": "free", "0x104bc8": "consoleInit", "0x104ba4": "appletMainLoop", "0x104c3c": "armGetSystemTick", "0x104b3c": "padInitializeDefault", "0x104b5c": "padUpdate", "0x104bd0": "consoleUpdate", "0x104b8c": "padGetButtonsDown", "0x104be0": "consoleExit"},
       "loops": [
         {
           "start": "00104d10",
@@ -248,5 +251,6 @@
         }
       ]
     }
-  ]
+  ],
+  "strings": {"0x1004f9": "__cxa_atexit", "0x1006e0": "[+] Switch Particle Bench (libnx HLE shim) iniciado no Android!", "0x1006d0": "[+] Frames: %u\n", "0x10054c": "libc.so", "0x1002e0": "/system/bin/linker64", "0x100829": "zR", "0x100526": "clock_gettime", "0x100559": "libdl.so", "0x100506": "__register_atfork", "0x100539": "malloc", "0x100518": "stdout", "0x100720": "[+] Checksum: %llu\n", "0x100534": "puts", "0x100754": "[+] Ultima particula: %u\n", "0x100547": "free", "0x100734": "[+] Tempo (60 frames): %.4f ms\n", "0x100540": "printf", "0x1004ed": "__libc_init", "0x100554": "LIBC", "0x10051f": "fflush"}
 }

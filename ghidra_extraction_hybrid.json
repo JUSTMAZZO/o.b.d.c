@@ -32,6 +32,7 @@
       ],
       "resolved_data": {
       },
+      "calls": {"0x104980": "__libc_init"},
       "loops": [
 
       ]
@@ -101,6 +102,7 @@
       "resolved_data": {
         "DAT_1005c8": "00 00 00 00 01 00 00 00"
       },
+      "calls": {"0x1049b0": "puts", "0x1049d0": "printf", "0x1049c0": "clock"},
       "loops": [
         {
           "start": "001048c0",
@@ -110,5 +112,6 @@
         }
       ]
     }
-  ]
+  ],
+  "strings": {"0x1005e5": "[+] Executado nativamente no hardware AArch64.", "0x1004b5": "clock", "0x1005d0": "[+] Resultado: %lld\n", "0x1004b0": "puts", "0x1004c2": "libc.so", "0x1002e0": "/system/bin/linker64", "0x10049e": "__register_atfork", "0x100614": "[+] Tempo decorrido: %.4f s\n", "0x1004cf": "libdl.so", "0x100485": "__libc_init", "0x1004ca": "LIBC", "0x1004bb": "printf", "0x100631": "[+] Execucao nativa ARM64 iniciada no Android!", "0x1006a9": "zR", "0x100491": "__cxa_atexit"}
 }

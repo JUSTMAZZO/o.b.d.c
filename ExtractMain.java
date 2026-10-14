@@ -99,7 +99,18 @@ public class ExtractMain extends GhidraScript {
                 }
             }
 
-            // 3. Isolamento de loops: salto condicional para trás dentro da função
+            // 3. Alvos de chamada (bl) -> nome da função (thunks de PLT incluídos)
+            Map<String, String> calls = new HashMap<>();
+            for (Instruction ci : insts) {
+                if (!ci.getFlowType().isCall()) continue;
+                for (Address target : ci.getFlows()) {
+                    Function callee = currentProgram.getFunctionManager().getFunctionAt(target);
+                    calls.put("0x" + Long.toHexString(target.getOffset()),
+                              callee != null ? callee.getName() : "sub_" + Long.toHexString(target.getOffset()));
+                }
+            }
+
+            // 4. Isolamento de loops: salto condicional para trás dentro da função
             List<String> loopsJson = new ArrayList<>();
             for (Instruction br : insts) {
                 FlowType ft = br.getFlowType();
@@ -165,12 +176,25 @@ public class ExtractMain extends GhidraScript {
             }
             json.append("      },\n");
 
+            json.append("      \"calls\": ").append(stringMap(calls)).append(",\n");
+
             // Loops isolados
             json.append("      \"loops\": [\n").append(String.join(",\n", loopsJson)).append("\n      ]\n");
             json.append("    }");
         }
 
-        json.append("\n  ]\n}");
+        json.append("\n  ],\n");
+
+        // Strings definidas no programa (formatos de printf, mensagens de puts), por endereço
+        Map<String, String> strings = new HashMap<>();
+        for (Data d : currentProgram.getListing().getDefinedData(true)) {
+            MemoryBlock blk = mem.getBlock(d.getAddress());
+            // só blocos carregados em memória (ignora .comment/.strtab, que começam no endereço 0)
+            if (blk != null && blk.isLoaded() && d.hasStringValue() && d.getValue() != null) {
+                strings.put("0x" + Long.toHexString(d.getAddress().getOffset()), d.getValue().toString());
+            }
+        }
+        json.append("  \"strings\": ").append(stringMap(strings)).append("\n}");
 
         // nome de saída opcional: -postScript ExtractMain.java <arquivo.json>
         String[] args = getScriptArgs();
@@ -189,6 +213,16 @@ public class ExtractMain extends GhidraScript {
             sb.append(i > 0 ? ", " : "").append("\"").append(escapeJson(in.getAddress() + ": " + in.toString())).append("\"");
         }
         return sb.append("]").toString();
+    }
+
+    private String stringMap(Map<String, String> m) {
+        StringBuilder sb = new StringBuilder("{");
+        int i = 0;
+        for (Map.Entry<String, String> e : m.entrySet()) {
+            sb.append(i++ > 0 ? ", " : "").append("\"").append(escapeJson(e.getKey())).append("\": \"")
+              .append(escapeJson(e.getValue())).append("\"");
+        }
+        return sb.append("}").toString();
     }
 
     private String escapeJson(String s) {
