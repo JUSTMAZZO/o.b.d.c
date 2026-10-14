@@ -5,9 +5,9 @@
 
 ### Recompilação estática AArch64 → AArch64: binários de Nintendo Switch rodando nativamente no Android
 
-![Endgame](https://img.shields.io/badge/Endgame-41%25-orange?style=for-the-badge) ![Fase atual](https://img.shields.io/badge/Fase%20atual-2%20%E2%80%93%20Em%20andamento-yellow?style=for-the-badge) ![ISA](https://img.shields.io/badge/ISA-AArch64%20%E2%86%92%20AArch64-informational?style=for-the-badge&logo=arm&logoColor=white) ![Alvo](https://img.shields.io/badge/Alvo-Galaxy%20A56%20%C2%B7%20Exynos%201580-1428A0?style=for-the-badge&logo=samsung&logoColor=white)
+![Endgame](https://img.shields.io/badge/Endgame-45%25-orange?style=for-the-badge) ![Fase atual](https://img.shields.io/badge/Fase%20atual-2%20%E2%80%93%20Em%20andamento-yellow?style=for-the-badge) ![ISA](https://img.shields.io/badge/ISA-AArch64%20%E2%86%92%20AArch64-informational?style=for-the-badge&logo=arm&logoColor=white) ![Alvo](https://img.shields.io/badge/Alvo-Galaxy%20A56%20%C2%B7%20Exynos%201580-1428A0?style=for-the-badge&logo=samsung&logoColor=white)
 
-![Validação](https://img.shields.io/badge/Valida%C3%A7%C3%A3o-11%2F11%20OK-brightgreen?style=for-the-badge) ![Benchmarks](https://img.shields.io/badge/Benchmarks-3%20no%20A56-teal?style=for-the-badge&logo=android&logoColor=white) ![Instruções](https://img.shields.io/badge/Instru%C3%A7%C3%B5es-17%20suportadas-blueviolet?style=for-the-badge) ![LLM](https://img.shields.io/badge/LLM-qwen2.5--coder%207b-black?style=for-the-badge&logo=ollama&logoColor=white) ![Atualizado](https://img.shields.io/badge/Atualizado-2026--10--14-lightgrey?style=for-the-badge) [![Licença](https://img.shields.io/badge/Licen%C3%A7a-MIT-green?style=for-the-badge)](LICENSE)
+![Validação](https://img.shields.io/badge/Valida%C3%A7%C3%A3o-14%2F14%20OK-brightgreen?style=for-the-badge) ![Benchmarks](https://img.shields.io/badge/Benchmarks-3%20no%20A56-teal?style=for-the-badge&logo=android&logoColor=white) ![Instruções](https://img.shields.io/badge/Instru%C3%A7%C3%B5es-20%20suportadas-blueviolet?style=for-the-badge) ![LLM](https://img.shields.io/badge/LLM-qwen2.5--coder%207b-black?style=for-the-badge&logo=ollama&logoColor=white) ![Atualizado](https://img.shields.io/badge/Atualizado-2026--10--14-lightgrey?style=for-the-badge) [![Licença](https://img.shields.io/badge/Licen%C3%A7a-MIT-green?style=for-the-badge)](LICENSE)
 
 </div>
 
@@ -30,15 +30,15 @@ Switch ELF/NSO ──► Ghidra (ASM + CFG + .rodata) ──► Lifter simbólic
 Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── shim ABI/svc ◄──┘
 ```
 
-## 📈 Progresso até o Endgame: `████████░░░░░░░░░░░░ 41%`
+## 📈 Progresso até o Endgame: `█████████░░░░░░░░░░░ 45%`
 
 ## 🧩 Módulos atuais
 
 | Módulo | Status | Progresso | O que faz hoje | Próximo |
 |---|---|---|---|---|
 | **Ghidra Extractor**<br>`ExtractMain.java` | ✅ Concluído | `████████░░ 75%` | C descompilado + ASM AArch64 + .rodata resolvido + isolamento de múltiplos loops (corpo e pré-cabeçalho) | CFG completo por bloco básico, múltiplos loops aninhados, tipos de ponteiro |
-| **NEON Symbolic Lifter**<br>`neon_lifter.py` | 🟡 Em andamento | `████░░░░░░ 45%` | Propagação simbólica por lane, memória base+índice (ldp/stp q), stores e acumuladores, vários loops em sequência, validação concreta | ld1/st1 e pós-incremento, and/orr/sshr, umull/smull, corrigir printf quebrado no esqueleto do main |
-| **Local LLM Qwen 2.5 7B**<br>`qwen2.5-coder:7b (Ollama, CUDA parcial)` | 🟡 Em andamento | `██████░░░░ 55%` | Gera C escalar limpo a partir do resumo determinístico do lifter + esqueleto do main | Diff automático C gerado × fórmula do lifter (o Qwen acumulou o valor antes do XOR no benchmark_array_neon) |
+| **NEON Symbolic Lifter**<br>`neon_lifter.py` | 🟡 Em andamento | `██████░░░░ 60%` | Propagação simbólica por lane, memória (ldp/stp, ldr/str q pós-incremento), stores dependentes em ordem sequencial, boost simbólico por frame, validação concreta + 60 frames | ld1/st1, orr/bic/sshr, umull/smull, CFG genérico (csel/cbz) em vez de esqueleto por binário |
+| **Local LLM Qwen 2.5 7B**<br>`qwen2.5-coder:7b (Ollama, CUDA parcial)` | 🟡 Em andamento | `██████░░░░ 65%` | Gera C escalar a partir do resumo do lifter + esqueleto; posição de cada loop conferida por profundidade de chaves, com 1 nova tentativa guiada | Conferir a semântica do C gerado (execução no host) antes de ir ao aparelho |
 | **Android AArch64 Runner**<br>`Galaxy A56 via ADB` | 🟡 Em andamento | `████░░░░░░ 45%` | push + chmod + execução em /data/local/tmp, medições intercaladas (15×) | Script único de round-trip (compilar → push → rodar → comparar), afinidade de núcleo (taskset) |
 | **Switch HLE Shim**<br>`switch_hle_shim.h` | 🟡 Em andamento | `██░░░░░░░░ 15%` | Tipos e primitivas libnx (console, appletMainLoop, pad/hid determinístico, armGetSystemTick a 19,2 MHz) sobre Bionic/POSIX | Shim de fs/time/sync, entrada real (toque/gamepad), loader ELF/NRO e tradução de svc |
 
@@ -47,7 +47,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | Fase | Subsistema | Status | Progresso |
 |:---:|---|---|---|
 | **1** | Lifter NEON Aritmético | ✅ Concluído | `██████████ 100%` |
-| **2** | Memória, Arrays e Ponteiros | 🟡 Em andamento | `█████░░░░░ 50%` |
+| **2** | Memória, Arrays e Ponteiros | 🟡 Em andamento | `██████░░░░ 65%` |
 | **3** | Loader ELF e Tradução de ABI / Syscalls | 🟡 Em andamento | `██░░░░░░░░ 15%` |
 | **4** | Subsistema de Áudio, Threads e Vulkan Mobile | ⚪ Planejado | `░░░░░░░░░░ 0%` |
 
@@ -63,14 +63,17 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 </details>
 
 <details open>
-<summary><b>Fase 2 — Memória, Arrays e Ponteiros</b> (5/8)</summary>
+<summary><b>Fase 2 — Memória, Arrays e Ponteiros</b> (8/11)</summary>
 
 - [x] Modelo de memória simbólico (base + índice × escala)
 - [x] ldp/stp de registradores Q
 - [x] Vários loops em sequência na mesma função
 - [x] Benchmark com buffers (benchmark_array_neon) validado pelo lifter
+- [x] Stores dependentes no mesmo loop (ordem sequencial em C)
+- [x] Loop NEON dentro do loop de frames (60× com boost simbólico)
 - [x] C reconstruído do benchmark_array_neon executado no A56
-- [ ] ld1/st1 e ldr/str com pós-incremento
+- [x] ldr/str de registradores Q com pós-incremento
+- [ ] ld1/st1
 - [ ] CFG completo e loops aninhados
 - [ ] Recuperação de structs e tipos de ponteiro
 
@@ -106,7 +109,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 |---|---|---|---:|---:|:---:|---|
 | **`benchmark_arm64`**<br>Loop bitwise escalar/vetorial | mul, add, eor, ushr, uaddw | Resultado: `151550809095744` | 0.0072 s | 0.0099 s | **1.38×** | 📱 `qwen_main` |
 | **`benchmark_array_neon`**<br>Loop duplo com arrays in_buf/out_buf | ldp/stp, shl, ushr, sub, eor, uaddw/uaddw2 | Checksum: `12249998500128`<br>Último elemento: `24500040` | 0.0021 s | — | — | 📱 `reconstructed_array_bin` |
-| **`switch_particle_bench`**<br>Homebrew libnx: física de 100.000 partículas × 60 frames (shim HLE) | ldr q, str q (pós-incremento), dup, add, and, eor, ushr, sub | Checksum: `88196450180`<br>Última partícula: `1734747` | 0.0044 s | — | — | 🎮 `switch_particle_bench` |
+| **`switch_particle_bench`**<br>Homebrew libnx: física de 100.000 partículas × 60 frames (shim HLE) | ldr q, str q (pós-incremento), dup, add, and, eor, ushr, sub | Checksum: `88196450180`<br>Última partícula: `1734747` | 0.0044 s | — | — | 📱 `reconstructed_switch_bin` |
 
 📱 = C reconstruído validado no aparelho · 🎮 = fonte libnx portado via shim HLE e validado · ⏳ = aguardando aparelho · ❌ = diverge
 
@@ -173,7 +176,17 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 
 ### `switch_particle_bench` — Homebrew libnx: física de 100.000 partículas × 60 frames (shim HLE)
 
-> 🎮 Fonte no padrão libnx compilado com switch_hle_shim.h (NDK r28, -O2; loop de física vetorizado: VF 4). Sem afinidade de núcleo o tempo é bimodal (~4,5 ms em núcleo grande, 10–16 ms em núcleo pequeno).
+> 📱 Round-trip completo: binário com shim libnx → Ghidra → lifter → Qwen → NDK r28 -O2 → A56 (15×, taskset 80) com checksum e última partícula idênticos. O fonte original também roda via shim HLE (switch_particle_bench).
+
+**Round-trip binário → LLM → C**
+
+| # | Entrada para o LLM | Binário | Fórmula | Iterações | Resultado da reconstrução | LLM (s) |
+|:---:|---|---|:---:|:---:|---|---:|
+| 1 | Lifter (fórmulas sobre valores carregados) + esqueleto | `switch_particle_bench` | ❌ | ✅ | —<br><sub>pos_x reaplicava a atualização de vel_x já escrita; resumo do lifter passou a ordem sequencial</sub> | — |
+| 2 | Resumo sequencial + esqueleto | `switch_particle_bench` | ✅ | ❌ | —<br><sub>Qwen moveu o loop de inicialização para dentro do while (detectado pela checagem de profundidade, inclusive na nova tentativa)</sub> | 49.1 |
+| 3 | Resumo sequencial + esqueleto + posição de cada loop | `switch_particle_bench` | ✅ | ✅ | `88196450180` 📱 | 43.6 |
+
+📱 = recompilado e executado no Galaxy A56 · 🐍 = verificado em Python · ❌ = diverge do esperado
 
 **Execução no aparelho**
 
@@ -181,6 +194,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 |---|:---:|---:|---:|---|
 | switch_particle_bench (sem afinidade) | 15 | 0.0054 s | 0.0044 s | `88196450180` ✅ |
 | switch_particle_bench (taskset cpu7, 2,91 GHz) | 15 | 0.0044 s | 0.0044 s | `88196450180` ✅ |
+| reconstructed_switch_bin (C do Qwen, taskset cpu7) | 15 | 0.0047 s | 0.0042 s | `88196450180` ✅ |
 
 **Validação**
 
@@ -190,22 +204,28 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | A56: 30 execuções, checksum e última partícula idênticos | `88196450180 / 1734747` | ✅ |
 | Frames executados (appletMainLoop + Plus no frame 60) | `60` | ✅ |
 | Loop de física vetorizado pelo Clang -O2 (-Rpass=loop-vectorize) | `VF 4 × IC 1` | ✅ |
+| Lifter: execução concreta NEON (500 voltas) vs fórmula simbólica | `27777460 = 27777460` | ✅ |
+| Lifter: 60 frames sobre 100.000 partículas vs aparelho | `88196450180` | ✅ |
+| C reconstruído executado no A56 (15×, frames + checksum + última partícula) | `60 / 88196450180 / 1734747` | ✅ |
 
 ## 🧮 Instruções ARM64/NEON no lifter
 
-**17 suportadas** · 10 grupos planejados
+**20 suportadas** · 10 grupos planejados
 
 | | Instrução | Tipo | Observação |
 |:---:|---|---|---|
 | ✅ | `mov` | escalar | constantes e cópias de registrador |
 | ✅ | `movk` | escalar | constantes de 64 bits montadas em partes |
 | ✅ | `movi` | NEON | broadcast imediato (.2S / .4S / .2D) |
-| ✅ | `ldr` | memória | carga literal de .rodata (d/q) |
+| ✅ | `dup` | NEON | broadcast de escalar para lanes (`boost` simbólico) |
+| ✅ | `ldr` | memória | literal de .rodata (d/q) e ldr q com pós-incremento |
+| ✅ | `str` | memória | str q com pós-incremento |
 | ✅ | `ldp` | memória | par de registradores Q, base + índice |
 | ✅ | `stp` | memória | par de registradores Q → array de saída |
 | ✅ | `add` | NEON/escalar | por lane; escalar como indução/endereço |
 | ✅ | `sub` | NEON | por lane, 32 bits |
 | ✅ | `mul` | NEON | por lane, 32 bits |
+| ✅ | `and` | NEON | AND bit a bit por lane (máscaras 0xFF / 0xFFFF) |
 | ✅ | `eor` | NEON | .8B/.16B tratado como XOR por lane |
 | ✅ | `ushr` | NEON | shift lógico à direita por imediato |
 | ✅ | `shl` | NEON | shift à esquerda por imediato |
@@ -214,10 +234,10 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | ✅ | `subs` | controle | contador de voltas / trip count |
 | ✅ | `cmp` | controle | limite em bytes (offset × passo) |
 | ✅ | `b.ne` | controle | aresta de retorno do loop |
-| ⬜ | `and, orr, bic, mvn` | NEON/escalar | planejado — Fase 2 |
+| ⬜ | `orr, bic, mvn` | NEON/escalar | planejado — Fase 2 |
 | ⬜ | `sshr, ushl, sshl` | NEON | planejado — Fase 2 |
 | ⬜ | `umull, smull, umlal, smlal` | NEON | planejado — Fase 2 |
-| ⬜ | `ld1 / st1 (pós-incremento)` | memória | planejado — Fase 2 |
+| ⬜ | `ld1 / st1` | memória | planejado — Fase 2 |
 | ⬜ | `ldr / str escalares gerais` | memória | planejado — Fase 2 |
 | ⬜ | `b.cond / cbz / cbnz / tbz` | controle | planejado — Fase 2 |
 | ⬜ | `bl / blr / ret` | controle | planejado — Fase 3 |

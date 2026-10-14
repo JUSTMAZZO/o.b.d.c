@@ -53,17 +53,17 @@
       "name": "NEON Symbolic Lifter",
       "file": "neon_lifter.py",
       "status": "in_progress",
-      "progress": 45,
-      "summary": "Propagação simbólica por lane, memória base+índice (ldp/stp q), stores e acumuladores, vários loops em sequência, validação concreta",
-      "next": "ld1/st1 e pós-incremento, and/orr/sshr, umull/smull, corrigir printf quebrado no esqueleto do main"
+      "progress": 60,
+      "summary": "Propagação simbólica por lane, memória (ldp/stp, ldr/str q pós-incremento), stores dependentes em ordem sequencial, boost simbólico por frame, validação concreta + 60 frames",
+      "next": "ld1/st1, orr/bic/sshr, umull/smull, CFG genérico (csel/cbz) em vez de esqueleto por binário"
     },
     {
       "name": "Local LLM Qwen 2.5 7B",
       "file": "qwen2.5-coder:7b (Ollama, CUDA parcial)",
       "status": "in_progress",
-      "progress": 55,
-      "summary": "Gera C escalar limpo a partir do resumo determinístico do lifter + esqueleto do main",
-      "next": "Diff automático C gerado × fórmula do lifter (o Qwen acumulou o valor antes do XOR no benchmark_array_neon)"
+      "progress": 65,
+      "summary": "Gera C escalar a partir do resumo do lifter + esqueleto; posição de cada loop conferida por profundidade de chaves, com 1 nova tentativa guiada",
+      "next": "Conferir a semântica do C gerado (execução no host) antes de ir ao aparelho"
     },
     {
       "name": "Android AArch64 Runner",
@@ -115,7 +115,7 @@
       "phase": 2,
       "title": "Memória, Arrays e Ponteiros",
       "status": "in_progress",
-      "progress": 50,
+      "progress": 65,
       "items": [
         {
           "name": "Modelo de memória simbólico (base + índice × escala)",
@@ -134,11 +134,23 @@
           "done": true
         },
         {
+          "name": "Stores dependentes no mesmo loop (ordem sequencial em C)",
+          "done": true
+        },
+        {
+          "name": "Loop NEON dentro do loop de frames (60× com boost simbólico)",
+          "done": true
+        },
+        {
           "name": "C reconstruído do benchmark_array_neon executado no A56",
           "done": true
         },
         {
-          "name": "ld1/st1 e ldr/str com pós-incremento",
+          "name": "ldr/str de registradores Q com pós-incremento",
+          "done": true
+        },
+        {
+          "name": "ld1/st1",
           "done": false
         },
         {
@@ -407,11 +419,42 @@
         "neon_median_s": 0.0044,
         "scalar_median_s": null,
         "reconstructed": {
-          "binary": "switch_particle_bench",
-          "status": "hle_port",
-          "note": "Fonte no padrão libnx compilado com switch_hle_shim.h (NDK r28, -O2; loop de física vetorizado: VF 4). Sem afinidade de núcleo o tempo é bimodal (~4,5 ms em núcleo grande, 10–16 ms em núcleo pequeno)."
+          "binary": "reconstructed_switch_bin",
+          "status": "verified",
+          "note": "Round-trip completo: binário com shim libnx → Ghidra → lifter → Qwen → NDK r28 -O2 → A56 (15×, taskset 80) com checksum e última partícula idênticos. O fonte original também roda via shim HLE (switch_particle_bench)."
         },
-        "attempts": [],
+        "attempts": [
+          {
+            "n": 1,
+            "input": "Lifter (fórmulas sobre valores carregados) + esqueleto",
+            "binary": "switch_particle_bench",
+            "formula": false,
+            "iterations": "ok",
+            "result": "—",
+            "llm_seconds": null,
+            "note": "pos_x reaplicava a atualização de vel_x já escrita; resumo do lifter passou a ordem sequencial"
+          },
+          {
+            "n": 2,
+            "input": "Resumo sequencial + esqueleto",
+            "binary": "switch_particle_bench",
+            "formula": true,
+            "iterations": "erro",
+            "result": "—",
+            "llm_seconds": 49.1,
+            "note": "Qwen moveu o loop de inicialização para dentro do while (detectado pela checagem de profundidade, inclusive na nova tentativa)"
+          },
+          {
+            "n": 3,
+            "input": "Resumo sequencial + esqueleto + posição de cada loop",
+            "binary": "switch_particle_bench",
+            "formula": true,
+            "iterations": "ok",
+            "result": "88196450180",
+            "llm_seconds": 43.6,
+            "verified_on_device": true
+          }
+        ],
         "device_runs": [
           {
             "binary": "switch_particle_bench (sem afinidade)",
@@ -425,6 +468,13 @@
             "runs": 15,
             "median_s": 0.0044349,
             "min_s": 0.0043868,
+            "result": "88196450180"
+          },
+          {
+            "binary": "reconstructed_switch_bin (C do Qwen, taskset cpu7)",
+            "runs": 15,
+            "median_s": 0.0047456,
+            "min_s": 0.004221,
             "result": "88196450180"
           }
         ],
@@ -447,6 +497,21 @@
           {
             "check": "Loop de física vetorizado pelo Clang -O2 (-Rpass=loop-vectorize)",
             "value": "VF 4 × IC 1",
+            "ok": true
+          },
+          {
+            "check": "Lifter: execução concreta NEON (500 voltas) vs fórmula simbólica",
+            "value": "27777460 = 27777460",
+            "ok": true
+          },
+          {
+            "check": "Lifter: 60 frames sobre 100.000 partículas vs aparelho",
+            "value": "88196450180",
+            "ok": true
+          },
+          {
+            "check": "C reconstruído executado no A56 (15×, frames + checksum + última partícula)",
+            "value": "60 / 88196450180 / 1734747",
             "ok": true
           }
         ]
@@ -471,9 +536,19 @@
         "note": "broadcast imediato (.2S / .4S / .2D)"
       },
       {
+        "insn": "dup",
+        "kind": "NEON",
+        "note": "broadcast de escalar para lanes (`boost` simbólico)"
+      },
+      {
         "insn": "ldr",
         "kind": "memória",
-        "note": "carga literal de .rodata (d/q)"
+        "note": "literal de .rodata (d/q) e ldr q com pós-incremento"
+      },
+      {
+        "insn": "str",
+        "kind": "memória",
+        "note": "str q com pós-incremento"
       },
       {
         "insn": "ldp",
@@ -499,6 +574,11 @@
         "insn": "mul",
         "kind": "NEON",
         "note": "por lane, 32 bits"
+      },
+      {
+        "insn": "and",
+        "kind": "NEON",
+        "note": "AND bit a bit por lane (máscaras 0xFF / 0xFFFF)"
       },
       {
         "insn": "eor",
@@ -543,7 +623,7 @@
     ],
     "planned": [
       {
-        "insn": "and, orr, bic, mvn",
+        "insn": "orr, bic, mvn",
         "kind": "NEON/escalar",
         "phase": 2
       },
@@ -558,7 +638,7 @@
         "phase": 2
       },
       {
-        "insn": "ld1 / st1 (pós-incremento)",
+        "insn": "ld1 / st1",
         "kind": "memória",
         "phase": 2
       },
