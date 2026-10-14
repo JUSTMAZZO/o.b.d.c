@@ -430,12 +430,12 @@
           "Checksum": "88196450180",
           "Última partícula": "1734747"
         },
-        "neon_median_s": 0.0044,
+        "neon_median_s": 0.004584,
         "scalar_median_s": null,
         "reconstructed": {
           "binary": "reconstructed_switch_bin",
           "status": "verified",
-          "note": "Round-trip completo: binário com shim libnx → Ghidra → lifter + esqueleto do main gerado do CFG → Qwen → NDK r28 -O2 → A56 (15×, taskset 80) com checksum e última partícula idênticos. O C de referência sem LLM também confere. Tempos de 4,5–7 ms variam com o estado do aparelho."
+          "note": "Round-trip completo: binário com shim libnx → Ghidra → lifter + esqueleto do main gerado do CFG → Qwen → NDK r28 -O2 → A56 (15×, taskset 80) com checksum e última partícula idênticos. O C de referência sem LLM também confere. Medição intercalada (20 pares, cpu7): 4,58 ms original × 4,71 ms reconstruído, razão mediana 1,011×; a cpu7 varia de frequência (DVFS), por isso os tempos isolados oscilam entre ~3,2 e ~7 ms."
         },
         "attempts": [
           {
@@ -513,10 +513,17 @@
             "result": "88196450180"
           },
           {
-            "binary": "reconstructed_switch_bin (C do Qwen sobre o esqueleto do CFG, taskset cpu7)",
-            "runs": 15,
-            "median_s": 0.0069978,
-            "min_s": 0.0044582,
+            "binary": "switch_particle_bench (original, intercalado A/B, cpu7)",
+            "runs": 20,
+            "median_s": 0.004584,
+            "min_s": 0.00318,
+            "result": "88196450180"
+          },
+          {
+            "binary": "reconstructed_switch_bin (Qwen + esqueleto do CFG, intercalado A/B, cpu7)",
+            "runs": 20,
+            "median_s": 0.004709,
+            "min_s": 0.003189,
             "result": "88196450180"
           }
         ],
@@ -559,6 +566,11 @@
           {
             "check": "C de referência sem LLM (esqueleto do CFG + lifter, ref_switch) no A56, 3×",
             "value": "60 / 88196450180 / 1734747",
+            "ok": true
+          },
+          {
+            "check": "Desempenho do C reconstruído vs original (20 pares intercalados, razão B/A mediana)",
+            "value": "1,011×",
             "ok": true
           }
         ]
