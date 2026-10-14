@@ -9,6 +9,7 @@
  *   - quadro 30: HidNpadButton_A pressionado (impulso);
  *   - quadro 60: HidNpadButton_Plus pressionado (sair).
  *
+ * Todas as primitivas sao noinline (SHIM_API) para preservar as chamadas no binario.
  * Os valores de botoes/estilos e a frequencia do tick (19,2 MHz) seguem a libnx.
  */
 #ifndef SWITCH_HLE_SHIM_H
@@ -27,6 +28,10 @@ typedef uint64_t u64;
 typedef int32_t  s32;
 typedef int64_t  s64;
 typedef u32      Result;
+
+/* Cada primitiva vira uma funcao real (bl), como a fronteira de ABI de um homebrew
+ * que chama a libnx; sem isso o Clang funde o shim dentro do main. */
+#define SHIM_API static inline __attribute__((noinline))
 
 #define BIT(n) (1U << (n))
 #define R_SUCCEEDED(res) ((res) == 0)
@@ -59,13 +64,13 @@ static u32 g_shim_frame;
 static u32 g_shim_max_players;
 static u32 g_shim_style_set;
 
-static inline void padConfigureInput(u32 max_players, u32 style_set)
+SHIM_API void padConfigureInput(u32 max_players, u32 style_set)
 {
     g_shim_max_players = max_players;
     g_shim_style_set = style_set;
 }
 
-static inline void padInitializeDefault(PadState *pad)
+SHIM_API void padInitializeDefault(PadState *pad)
 {
     *pad = (PadState){0};
     pad->id_mask = pad->active_id_mask = 1;
@@ -73,7 +78,7 @@ static inline void padInitializeDefault(PadState *pad)
     pad->style_set = g_shim_style_set;
 }
 
-static inline void padUpdate(PadState *pad)
+SHIM_API void padUpdate(PadState *pad)
 {
     u64 buttons = 0;
     if (g_shim_frame == SHIM_FRAME_BOOST_A)
@@ -84,12 +89,12 @@ static inline void padUpdate(PadState *pad)
     pad->buttons_cur = buttons;
 }
 
-static inline u64 padGetButtons(const PadState *pad)     { return pad->buttons_cur; }
-static inline u64 padGetButtonsDown(const PadState *pad) { return pad->buttons_cur & ~pad->buttons_old; }
-static inline u64 padGetButtonsUp(const PadState *pad)   { return ~pad->buttons_cur & pad->buttons_old; }
+SHIM_API u64 padGetButtons(const PadState *pad)     { return pad->buttons_cur; }
+SHIM_API u64 padGetButtonsDown(const PadState *pad) { return pad->buttons_cur & ~pad->buttons_old; }
+SHIM_API u64 padGetButtonsUp(const PadState *pad)   { return ~pad->buttons_cur & pad->buttons_old; }
 
 /* ------------------------------------------------------------------ applet / console */
-static inline bool appletMainLoop(void)
+SHIM_API bool appletMainLoop(void)
 {
     if (g_shim_frame >= SHIM_FRAMES)
         return false;
@@ -98,20 +103,20 @@ static inline bool appletMainLoop(void)
 }
 
 /* No Switch o console desenha no framebuffer; aqui vai para o stdout do Bionic. */
-static inline void *consoleInit(void *console) { (void)console; return NULL; }
-static inline void consoleUpdate(void *console) { (void)console; fflush(stdout); }
-static inline void consoleExit(void *console)   { (void)console; fflush(stdout); }
+SHIM_API void *consoleInit(void *console) { (void)console; return NULL; }
+SHIM_API void consoleUpdate(void *console) { (void)console; fflush(stdout); }
+SHIM_API void consoleExit(void *console)   { (void)console; fflush(stdout); }
 
 /* ------------------------------------------------------------------ timer (arm) */
 /* Contador de sistema do Switch: 19,2 MHz. Emulado a partir de CLOCK_MONOTONIC. */
 #define SHIM_TICK_FREQ 19200000ULL
 
-static inline u64 armGetSystemTickFreq(void) { return SHIM_TICK_FREQ; }
+SHIM_API u64 armGetSystemTickFreq(void) { return SHIM_TICK_FREQ; }
 
-static inline u64 armNsToTicks(u64 ns) { return ns * 12 / 625; }    /* ns * 19,2e6 / 1e9 */
-static inline u64 armTicksToNs(u64 tick) { return tick * 625 / 12; } /* tick * 1e9 / 19,2e6 */
+SHIM_API u64 armNsToTicks(u64 ns) { return ns * 12 / 625; }    /* ns * 19,2e6 / 1e9 */
+SHIM_API u64 armTicksToNs(u64 tick) { return tick * 625 / 12; } /* tick * 1e9 / 19,2e6 */
 
-static inline u64 armGetSystemTick(void)
+SHIM_API u64 armGetSystemTick(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
