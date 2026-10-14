@@ -13,6 +13,15 @@ STATUS = {
 }
 
 
+REC = {'verified': '📱', 'pending_device': '⏳', 'failed': '❌'}
+REC_LEGEND = '📱 = validado no aparelho · ⏳ = aguardando aparelho · ❌ = diverge'
+OK = {True: '✅', False: '❌', None: '⏳'}
+
+
+def secs(x):
+    return f"{x:.4f} s" if x is not None else '—'
+
+
 def bar(pct, width=10):
     full = round(pct / 100 * width)
     return '█' * full + '░' * (width - full) + f' {pct}%'
@@ -36,7 +45,10 @@ def render(d):
     phases = d['roadmap']
     endgame = round(sum(ph['progress'] for ph in phases) / len(phases))
     current = next((ph for ph in phases if ph['status'] == 'in_progress'), phases[0])
-    passed = sum(v['ok'] for v in t['validation'])
+    benches = t['benchmarks']
+    checks = [v for b in benches for v in b['validation']]
+    passed = sum(v['ok'] is True for v in checks)
+    decided = sum(v['ok'] is not None for v in checks)
     sup = len(d['isa']['supported'])
 
     out = [f"<!-- Gerado por update_dashboard.py a partir de status.json — não edite à mão. -->",
@@ -50,7 +62,9 @@ def render(d):
                badge('Alvo', 'Galaxy A56 · Exynos 1580', '1428A0', 'samsung'),
            ]), '',
            ' '.join([
-               badge('Validação', f'{passed}/{len(t["validation"])} OK', 'brightgreen' if passed == len(t['validation']) else 'red'),
+               badge('Validação', f'{passed}/{len(checks)} OK',
+                     'red' if passed < decided else 'brightgreen' if decided == len(checks) else 'yellow'),
+               badge('Benchmarks', f'{len(benches)} no A56', 'teal', 'android'),
                badge('Instruções', f'{sup} suportadas', 'blueviolet'),
                badge('LLM', 'qwen2.5-coder 7b', 'black', 'ollama'),
                badge('Atualizado', p['updated'], 'lightgrey'),
@@ -92,37 +106,59 @@ def render(d):
         out += [f"- [{'x' if i['done'] else ' '}] {i['name']}" for i in ph['items']]
         out += ['', '</details>', '']
 
-    out += ['## 📊 Telemetria real', '',
-            f"### Round-trip binário → LLM → C (resultado esperado: `{t['expected_result']}`)", '',
-            '| # | Entrada para o LLM | Binário | Fórmula | Iterações | Resultado da reconstrução | LLM (s) |',
-            '|:---:|---|---|:---:|:---:|---|---:|']
+    out += ['## 📱 Resultados no Galaxy A56', '',
+            '| Benchmark | Operações | Esperado | Mediana NEON | Mediana escalar | Aceleração | C reconstruído |',
+            '|---|---|---|---:|---:|:---:|---|']
+    for b in benches:
+        exp = '<br>'.join(f"{k}: `{v}`" for k, v in b['expected'].items())
+        speed = f"**{b['scalar_median_s'] / b['neon_median_s']:.2f}×**" if b['scalar_median_s'] else '—'
+        rec = b['reconstructed']
+        out.append(f"| **`{b['id']}`**<br>{b['title']} | {b['ops']} | {exp} | {secs(b['neon_median_s'])} | "
+                   f"{secs(b['scalar_median_s'])} | {speed} | {REC[rec['status']]} `{rec['binary']}` |")
+    out += ['', REC_LEGEND, '']
+
+    out += ['## 📊 Telemetria por benchmark', '']
     it_icon = {'ok': '✅', 'acidental': '⚠️ acidental', 'erro': '❌'}
-    for a in t['attempts']:
-        res = f"`{a['result']}`" if a['result'] != '—' else '—'
-        if a.get('verified_on_device'):
-            res += ' 📱'
-        elif a['result'] == str(t['expected_result']):
-            res += ' 🐍'
-        out.append(f"| {a['n']} | {a['input']} | `{a['binary']}` | {'✅' if a['formula'] else '❌'} | "
-                   f"{it_icon[a['iterations']]} | {res} | {a['llm_seconds']} |")
-    out += ['', '📱 = recompilado e executado no Galaxy A56 · 🐍 = verificado em Python', '']
+    for b in benches:
+        expected = set(b['expected'].values())
+        out += [f"### `{b['id']}` — {b['title']}", '']
+        if b['reconstructed'].get('note'):
+            out += [f"> {REC[b['reconstructed']['status']]} {b['reconstructed']['note']}", '']
 
-    out += ['### Execução no Galaxy A56', '',
-            '| Binário | Execuções | Mediana | Mínimo | Resultado |', '|---|:---:|---:|---:|---|']
-    for r in t['device_runs']:
-        ok = '✅' if r['result'] == str(t['expected_result']) else '❌'
-        out.append(f"| {r['binary']} | {r['runs']} | {r['median_s']:.4f} s | {r['min_s']:.4f} s | `{r['result']}` {ok} |")
-    vec, novec = t['device_runs'][0], t['device_runs'][1]
-    out += ['', f"Aceleração NEON (mediana): **{novec['median_s'] / vec['median_s']:.2f}×**", '']
+        out += ['**Round-trip binário → LLM → C**', '',
+                '| # | Entrada para o LLM | Binário | Fórmula | Iterações | Resultado da reconstrução | LLM (s) |',
+                '|:---:|---|---|:---:|:---:|---|---:|']
+        for a in b['attempts']:
+            res = f"`{a['result']}`" if a['result'] != '—' else '—'
+            if a.get('verified_on_device'):
+                res += ' 📱'
+            elif a['result'] in expected:
+                res += ' 🐍'
+            elif a['result'] != '—':
+                res += ' ❌'
+            if a.get('note'):
+                res += f"<br><sub>{a['note']}</sub>"
+            llm = a['llm_seconds'] if a['llm_seconds'] is not None else '—'
+            out.append(f"| {a['n']} | {a['input']} | `{a['binary']}` | {'✅' if a['formula'] else '❌'} | "
+                       f"{it_icon[a['iterations']]} | {res} | {llm} |")
+        out += ['', '📱 = recompilado e executado no Galaxy A56 · 🐍 = verificado em Python · ❌ = diverge do esperado', '']
 
-    out += ['### Validação matemática', '', '| Verificação | Valor | |', '|---|---|:---:|']
-    out += [f"| {x['check']} | `{x['value']}` | {'✅' if x['ok'] else '❌'} |" for x in t['validation']]
-    out.append('')
+        out += ['**Execução no aparelho**', '',
+                '| Binário | Execuções | Mediana | Mínimo | Resultado |', '|---|:---:|---:|---:|---|']
+        for r in b['device_runs']:
+            ok = '✅' if r['result'] in expected else '❌'
+            out.append(f"| {r['binary']} | {r['runs']} | {secs(r['median_s'])} | {secs(r['min_s'])} | `{r['result']}` {ok} |")
+        out.append('')
+
+        out += ['**Validação**', '', '| Verificação | Valor | |', '|---|---|:---:|']
+        out += [f"| {x['check']} | `{x['value']}` | {OK[x['ok']]} |" for x in b['validation']]
+        out.append('')
 
     out += ['## 🧮 Instruções ARM64/NEON no lifter', '',
+            f"**{sup} suportadas** · {len(d['isa']['planned'])} grupos planejados", '',
             '| | Instrução | Tipo | Observação |', '|:---:|---|---|---|']
     out += [f"| ✅ | `{i['insn']}` | {i['kind']} | {i['note']} |" for i in d['isa']['supported']]
-    out += [f"| ⬜ | `{i['insn']}` | {i['kind']} | planejado |" for i in d['isa']['planned']]
+    out += [f"| ⬜ | `{i['insn']}` | {i['kind']} | planejado — Fase {i['phase']} |" for i in d['isa']['planned']]
     out.append('')
 
     out += ['## 🛠️ Toolchain', '', '| Ferramenta | Versão | Papel |', '|---|---|---|']

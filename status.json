@@ -2,7 +2,7 @@
   "project": {
     "name": "o.b.d.c",
     "tagline": "Recompilação estática AArch64 → AArch64: binários de Nintendo Switch rodando nativamente no Android",
-    "updated": "2026-10-13",
+    "updated": "2026-10-14",
     "license": "MIT",
     "repo": "https://github.com/JUSTMAZZO/o.b.d.c",
     "vision": {
@@ -13,42 +13,60 @@
     },
     "scope_note": "Projeto de engenharia de compiladores e tradução de ABI. O foco são homebrews e ELFs próprios/de código aberto; não distribui nem ajuda a obter firmware, chaves ou jogos comerciais."
   },
-
   "toolchain": [
-    { "name": "Ghidra", "version": "12.1.4", "role": "Análise headless + descompilação" },
-    { "name": "Android NDK", "version": "r28 (28.2.13676358)", "role": "Clang aarch64-linux-android35" },
-    { "name": "Ollama", "version": "0.40.3", "role": "Servidor local do LLM" },
-    { "name": "qwen2.5-coder:7b", "version": "7.6B · Q4_K_M (GGUF)", "role": "5,38 GB; 4,09 GB (~76%) em VRAM na RTX 4050 Laptop (6 GB), resto em CPU" },
-    { "name": "Galaxy A56", "version": "SM-A566E", "role": "4×1,95 GHz + 3×2,6 GHz + 1×2,91 GHz" }
+    {
+      "name": "Ghidra",
+      "version": "12.1.4",
+      "role": "Análise headless + descompilação"
+    },
+    {
+      "name": "Android NDK",
+      "version": "r28 (28.2.13676358)",
+      "role": "Clang aarch64-linux-android35"
+    },
+    {
+      "name": "Ollama",
+      "version": "0.40.3",
+      "role": "Servidor local do LLM"
+    },
+    {
+      "name": "qwen2.5-coder:7b",
+      "version": "7.6B · Q4_K_M (GGUF)",
+      "role": "5,38 GB; 4,09 GB (~76%) em VRAM na RTX 4050 Laptop (6 GB), resto em CPU"
+    },
+    {
+      "name": "Galaxy A56",
+      "version": "SM-A566E",
+      "role": "4×1,95 GHz + 3×2,6 GHz + 1×2,91 GHz"
+    }
   ],
-
   "modules": [
     {
-      "name": "Ghidra Headless Extractor",
+      "name": "Ghidra Extractor",
       "file": "ExtractMain.java",
       "status": "done",
-      "progress": 70,
-      "summary": "C descompilado + ASM AArch64 + dados .rodata resolvidos + isolamento de loops (corpo e pré-cabeçalho)",
+      "progress": 75,
+      "summary": "C descompilado + ASM AArch64 + .rodata resolvido + isolamento de múltiplos loops (corpo e pré-cabeçalho)",
       "next": "CFG completo por bloco básico, múltiplos loops aninhados, tipos de ponteiro"
     },
     {
       "name": "NEON Symbolic Lifter",
       "file": "neon_lifter.py",
       "status": "in_progress",
-      "progress": 30,
-      "summary": "Propagação simbólica por lane, detecção de indução/passo/trip count, validação concreta e contra o aparelho",
-      "next": "Memória (ld1/st1/ldr/str), and/orr/shl/sshr, umull/smull, loops com várias fórmulas"
+      "progress": 45,
+      "summary": "Propagação simbólica por lane, memória base+índice (ldp/stp q), stores e acumuladores, vários loops em sequência, validação concreta",
+      "next": "ld1/st1 e pós-incremento, and/orr/sshr, umull/smull, corrigir printf quebrado no esqueleto do main"
     },
     {
-      "name": "Local LLM Synthesizer",
+      "name": "Local LLM Qwen 2.5 7B",
       "file": "qwen2.5-coder:7b (Ollama, CUDA parcial)",
-      "status": "done",
-      "progress": 60,
+      "status": "in_progress",
+      "progress": 55,
       "summary": "Gera C escalar limpo a partir do resumo determinístico do lifter + esqueleto do main",
-      "next": "Renomear variáveis com significado, recompilar e diferenciar automaticamente"
+      "next": "Diff automático C gerado × fórmula do lifter (o Qwen acumulou o valor antes do XOR no benchmark_array_neon)"
     },
     {
-      "name": "Target Hardware Runner",
+      "name": "Android AArch64 Runner",
       "file": "Galaxy A56 via ADB",
       "status": "in_progress",
       "progress": 45,
@@ -56,105 +74,453 @@
       "next": "Script único de round-trip (compilar → push → rodar → comparar), afinidade de núcleo (taskset)"
     }
   ],
-
   "roadmap": [
     {
       "phase": 1,
-      "title": "Extração CFG/ASM e Elevação Simbólica NEON",
-      "status": "in_progress",
-      "progress": 40,
+      "title": "Lifter NEON Aritmético",
+      "status": "done",
+      "progress": 100,
       "items": [
-        { "name": "Ghidra headless sem PyGhidra (script Java)", "done": true },
-        { "name": "Extração híbrida C + ASM + .rodata", "done": true },
-        { "name": "Isolamento de loop + pré-cabeçalho", "done": true },
-        { "name": "Lifter simbólico NEON (aritmética/bitwise)", "done": true },
-        { "name": "Validação concreta + round-trip no aparelho", "done": true },
-        { "name": "CFG completo e loops aninhados", "done": false },
-        { "name": "Conjunto amplo de instruções escalares/NEON", "done": false }
+        {
+          "name": "Ghidra headless sem PyGhidra (script Java)",
+          "done": true
+        },
+        {
+          "name": "Extração híbrida C + ASM + .rodata",
+          "done": true
+        },
+        {
+          "name": "Isolamento de loop + pré-cabeçalho",
+          "done": true
+        },
+        {
+          "name": "Lifter simbólico NEON (add/sub/mul/eor/shl/ushr/uaddw)",
+          "done": true
+        },
+        {
+          "name": "Validação concreta + round-trip no aparelho (benchmark_arm64)",
+          "done": true
+        }
       ]
     },
     {
       "phase": 2,
-      "title": "Ponteiros, Arrays e Memória (ld1/st1/ldr/str)",
-      "status": "next",
-      "progress": 0,
+      "title": "Memória, Arrays e Ponteiros",
+      "status": "in_progress",
+      "progress": 50,
       "items": [
-        { "name": "Modelo de memória simbólico (base + índice × escala)", "done": false },
-        { "name": "ld1/st1 e ldr/str com pós-incremento", "done": false },
-        { "name": "Recuperação de arrays e structs", "done": false },
-        { "name": "Benchmarks com buffers (memcpy, saxpy, dot product)", "done": false }
+        {
+          "name": "Modelo de memória simbólico (base + índice × escala)",
+          "done": true
+        },
+        {
+          "name": "ldp/stp de registradores Q",
+          "done": true
+        },
+        {
+          "name": "Vários loops em sequência na mesma função",
+          "done": true
+        },
+        {
+          "name": "Benchmark com buffers (benchmark_array_neon) validado pelo lifter",
+          "done": true
+        },
+        {
+          "name": "C reconstruído do benchmark_array_neon executado no A56",
+          "done": true
+        },
+        {
+          "name": "ld1/st1 e ldr/str com pós-incremento",
+          "done": false
+        },
+        {
+          "name": "CFG completo e loops aninhados",
+          "done": false
+        },
+        {
+          "name": "Recuperação de structs e tipos de ponteiro",
+          "done": false
+        }
       ]
     },
     {
       "phase": 3,
-      "title": "Loader e Tradução de ABI / Syscalls (svc Horizon / libnx → Bionic)",
+      "title": "Loader ELF e Tradução de ABI / Syscalls",
       "status": "planned",
       "progress": 0,
       "items": [
-        { "name": "Parser NSO/NRO (segmentos, MOD0, relocações)", "done": false },
-        { "name": "Mapa de svc do Horizon → chamadas Bionic/POSIX", "done": false },
-        { "name": "Shim de libnx (fs, hid, time, sync)", "done": false },
-        { "name": "TLS (tpidrro_el0) / registrador x18 e convenções de ABI", "done": false },
-        { "name": "Primeiro homebrew de console (printf) rodando no A56", "done": false }
+        {
+          "name": "Loader ELF/NSO/NRO (segmentos, MOD0, relocações)",
+          "done": false
+        },
+        {
+          "name": "Mapa de svc do Horizon → chamadas Bionic/POSIX",
+          "done": false
+        },
+        {
+          "name": "Shim de libnx (fs, hid, time, sync)",
+          "done": false
+        },
+        {
+          "name": "TLS (tpidrro_el0) / registrador x18 e convenções de ABI",
+          "done": false
+        },
+        {
+          "name": "Primeiro homebrew de console (printf) rodando no A56",
+          "done": false
+        }
       ]
     },
     {
       "phase": 4,
-      "title": "Áudio, Threads e Redirecionamento Gráfico para Vulkan Mobile",
+      "title": "Subsistema de Áudio, Threads e Vulkan Mobile",
       "status": "planned",
       "progress": 0,
       "items": [
-        { "name": "Threads e sincronização Horizon → pthread", "done": false },
-        { "name": "Áudio (audren/audout) → AAudio", "done": false },
-        { "name": "Entrada (hid) → toque/gamepad Android", "done": false },
-        { "name": "Comandos gráficos (deko3d/NVN) → Vulkan (Xclipse 540)", "done": false },
-        { "name": "Homebrew gráfico rodando no A56", "done": false }
+        {
+          "name": "Threads e sincronização Horizon → pthread",
+          "done": false
+        },
+        {
+          "name": "Áudio (audren/audout) → AAudio",
+          "done": false
+        },
+        {
+          "name": "Entrada (hid) → toque/gamepad Android",
+          "done": false
+        },
+        {
+          "name": "Comandos gráficos (deko3d/NVN) → Vulkan (Xclipse 540)",
+          "done": false
+        },
+        {
+          "name": "Homebrew gráfico rodando no A56",
+          "done": false
+        }
       ]
     }
   ],
-
   "telemetry": {
-    "expected_result": 151550809095744,
-    "attempts": [
-      { "n": 1, "input": "C do Ghidra (O2 vetorizado)", "binary": "benchmark_arm64", "formula": false, "iterations": "ok", "result": "14319067213159522304", "llm_seconds": 78.6 },
-      { "n": 2, "input": "C do Ghidra (O2 sem vetorização)", "binary": "benchmark_arm64_novec", "formula": true, "iterations": "ok", "result": "151550809095744", "llm_seconds": 45.6 },
-      { "n": 3, "input": "C + ASM + DAT (vetorizado)", "binary": "benchmark_arm64", "formula": false, "iterations": "acidental", "result": "—", "llm_seconds": 129.6 },
-      { "n": 4, "input": "Só loop ASM, prompt guiado", "binary": "benchmark_arm64", "formula": false, "iterations": "erro", "result": "—", "llm_seconds": 314.6 },
-      { "n": 5, "input": "Lifter simbólico + esqueleto", "binary": "benchmark_arm64", "formula": true, "iterations": "ok", "result": "151550809095744", "llm_seconds": 25.5, "verified_on_device": true }
-    ],
-    "device_runs": [
-      { "binary": "benchmark_arm64 (NEON, -O2)", "runs": 15, "median_s": 0.0072, "min_s": 0.0063, "result": "151550809095744" },
-      { "binary": "benchmark_arm64_novec (escalar)", "runs": 15, "median_s": 0.0099, "min_s": 0.0094, "result": "151550809095744" },
-      { "binary": "qwen_main (C gerado pelo Qwen, tentativa 5)", "runs": 1, "median_s": 0.0099, "min_s": 0.0099, "result": "151550809095744" }
-    ],
-    "validation": [
-      { "check": "Lifter: execução concreta (2000 voltas) vs fórmula simbólica", "value": "96467232 = 96467232", "ok": true },
-      { "check": "Lifter: fórmula sobre 10.000.000 iterações vs aparelho", "value": "151550809095744", "ok": true },
-      { "check": "C do Qwen recompilado (NDK) e executado no A56", "value": "151550809095744", "ok": true }
+    "benchmarks": [
+      {
+        "id": "benchmark_arm64",
+        "title": "Loop bitwise escalar/vetorial",
+        "ops": "mul, add, eor, ushr, uaddw",
+        "expected": {
+          "Resultado": "151550809095744"
+        },
+        "neon_median_s": 0.0072,
+        "scalar_median_s": 0.0099,
+        "reconstructed": {
+          "binary": "qwen_main",
+          "status": "verified"
+        },
+        "attempts": [
+          {
+            "n": 1,
+            "input": "C do Ghidra (O2 vetorizado)",
+            "binary": "benchmark_arm64",
+            "formula": false,
+            "iterations": "ok",
+            "result": "14319067213159522304",
+            "llm_seconds": 78.6
+          },
+          {
+            "n": 2,
+            "input": "C do Ghidra (O2 sem vetorização)",
+            "binary": "benchmark_arm64_novec",
+            "formula": true,
+            "iterations": "ok",
+            "result": "151550809095744",
+            "llm_seconds": 45.6
+          },
+          {
+            "n": 3,
+            "input": "C + ASM + DAT (vetorizado)",
+            "binary": "benchmark_arm64",
+            "formula": false,
+            "iterations": "acidental",
+            "result": "—",
+            "llm_seconds": 129.6
+          },
+          {
+            "n": 4,
+            "input": "Só loop ASM, prompt guiado",
+            "binary": "benchmark_arm64",
+            "formula": false,
+            "iterations": "erro",
+            "result": "—",
+            "llm_seconds": 314.6
+          },
+          {
+            "n": 5,
+            "input": "Lifter simbólico + esqueleto",
+            "binary": "benchmark_arm64",
+            "formula": true,
+            "iterations": "ok",
+            "result": "151550809095744",
+            "llm_seconds": 25.5,
+            "verified_on_device": true
+          }
+        ],
+        "device_runs": [
+          {
+            "binary": "benchmark_arm64 (NEON, -O2)",
+            "runs": 15,
+            "median_s": 0.0072,
+            "min_s": 0.0063,
+            "result": "151550809095744"
+          },
+          {
+            "binary": "benchmark_arm64_novec (escalar)",
+            "runs": 15,
+            "median_s": 0.0099,
+            "min_s": 0.0094,
+            "result": "151550809095744"
+          },
+          {
+            "binary": "qwen_main (C gerado pelo Qwen, tentativa 5)",
+            "runs": 1,
+            "median_s": 0.0099,
+            "min_s": 0.0099,
+            "result": "151550809095744"
+          }
+        ],
+        "validation": [
+          {
+            "check": "Lifter: execução concreta (2000 voltas) vs fórmula simbólica",
+            "value": "96467232 = 96467232",
+            "ok": true
+          },
+          {
+            "check": "Lifter: fórmula sobre 10.000.000 iterações vs aparelho",
+            "value": "151550809095744",
+            "ok": true
+          },
+          {
+            "check": "C do Qwen recompilado (NDK) e executado no A56",
+            "value": "151550809095744",
+            "ok": true
+          }
+        ]
+      },
+      {
+        "id": "benchmark_array_neon",
+        "title": "Loop duplo com arrays in_buf/out_buf",
+        "ops": "ldp/stp, shl, ushr, sub, eor, uaddw/uaddw2",
+        "expected": {
+          "Checksum": "12249998500128",
+          "Último elemento": "24500040"
+        },
+        "neon_median_s": 0.0021,
+        "scalar_median_s": null,
+        "reconstructed": {
+          "binary": "reconstructed_array_bin",
+          "status": "verified",
+          "note": "C reconstruído (NDK r28, -O2) executado 15× no A56: checksum e último elemento idênticos ao binário original"
+        },
+        "attempts": [
+          {
+            "n": 1,
+            "input": "Lifter simbólico (2 loops + memória) + esqueleto",
+            "binary": "benchmark_array_neon",
+            "formula": false,
+            "iterations": "ok",
+            "result": "12249998500000",
+            "llm_seconds": null,
+            "note": "Qwen acumulou o valor antes do XOR 0x5a e moveu start_time para antes do loop 1"
+          },
+          {
+            "n": 2,
+            "input": "Saída do Qwen corrigida manualmente (reconstructed_array.c)",
+            "binary": "benchmark_array_neon",
+            "formula": true,
+            "iterations": "ok",
+            "result": "12249998500128",
+            "llm_seconds": null,
+            "verified_on_device": true
+          }
+        ],
+        "device_runs": [
+          {
+            "binary": "benchmark_array_neon (NEON, -O2)",
+            "runs": 15,
+            "median_s": 0.0021,
+            "min_s": null,
+            "result": "12249998500128"
+          },
+          {
+            "binary": "reconstructed_array_bin (C reconstruído, -O2)",
+            "runs": 15,
+            "median_s": 0.0023,
+            "min_s": 0.0019,
+            "result": "12249998500128"
+          }
+        ],
+        "validation": [
+          {
+            "check": "Lifter: execução concreta NEON (1000 voltas) vs fórmula simbólica",
+            "value": "783988128 = 783988128",
+            "ok": true
+          },
+          {
+            "check": "Lifter: checksum sobre 1.000.000 elementos vs aparelho",
+            "value": "12249998500128",
+            "ok": true
+          },
+          {
+            "check": "Último elemento out_buf[N-1] (Python)",
+            "value": "24500040",
+            "ok": true
+          },
+          {
+            "check": "C reconstruído executado no A56 (15×, checksum + último elemento)",
+            "value": "12249998500128 / 24500040",
+            "ok": true
+          }
+        ]
+      }
     ]
   },
-
   "isa": {
     "supported": [
-      { "insn": "mov / movk", "kind": "escalar", "note": "constantes de 32/64 bits resolvidas" },
-      { "insn": "movi", "kind": "NEON", "note": "broadcast imediato (.2S / .2D)" },
-      { "insn": "ldr d (literal .rodata)", "kind": "memória", "note": "só carga de constante resolvida" },
-      { "insn": "add", "kind": "NEON", "note": "inclui indução afim i + c" },
-      { "insn": "mul", "kind": "NEON", "note": "por lane, 32 bits" },
-      { "insn": "eor", "kind": "NEON", "note": ".8B/.16B tratado como XOR por lane" },
-      { "insn": "ushr", "kind": "NEON", "note": "shift lógico à direita por imediato" },
-      { "insn": "uaddw", "kind": "NEON", "note": "acumulação com extensão para 64 bits" },
-      { "insn": "subs + b.ne", "kind": "controle", "note": "contador de voltas / trip count" }
+      {
+        "insn": "mov",
+        "kind": "escalar",
+        "note": "constantes e cópias de registrador"
+      },
+      {
+        "insn": "movk",
+        "kind": "escalar",
+        "note": "constantes de 64 bits montadas em partes"
+      },
+      {
+        "insn": "movi",
+        "kind": "NEON",
+        "note": "broadcast imediato (.2S / .4S / .2D)"
+      },
+      {
+        "insn": "ldr",
+        "kind": "memória",
+        "note": "carga literal de .rodata (d/q)"
+      },
+      {
+        "insn": "ldp",
+        "kind": "memória",
+        "note": "par de registradores Q, base + índice"
+      },
+      {
+        "insn": "stp",
+        "kind": "memória",
+        "note": "par de registradores Q → array de saída"
+      },
+      {
+        "insn": "add",
+        "kind": "NEON/escalar",
+        "note": "por lane; escalar como indução/endereço"
+      },
+      {
+        "insn": "sub",
+        "kind": "NEON",
+        "note": "por lane, 32 bits"
+      },
+      {
+        "insn": "mul",
+        "kind": "NEON",
+        "note": "por lane, 32 bits"
+      },
+      {
+        "insn": "eor",
+        "kind": "NEON",
+        "note": ".8B/.16B tratado como XOR por lane"
+      },
+      {
+        "insn": "ushr",
+        "kind": "NEON",
+        "note": "shift lógico à direita por imediato"
+      },
+      {
+        "insn": "shl",
+        "kind": "NEON",
+        "note": "shift à esquerda por imediato"
+      },
+      {
+        "insn": "uaddw",
+        "kind": "NEON",
+        "note": "acumula lanes baixas estendidas para 64 bits"
+      },
+      {
+        "insn": "uaddw2",
+        "kind": "NEON",
+        "note": "acumula lanes altas estendidas para 64 bits"
+      },
+      {
+        "insn": "subs",
+        "kind": "controle",
+        "note": "contador de voltas / trip count"
+      },
+      {
+        "insn": "cmp",
+        "kind": "controle",
+        "note": "limite em bytes (offset × passo)"
+      },
+      {
+        "insn": "b.ne",
+        "kind": "controle",
+        "note": "aresta de retorno do loop"
+      }
     ],
     "planned": [
-      { "insn": "sub, and, orr, bic", "kind": "NEON/escalar" },
-      { "insn": "shl, sshr, ushl", "kind": "NEON" },
-      { "insn": "umull, smull, umlal, smlal", "kind": "NEON" },
-      { "insn": "ld1 / st1", "kind": "memória" },
-      { "insn": "ldr / str / ldp / stp gerais", "kind": "memória" },
-      { "insn": "cmp + b.cond / cbz / tbz", "kind": "controle" },
-      { "insn": "svc #imm (Horizon OS)", "kind": "sistema" },
-      { "insn": "mrs tpidrro_el0 (TLS)", "kind": "sistema" }
+      {
+        "insn": "and, orr, bic, mvn",
+        "kind": "NEON/escalar",
+        "phase": 2
+      },
+      {
+        "insn": "sshr, ushl, sshl",
+        "kind": "NEON",
+        "phase": 2
+      },
+      {
+        "insn": "umull, smull, umlal, smlal",
+        "kind": "NEON",
+        "phase": 2
+      },
+      {
+        "insn": "ld1 / st1 (pós-incremento)",
+        "kind": "memória",
+        "phase": 2
+      },
+      {
+        "insn": "ldr / str escalares gerais",
+        "kind": "memória",
+        "phase": 2
+      },
+      {
+        "insn": "b.cond / cbz / cbnz / tbz",
+        "kind": "controle",
+        "phase": 2
+      },
+      {
+        "insn": "bl / blr / ret",
+        "kind": "controle",
+        "phase": 3
+      },
+      {
+        "insn": "svc #imm (Horizon OS)",
+        "kind": "sistema",
+        "phase": 3
+      },
+      {
+        "insn": "mrs tpidrro_el0 (TLS)",
+        "kind": "sistema",
+        "phase": 3
+      },
+      {
+        "insn": "ldxr / stxr / ldaxr / stlxr",
+        "kind": "atômico",
+        "phase": 4
+      }
     ]
   }
 }
