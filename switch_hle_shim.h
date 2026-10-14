@@ -9,7 +9,7 @@
  *   - quadro 30: HidNpadButton_A pressionado (impulso);
  *   - quadro 60: HidNpadButton_Plus pressionado (sair).
  *
- * Todas as primitivas sao noinline (SHIM_API) para preservar as chamadas no binario.
+ * Todas as primitivas sao weak + noinline (SHIM_API) para preservar as chamadas no binario.
  * Os valores de botoes/estilos e a frequencia do tick (19,2 MHz) seguem a libnx.
  */
 #ifndef SWITCH_HLE_SHIM_H
@@ -30,8 +30,10 @@ typedef int64_t  s64;
 typedef u32      Result;
 
 /* Cada primitiva vira uma funcao real (bl), como a fronteira de ABI de um homebrew
- * que chama a libnx; sem isso o Clang funde o shim dentro do main. */
-#define SHIM_API static inline __attribute__((noinline))
+ * que chama a libnx. noinline sozinho nao basta: com static o Clang ainda propaga
+ * constantes para dentro da funcao e apaga chamadas sem efeito. weak torna a
+ * definicao substituivel no link, o que bloqueia essa otimizacao interprocedural. */
+#define SHIM_API __attribute__((weak, noinline))
 
 #define BIT(n) (1U << (n))
 #define R_SUCCEEDED(res) ((res) == 0)
