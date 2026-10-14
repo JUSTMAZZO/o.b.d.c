@@ -5,6 +5,7 @@ benchmark_array_neon
 reconstructed_array_bin
 qwen_main
 switch_particle_bench
+reconstructed_switch_bin
 *.o
 *.so
 
