@@ -13,8 +13,8 @@ STATUS = {
 }
 
 
-REC = {'verified': '📱', 'pending_device': '⏳', 'failed': '❌'}
-REC_LEGEND = '📱 = validado no aparelho · ⏳ = aguardando aparelho · ❌ = diverge'
+REC = {'verified': '📱', 'hle_port': '🎮', 'pending_device': '⏳', 'failed': '❌'}
+REC_LEGEND = '📱 = C reconstruído validado no aparelho · 🎮 = fonte libnx portado via shim HLE e validado · ⏳ = aguardando aparelho · ❌ = diverge'
 OK = {True: '✅', False: '❌', None: '⏳'}
 
 
@@ -38,6 +38,28 @@ def badge(label, message, color, logo=None):
 def status(s):
     icon, text, _ = STATUS[s]
     return f"{icon} {text}"
+
+
+def attempts_table(b, expected):
+    it_icon = {'ok': '✅', 'acidental': '⚠️ acidental', 'erro': '❌'}
+    out = ['**Round-trip binário → LLM → C**', '',
+           '| # | Entrada para o LLM | Binário | Fórmula | Iterações | Resultado da reconstrução | LLM (s) |',
+           '|:---:|---|---|:---:|:---:|---|---:|']
+    for a in b['attempts']:
+        res = f"`{a['result']}`" if a['result'] != '—' else '—'
+        if a.get('verified_on_device'):
+            res += ' 📱'
+        elif a['result'] in expected:
+            res += ' 🐍'
+        elif a['result'] != '—':
+            res += ' ❌'
+        if a.get('note'):
+            res += f"<br><sub>{a['note']}</sub>"
+        llm = a['llm_seconds'] if a['llm_seconds'] is not None else '—'
+        out.append(f"| {a['n']} | {a['input']} | `{a['binary']}` | {'✅' if a['formula'] else '❌'} | "
+                   f"{it_icon[a['iterations']]} | {res} | {llm} |")
+    out += ['', '📱 = recompilado e executado no Galaxy A56 · 🐍 = verificado em Python · ❌ = diverge do esperado', '']
+    return out
 
 
 def render(d):
@@ -107,7 +129,7 @@ def render(d):
         out += ['', '</details>', '']
 
     out += ['## 📱 Resultados no Galaxy A56', '',
-            '| Benchmark | Operações | Esperado | Mediana NEON | Mediana escalar | Aceleração | C reconstruído |',
+            '| Benchmark | Operações | Esperado | Mediana NEON | Mediana escalar | Aceleração | C reconstruído / portado |',
             '|---|---|---|---:|---:|:---:|---|']
     for b in benches:
         exp = '<br>'.join(f"{k}: `{v}`" for k, v in b['expected'].items())
@@ -118,30 +140,14 @@ def render(d):
     out += ['', REC_LEGEND, '']
 
     out += ['## 📊 Telemetria por benchmark', '']
-    it_icon = {'ok': '✅', 'acidental': '⚠️ acidental', 'erro': '❌'}
     for b in benches:
         expected = set(b['expected'].values())
         out += [f"### `{b['id']}` — {b['title']}", '']
         if b['reconstructed'].get('note'):
             out += [f"> {REC[b['reconstructed']['status']]} {b['reconstructed']['note']}", '']
 
-        out += ['**Round-trip binário → LLM → C**', '',
-                '| # | Entrada para o LLM | Binário | Fórmula | Iterações | Resultado da reconstrução | LLM (s) |',
-                '|:---:|---|---|:---:|:---:|---|---:|']
-        for a in b['attempts']:
-            res = f"`{a['result']}`" if a['result'] != '—' else '—'
-            if a.get('verified_on_device'):
-                res += ' 📱'
-            elif a['result'] in expected:
-                res += ' 🐍'
-            elif a['result'] != '—':
-                res += ' ❌'
-            if a.get('note'):
-                res += f"<br><sub>{a['note']}</sub>"
-            llm = a['llm_seconds'] if a['llm_seconds'] is not None else '—'
-            out.append(f"| {a['n']} | {a['input']} | `{a['binary']}` | {'✅' if a['formula'] else '❌'} | "
-                       f"{it_icon[a['iterations']]} | {res} | {llm} |")
-        out += ['', '📱 = recompilado e executado no Galaxy A56 · 🐍 = verificado em Python · ❌ = diverge do esperado', '']
+        if b['attempts']:
+            out += attempts_table(b, expected)
 
         out += ['**Execução no aparelho**', '',
                 '| Binário | Execuções | Mediana | Mínimo | Resultado |', '|---|:---:|---:|---:|---|']

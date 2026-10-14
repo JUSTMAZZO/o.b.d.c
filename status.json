@@ -72,6 +72,14 @@
       "progress": 45,
       "summary": "push + chmod + execução em /data/local/tmp, medições intercaladas (15×)",
       "next": "Script único de round-trip (compilar → push → rodar → comparar), afinidade de núcleo (taskset)"
+    },
+    {
+      "name": "Switch HLE Shim",
+      "file": "switch_hle_shim.h",
+      "status": "in_progress",
+      "progress": 15,
+      "summary": "Tipos e primitivas libnx (console, appletMainLoop, pad/hid determinístico, armGetSystemTick a 19,2 MHz) sobre Bionic/POSIX",
+      "next": "Shim de fs/time/sync, entrada real (toque/gamepad), loader ELF/NRO e tradução de svc"
     }
   ],
   "roadmap": [
@@ -146,9 +154,17 @@
     {
       "phase": 3,
       "title": "Loader ELF e Tradução de ABI / Syscalls",
-      "status": "planned",
-      "progress": 0,
+      "status": "in_progress",
+      "progress": 15,
       "items": [
+        {
+          "name": "Shim HLE de primitivas libnx (console, applet, pad, timer) — switch_hle_shim.h",
+          "done": true
+        },
+        {
+          "name": "Homebrew estilo libnx compilado do fonte e validado no A56 (switch_particle_bench)",
+          "done": true
+        },
         {
           "name": "Loader ELF/NSO/NRO (segmentos, MOD0, relocações)",
           "done": false
@@ -158,7 +174,7 @@
           "done": false
         },
         {
-          "name": "Shim de libnx (fs, hid, time, sync)",
+          "name": "Shim de libnx completo (fs, hid real, time, sync)",
           "done": false
         },
         {
@@ -166,7 +182,7 @@
           "done": false
         },
         {
-          "name": "Primeiro homebrew de console (printf) rodando no A56",
+          "name": "Primeiro homebrew binário (NRO) traduzido rodando no A56",
           "done": false
         }
       ]
@@ -376,6 +392,61 @@
           {
             "check": "C reconstruído executado no A56 (15×, checksum + último elemento)",
             "value": "12249998500128 / 24500040",
+            "ok": true
+          }
+        ]
+      },
+      {
+        "id": "switch_particle_bench",
+        "title": "Homebrew libnx: física de 100.000 partículas × 60 frames (shim HLE)",
+        "ops": "ldr q, str q (pós-incremento), dup, add, and, eor, ushr, sub",
+        "expected": {
+          "Checksum": "88196450180",
+          "Última partícula": "1734747"
+        },
+        "neon_median_s": 0.0044,
+        "scalar_median_s": null,
+        "reconstructed": {
+          "binary": "switch_particle_bench",
+          "status": "hle_port",
+          "note": "Fonte no padrão libnx compilado com switch_hle_shim.h (NDK r28, -O2; loop de física vetorizado: VF 4). Sem afinidade de núcleo o tempo é bimodal (~4,5 ms em núcleo grande, 10–16 ms em núcleo pequeno)."
+        },
+        "attempts": [],
+        "device_runs": [
+          {
+            "binary": "switch_particle_bench (sem afinidade)",
+            "runs": 15,
+            "median_s": 0.0054137,
+            "min_s": 0.0043509,
+            "result": "88196450180"
+          },
+          {
+            "binary": "switch_particle_bench (taskset cpu7, 2,91 GHz)",
+            "runs": 15,
+            "median_s": 0.0044349,
+            "min_s": 0.0043868,
+            "result": "88196450180"
+          }
+        ],
+        "validation": [
+          {
+            "check": "Referência NumPy (uint32, 60 frames, impulso no frame 30)",
+            "value": "88196450180 / 1734747",
+            "ok": true
+          },
+          {
+            "check": "A56: 30 execuções, checksum e última partícula idênticos",
+            "value": "88196450180 / 1734747",
+            "ok": true
+          },
+          {
+            "check": "Frames executados (appletMainLoop + Plus no frame 60)",
+            "value": "60",
+            "ok": true
+          },
+          {
+            "check": "Loop de física vetorizado pelo Clang -O2 (-Rpass=loop-vectorize)",
+            "value": "VF 4 × IC 1",
             "ok": true
           }
         ]

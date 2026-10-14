@@ -4,6 +4,7 @@ benchmark_arm64_novec
 benchmark_array_neon
 reconstructed_array_bin
 qwen_main
+switch_particle_bench
 *.o
 *.so
 
