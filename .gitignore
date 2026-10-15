@@ -29,3 +29,10 @@ qwen_response*.md
 .idea/
 Thumbs.db
 desktop.ini
+
+# Saidas de build do devkitPro (horizon_rt/hb_compute)
+horizon_rt/**/*.o
+horizon_rt/**/*.elf
+horizon_rt/**/*.nro
+horizon_rt/**/*.map
+horizon_rt/**/*.dis

@@ -1,0 +1,1898 @@
+{
+  "mod0_offset": 240,
+  "version": 0,
+  "size": 94208,
+  "flags": 0,
+  "segments": {
+    "text": {
+      "offset": 0,
+      "size": 65536
+    },
+    "ro": {
+      "offset": 65536,
+      "size": 12288
+    },
+    "data": {
+      "offset": 77824,
+      "size": 16384
+    }
+  },
+  "bss_size": 4096,
+  "build_id": "e65a52ac6c6564ab6be70b8ab6761386a6deb9d2000000000000000000000000",
+  "image_size": 98304,
+  "mod0": {
+    "dynamic": 78096,
+    "bss_start": 93808,
+    "bss_end": 97184,
+    "eh_frame_hdr_start": 68152,
+    "eh_frame_hdr_end": 68152,
+    "module_object": 240
+  },
+  "dynamic": {
+    "0xc": 62352,
+    "0xd": 62408,
+    "0x19": 77824,
+    "0x1b": 8,
+    "0x1a": 77832,
+    "0x1c": 8,
+    "HASH": 65672,
+    "STRTAB": 65768,
+    "SYMTAB": 65696,
+    "STRSZ": 1,
+    "SYMENT": 24,
+    "0x15": 0,
+    "RELA": 0,
+    "RELASZ": 0,
+    "RELAENT": 24,
+    "0x18": 0,
+    "FLAGS_1": 134217729,
+    "RELR": 65560,
+    "RELRSZ": 112,
+    "RELRENT": 8
+  },
+  "relocs": [
+    {
+      "kind": "relr",
+      "offset": 77824,
+      "addend": 1024
+    },
+    {
+      "kind": "relr",
+      "offset": 77832,
+      "addend": 928
+    },
+    {
+      "kind": "relr",
+      "offset": 77840,
+      "addend": 66408
+    },
+    {
+      "kind": "relr",
+      "offset": 77872,
+      "addend": 60416
+    },
+    {
+      "kind": "relr",
+      "offset": 78440,
+      "addend": 98304
+    },
+    {
+      "kind": "relr",
+      "offset": 78448,
+      "addend": 13184
+    },
+    {
+      "kind": "relr",
+      "offset": 78456,
+      "addend": 3696
+    },
+    {
+      "kind": "relr",
+      "offset": 78464,
+      "addend": 3600
+    },
+    {
+      "kind": "relr",
+      "offset": 78472,
+      "addend": 97136
+    },
+    {
+      "kind": "relr",
+      "offset": 78480,
+      "addend": 93880
+    },
+    {
+      "kind": "relr",
+      "offset": 78488,
+      "addend": 93520
+    },
+    {
+      "kind": "relr",
+      "offset": 78496,
+      "addend": 77840
+    },
+    {
+      "kind": "relr",
+      "offset": 78504,
+      "addend": 68144
+    },
+    {
+      "kind": "relr",
+      "offset": 78512,
+      "addend": 67656
+    },
+    {
+      "kind": "relr",
+      "offset": 78520,
+      "addend": 96568
+    },
+    {
+      "kind": "relr",
+      "offset": 78528,
+      "addend": 3568
+    },
+    {
+      "kind": "relr",
+      "offset": 78536,
+      "addend": 3632
+    },
+    {
+      "kind": "relr",
+      "offset": 78544,
+      "addend": 67096
+    },
+    {
+      "kind": "relr",
+      "offset": 78552,
+      "addend": 13376
+    },
+    {
+      "kind": "relr",
+      "offset": 78568,
+      "addend": 96560
+    },
+    {
+      "kind": "relr",
+      "offset": 78576,
+      "addend": 93888
+    },
+    {
+      "kind": "relr",
+      "offset": 78584,
+      "addend": 67616
+    },
+    {
+      "kind": "relr",
+      "offset": 78592,
+      "addend": 3744
+    },
+    {
+      "kind": "relr",
+      "offset": 78600,
+      "addend": 3728
+    },
+    {
+      "kind": "relr",
+      "offset": 78608,
+      "addend": 96584
+    },
+    {
+      "kind": "relr",
+      "offset": 78616,
+      "addend": 93800
+    },
+    {
+      "kind": "relr",
+      "offset": 78624,
+      "addend": 97184
+    },
+    {
+      "kind": "relr",
+      "offset": 78640,
+      "addend": 1204
+    },
+    {
+      "kind": "relr",
+      "offset": 78648,
+      "addend": 82520
+    },
+    {
+      "kind": "relr",
+      "offset": 78656,
+      "addend": 95920
+    },
+    {
+      "kind": "relr",
+      "offset": 78664,
+      "addend": 96472
+    },
+    {
+      "kind": "relr",
+      "offset": 78672,
+      "addend": 95928
+    },
+    {
+      "kind": "relr",
+      "offset": 78680,
+      "addend": 82536
+    },
+    {
+      "kind": "relr",
+      "offset": 78688,
+      "addend": 12960
+    },
+    {
+      "kind": "relr",
+      "offset": 78696,
+      "addend": 77832
+    },
+    {
+      "kind": "relr",
+      "offset": 78704,
+      "addend": 96552
+    },
+    {
+      "kind": "relr",
+      "offset": 78712,
+      "addend": 67208
+    },
+    {
+      "kind": "relr",
+      "offset": 78720,
+      "addend": 93800
+    },
+    {
+      "kind": "relr",
+      "offset": 78728,
+      "addend": 13280
+    },
+    {
+      "kind": "relr",
+      "offset": 78736,
+      "addend": 81928
+    },
+    {
+      "kind": "relr",
+      "offset": 78744,
+      "addend": 77832
+    },
+    {
+      "kind": "relr",
+      "offset": 78752,
+      "addend": 67320
+    },
+    {
+      "kind": "relr",
+      "offset": 78760,
+      "addend": 97184
+    },
+    {
+      "kind": "relr",
+      "offset": 78768,
+      "addend": 97160
+    },
+    {
+      "kind": "relr",
+      "offset": 78776,
+      "addend": 81936
+    },
+    {
+      "kind": "relr",
+      "offset": 78784,
+      "addend": 97168
+    },
+    {
+      "kind": "relr",
+      "offset": 78792,
+      "addend": 77824
+    },
+    {
+      "kind": "relr",
+      "offset": 78800,
+      "addend": 84600
+    },
+    {
+      "kind": "relr",
+      "offset": 78808,
+      "addend": 13056
+    },
+    {
+      "kind": "relr",
+      "offset": 78816,
+      "addend": 82528
+    },
+    {
+      "kind": "relr",
+      "offset": 78824,
+      "addend": 320
+    },
+    {
+      "kind": "relr",
+      "offset": 78832,
+      "addend": 81944
+    },
+    {
+      "kind": "relr",
+      "offset": 78840,
+      "addend": 66832
+    },
+    {
+      "kind": "relr",
+      "offset": 78848,
+      "addend": 77824
+    },
+    {
+      "kind": "relr",
+      "offset": 78856,
+      "addend": 3712
+    },
+    {
+      "kind": "relr",
+      "offset": 78864,
+      "addend": 77824
+    },
+    {
+      "kind": "relr",
+      "offset": 78880,
+      "addend": 84624
+    },
+    {
+      "kind": "relr",
+      "offset": 81936,
+      "addend": 81944
+    },
+    {
+      "kind": "relr",
+      "offset": 81952,
+      "addend": 96584
+    },
+    {
+      "kind": "relr",
+      "offset": 81960,
+      "addend": 96768
+    },
+    {
+      "kind": "relr",
+      "offset": 81968,
+      "addend": 96952
+    },
+    {
+      "kind": "relr",
+      "offset": 82552,
+      "addend": 82536
+    },
+    {
+      "kind": "relr",
+      "offset": 82560,
+      "addend": 82536
+    },
+    {
+      "kind": "relr",
+      "offset": 82568,
+      "addend": 82552
+    },
+    {
+      "kind": "relr",
+      "offset": 82576,
+      "addend": 82552
+    },
+    {
+      "kind": "relr",
+      "offset": 82584,
+      "addend": 82568
+    },
+    {
+      "kind": "relr",
+      "offset": 82592,
+      "addend": 82568
+    },
+    {
+      "kind": "relr",
+      "offset": 82600,
+      "addend": 82584
+    },
+    {
+      "kind": "relr",
+      "offset": 82608,
+      "addend": 82584
+    },
+    {
+      "kind": "relr",
+      "offset": 82616,
+      "addend": 82600
+    },
+    {
+      "kind": "relr",
+      "offset": 82624,
+      "addend": 82600
+    },
+    {
+      "kind": "relr",
+      "offset": 82632,
+      "addend": 82616
+    },
+    {
+      "kind": "relr",
+      "offset": 82640,
+      "addend": 82616
+    },
+    {
+      "kind": "relr",
+      "offset": 82648,
+      "addend": 82632
+    },
+    {
+      "kind": "relr",
+      "offset": 82656,
+      "addend": 82632
+    },
+    {
+      "kind": "relr",
+      "offset": 82664,
+      "addend": 82648
+    },
+    {
+      "kind": "relr",
+      "offset": 82672,
+      "addend": 82648
+    },
+    {
+      "kind": "relr",
+      "offset": 82680,
+      "addend": 82664
+    },
+    {
+      "kind": "relr",
+      "offset": 82688,
+      "addend": 82664
+    },
+    {
+      "kind": "relr",
+      "offset": 82696,
+      "addend": 82680
+    },
+    {
+      "kind": "relr",
+      "offset": 82704,
+      "addend": 82680
+    },
+    {
+      "kind": "relr",
+      "offset": 82712,
+      "addend": 82696
+    },
+    {
+      "kind": "relr",
+      "offset": 82720,
+      "addend": 82696
+    },
+    {
+      "kind": "relr",
+      "offset": 82728,
+      "addend": 82712
+    },
+    {
+      "kind": "relr",
+      "offset": 82736,
+      "addend": 82712
+    },
+    {
+      "kind": "relr",
+      "offset": 82744,
+      "addend": 82728
+    },
+    {
+      "kind": "relr",
+      "offset": 82752,
+      "addend": 82728
+    },
+    {
+      "kind": "relr",
+      "offset": 82760,
+      "addend": 82744
+    },
+    {
+      "kind": "relr",
+      "offset": 82768,
+      "addend": 82744
+    },
+    {
+      "kind": "relr",
+      "offset": 82776,
+      "addend": 82760
+    },
+    {
+      "kind": "relr",
+      "offset": 82784,
+      "addend": 82760
+    },
+    {
+      "kind": "relr",
+      "offset": 82792,
+      "addend": 82776
+    },
+    {
+      "kind": "relr",
+      "offset": 82800,
+      "addend": 82776
+    },
+    {
+      "kind": "relr",
+      "offset": 82808,
+      "addend": 82792
+    },
+    {
+      "kind": "relr",
+      "offset": 82816,
+      "addend": 82792
+    },
+    {
+      "kind": "relr",
+      "offset": 82824,
+      "addend": 82808
+    },
+    {
+      "kind": "relr",
+      "offset": 82832,
+      "addend": 82808
+    },
+    {
+      "kind": "relr",
+      "offset": 82840,
+      "addend": 82824
+    },
+    {
+      "kind": "relr",
+      "offset": 82848,
+      "addend": 82824
+    },
+    {
+      "kind": "relr",
+      "offset": 82856,
+      "addend": 82840
+    },
+    {
+      "kind": "relr",
+      "offset": 82864,
+      "addend": 82840
+    },
+    {
+      "kind": "relr",
+      "offset": 82872,
+      "addend": 82856
+    },
+    {
+      "kind": "relr",
+      "offset": 82880,
+      "addend": 82856
+    },
+    {
+      "kind": "relr",
+      "offset": 82888,
+      "addend": 82872
+    },
+    {
+      "kind": "relr",
+      "offset": 82896,
+      "addend": 82872
+    },
+    {
+      "kind": "relr",
+      "offset": 82904,
+      "addend": 82888
+    },
+    {
+      "kind": "relr",
+      "offset": 82912,
+      "addend": 82888
+    },
+    {
+      "kind": "relr",
+      "offset": 82920,
+      "addend": 82904
+    },
+    {
+      "kind": "relr",
+      "offset": 82928,
+      "addend": 82904
+    },
+    {
+      "kind": "relr",
+      "offset": 82936,
+      "addend": 82920
+    },
+    {
+      "kind": "relr",
+      "offset": 82944,
+      "addend": 82920
+    },
+    {
+      "kind": "relr",
+      "offset": 82952,
+      "addend": 82936
+    },
+    {
+      "kind": "relr",
+      "offset": 82960,
+      "addend": 82936
+    },
+    {
+      "kind": "relr",
+      "offset": 82968,
+      "addend": 82952
+    },
+    {
+      "kind": "relr",
+      "offset": 82976,
+      "addend": 82952
+    },
+    {
+      "kind": "relr",
+      "offset": 82984,
+      "addend": 82968
+    },
+    {
+      "kind": "relr",
+      "offset": 82992,
+      "addend": 82968
+    },
+    {
+      "kind": "relr",
+      "offset": 83000,
+      "addend": 82984
+    },
+    {
+      "kind": "relr",
+      "offset": 83008,
+      "addend": 82984
+    },
+    {
+      "kind": "relr",
+      "offset": 83016,
+      "addend": 83000
+    },
+    {
+      "kind": "relr",
+      "offset": 83024,
+      "addend": 83000
+    },
+    {
+      "kind": "relr",
+      "offset": 83032,
+      "addend": 83016
+    },
+    {
+      "kind": "relr",
+      "offset": 83040,
+      "addend": 83016
+    },
+    {
+      "kind": "relr",
+      "offset": 83048,
+      "addend": 83032
+    },
+    {
+      "kind": "relr",
+      "offset": 83056,
+      "addend": 83032
+    },
+    {
+      "kind": "relr",
+      "offset": 83064,
+      "addend": 83048
+    },
+    {
+      "kind": "relr",
+      "offset": 83072,
+      "addend": 83048
+    },
+    {
+      "kind": "relr",
+      "offset": 83080,
+      "addend": 83064
+    },
+    {
+      "kind": "relr",
+      "offset": 83088,
+      "addend": 83064
+    },
+    {
+      "kind": "relr",
+      "offset": 83096,
+      "addend": 83080
+    },
+    {
+      "kind": "relr",
+      "offset": 83104,
+      "addend": 83080
+    },
+    {
+      "kind": "relr",
+      "offset": 83112,
+      "addend": 83096
+    },
+    {
+      "kind": "relr",
+      "offset": 83120,
+      "addend": 83096
+    },
+    {
+      "kind": "relr",
+      "offset": 83128,
+      "addend": 83112
+    },
+    {
+      "kind": "relr",
+      "offset": 83136,
+      "addend": 83112
+    },
+    {
+      "kind": "relr",
+      "offset": 83144,
+      "addend": 83128
+    },
+    {
+      "kind": "relr",
+      "offset": 83152,
+      "addend": 83128
+    },
+    {
+      "kind": "relr",
+      "offset": 83160,
+      "addend": 83144
+    },
+    {
+      "kind": "relr",
+      "offset": 83168,
+      "addend": 83144
+    },
+    {
+      "kind": "relr",
+      "offset": 83176,
+      "addend": 83160
+    },
+    {
+      "kind": "relr",
+      "offset": 83184,
+      "addend": 83160
+    },
+    {
+      "kind": "relr",
+      "offset": 83192,
+      "addend": 83176
+    },
+    {
+      "kind": "relr",
+      "offset": 83200,
+      "addend": 83176
+    },
+    {
+      "kind": "relr",
+      "offset": 83208,
+      "addend": 83192
+    },
+    {
+      "kind": "relr",
+      "offset": 83216,
+      "addend": 83192
+    },
+    {
+      "kind": "relr",
+      "offset": 83224,
+      "addend": 83208
+    },
+    {
+      "kind": "relr",
+      "offset": 83232,
+      "addend": 83208
+    },
+    {
+      "kind": "relr",
+      "offset": 83240,
+      "addend": 83224
+    },
+    {
+      "kind": "relr",
+      "offset": 83248,
+      "addend": 83224
+    },
+    {
+      "kind": "relr",
+      "offset": 83256,
+      "addend": 83240
+    },
+    {
+      "kind": "relr",
+      "offset": 83264,
+      "addend": 83240
+    },
+    {
+      "kind": "relr",
+      "offset": 83272,
+      "addend": 83256
+    },
+    {
+      "kind": "relr",
+      "offset": 83280,
+      "addend": 83256
+    },
+    {
+      "kind": "relr",
+      "offset": 83288,
+      "addend": 83272
+    },
+    {
+      "kind": "relr",
+      "offset": 83296,
+      "addend": 83272
+    },
+    {
+      "kind": "relr",
+      "offset": 83304,
+      "addend": 83288
+    },
+    {
+      "kind": "relr",
+      "offset": 83312,
+      "addend": 83288
+    },
+    {
+      "kind": "relr",
+      "offset": 83320,
+      "addend": 83304
+    },
+    {
+      "kind": "relr",
+      "offset": 83328,
+      "addend": 83304
+    },
+    {
+      "kind": "relr",
+      "offset": 83336,
+      "addend": 83320
+    },
+    {
+      "kind": "relr",
+      "offset": 83344,
+      "addend": 83320
+    },
+    {
+      "kind": "relr",
+      "offset": 83352,
+      "addend": 83336
+    },
+    {
+      "kind": "relr",
+      "offset": 83360,
+      "addend": 83336
+    },
+    {
+      "kind": "relr",
+      "offset": 83368,
+      "addend": 83352
+    },
+    {
+      "kind": "relr",
+      "offset": 83376,
+      "addend": 83352
+    },
+    {
+      "kind": "relr",
+      "offset": 83384,
+      "addend": 83368
+    },
+    {
+      "kind": "relr",
+      "offset": 83392,
+      "addend": 83368
+    },
+    {
+      "kind": "relr",
+      "offset": 83400,
+      "addend": 83384
+    },
+    {
+      "kind": "relr",
+      "offset": 83408,
+      "addend": 83384
+    },
+    {
+      "kind": "relr",
+      "offset": 83416,
+      "addend": 83400
+    },
+    {
+      "kind": "relr",
+      "offset": 83424,
+      "addend": 83400
+    },
+    {
+      "kind": "relr",
+      "offset": 83432,
+      "addend": 83416
+    },
+    {
+      "kind": "relr",
+      "offset": 83440,
+      "addend": 83416
+    },
+    {
+      "kind": "relr",
+      "offset": 83448,
+      "addend": 83432
+    },
+    {
+      "kind": "relr",
+      "offset": 83456,
+      "addend": 83432
+    },
+    {
+      "kind": "relr",
+      "offset": 83464,
+      "addend": 83448
+    },
+    {
+      "kind": "relr",
+      "offset": 83472,
+      "addend": 83448
+    },
+    {
+      "kind": "relr",
+      "offset": 83480,
+      "addend": 83464
+    },
+    {
+      "kind": "relr",
+      "offset": 83488,
+      "addend": 83464
+    },
+    {
+      "kind": "relr",
+      "offset": 83496,
+      "addend": 83480
+    },
+    {
+      "kind": "relr",
+      "offset": 83504,
+      "addend": 83480
+    },
+    {
+      "kind": "relr",
+      "offset": 83512,
+      "addend": 83496
+    },
+    {
+      "kind": "relr",
+      "offset": 83520,
+      "addend": 83496
+    },
+    {
+      "kind": "relr",
+      "offset": 83528,
+      "addend": 83512
+    },
+    {
+      "kind": "relr",
+      "offset": 83536,
+      "addend": 83512
+    },
+    {
+      "kind": "relr",
+      "offset": 83544,
+      "addend": 83528
+    },
+    {
+      "kind": "relr",
+      "offset": 83552,
+      "addend": 83528
+    },
+    {
+      "kind": "relr",
+      "offset": 83560,
+      "addend": 83544
+    },
+    {
+      "kind": "relr",
+      "offset": 83568,
+      "addend": 83544
+    },
+    {
+      "kind": "relr",
+      "offset": 83576,
+      "addend": 83560
+    },
+    {
+      "kind": "relr",
+      "offset": 83584,
+      "addend": 83560
+    },
+    {
+      "kind": "relr",
+      "offset": 83592,
+      "addend": 83576
+    },
+    {
+      "kind": "relr",
+      "offset": 83600,
+      "addend": 83576
+    },
+    {
+      "kind": "relr",
+      "offset": 83608,
+      "addend": 83592
+    },
+    {
+      "kind": "relr",
+      "offset": 83616,
+      "addend": 83592
+    },
+    {
+      "kind": "relr",
+      "offset": 83624,
+      "addend": 83608
+    },
+    {
+      "kind": "relr",
+      "offset": 83632,
+      "addend": 83608
+    },
+    {
+      "kind": "relr",
+      "offset": 83640,
+      "addend": 83624
+    },
+    {
+      "kind": "relr",
+      "offset": 83648,
+      "addend": 83624
+    },
+    {
+      "kind": "relr",
+      "offset": 83656,
+      "addend": 83640
+    },
+    {
+      "kind": "relr",
+      "offset": 83664,
+      "addend": 83640
+    },
+    {
+      "kind": "relr",
+      "offset": 83672,
+      "addend": 83656
+    },
+    {
+      "kind": "relr",
+      "offset": 83680,
+      "addend": 83656
+    },
+    {
+      "kind": "relr",
+      "offset": 83688,
+      "addend": 83672
+    },
+    {
+      "kind": "relr",
+      "offset": 83696,
+      "addend": 83672
+    },
+    {
+      "kind": "relr",
+      "offset": 83704,
+      "addend": 83688
+    },
+    {
+      "kind": "relr",
+      "offset": 83712,
+      "addend": 83688
+    },
+    {
+      "kind": "relr",
+      "offset": 83720,
+      "addend": 83704
+    },
+    {
+      "kind": "relr",
+      "offset": 83728,
+      "addend": 83704
+    },
+    {
+      "kind": "relr",
+      "offset": 83736,
+      "addend": 83720
+    },
+    {
+      "kind": "relr",
+      "offset": 83744,
+      "addend": 83720
+    },
+    {
+      "kind": "relr",
+      "offset": 83752,
+      "addend": 83736
+    },
+    {
+      "kind": "relr",
+      "offset": 83760,
+      "addend": 83736
+    },
+    {
+      "kind": "relr",
+      "offset": 83768,
+      "addend": 83752
+    },
+    {
+      "kind": "relr",
+      "offset": 83776,
+      "addend": 83752
+    },
+    {
+      "kind": "relr",
+      "offset": 83784,
+      "addend": 83768
+    },
+    {
+      "kind": "relr",
+      "offset": 83792,
+      "addend": 83768
+    },
+    {
+      "kind": "relr",
+      "offset": 83800,
+      "addend": 83784
+    },
+    {
+      "kind": "relr",
+      "offset": 83808,
+      "addend": 83784
+    },
+    {
+      "kind": "relr",
+      "offset": 83816,
+      "addend": 83800
+    },
+    {
+      "kind": "relr",
+      "offset": 83824,
+      "addend": 83800
+    },
+    {
+      "kind": "relr",
+      "offset": 83832,
+      "addend": 83816
+    },
+    {
+      "kind": "relr",
+      "offset": 83840,
+      "addend": 83816
+    },
+    {
+      "kind": "relr",
+      "offset": 83848,
+      "addend": 83832
+    },
+    {
+      "kind": "relr",
+      "offset": 83856,
+      "addend": 83832
+    },
+    {
+      "kind": "relr",
+      "offset": 83864,
+      "addend": 83848
+    },
+    {
+      "kind": "relr",
+      "offset": 83872,
+      "addend": 83848
+    },
+    {
+      "kind": "relr",
+      "offset": 83880,
+      "addend": 83864
+    },
+    {
+      "kind": "relr",
+      "offset": 83888,
+      "addend": 83864
+    },
+    {
+      "kind": "relr",
+      "offset": 83896,
+      "addend": 83880
+    },
+    {
+      "kind": "relr",
+      "offset": 83904,
+      "addend": 83880
+    },
+    {
+      "kind": "relr",
+      "offset": 83912,
+      "addend": 83896
+    },
+    {
+      "kind": "relr",
+      "offset": 83920,
+      "addend": 83896
+    },
+    {
+      "kind": "relr",
+      "offset": 83928,
+      "addend": 83912
+    },
+    {
+      "kind": "relr",
+      "offset": 83936,
+      "addend": 83912
+    },
+    {
+      "kind": "relr",
+      "offset": 83944,
+      "addend": 83928
+    },
+    {
+      "kind": "relr",
+      "offset": 83952,
+      "addend": 83928
+    },
+    {
+      "kind": "relr",
+      "offset": 83960,
+      "addend": 83944
+    },
+    {
+      "kind": "relr",
+      "offset": 83968,
+      "addend": 83944
+    },
+    {
+      "kind": "relr",
+      "offset": 83976,
+      "addend": 83960
+    },
+    {
+      "kind": "relr",
+      "offset": 83984,
+      "addend": 83960
+    },
+    {
+      "kind": "relr",
+      "offset": 83992,
+      "addend": 83976
+    },
+    {
+      "kind": "relr",
+      "offset": 84000,
+      "addend": 83976
+    },
+    {
+      "kind": "relr",
+      "offset": 84008,
+      "addend": 83992
+    },
+    {
+      "kind": "relr",
+      "offset": 84016,
+      "addend": 83992
+    },
+    {
+      "kind": "relr",
+      "offset": 84024,
+      "addend": 84008
+    },
+    {
+      "kind": "relr",
+      "offset": 84032,
+      "addend": 84008
+    },
+    {
+      "kind": "relr",
+      "offset": 84040,
+      "addend": 84024
+    },
+    {
+      "kind": "relr",
+      "offset": 84048,
+      "addend": 84024
+    },
+    {
+      "kind": "relr",
+      "offset": 84056,
+      "addend": 84040
+    },
+    {
+      "kind": "relr",
+      "offset": 84064,
+      "addend": 84040
+    },
+    {
+      "kind": "relr",
+      "offset": 84072,
+      "addend": 84056
+    },
+    {
+      "kind": "relr",
+      "offset": 84080,
+      "addend": 84056
+    },
+    {
+      "kind": "relr",
+      "offset": 84088,
+      "addend": 84072
+    },
+    {
+      "kind": "relr",
+      "offset": 84096,
+      "addend": 84072
+    },
+    {
+      "kind": "relr",
+      "offset": 84104,
+      "addend": 84088
+    },
+    {
+      "kind": "relr",
+      "offset": 84112,
+      "addend": 84088
+    },
+    {
+      "kind": "relr",
+      "offset": 84120,
+      "addend": 84104
+    },
+    {
+      "kind": "relr",
+      "offset": 84128,
+      "addend": 84104
+    },
+    {
+      "kind": "relr",
+      "offset": 84136,
+      "addend": 84120
+    },
+    {
+      "kind": "relr",
+      "offset": 84144,
+      "addend": 84120
+    },
+    {
+      "kind": "relr",
+      "offset": 84152,
+      "addend": 84136
+    },
+    {
+      "kind": "relr",
+      "offset": 84160,
+      "addend": 84136
+    },
+    {
+      "kind": "relr",
+      "offset": 84168,
+      "addend": 84152
+    },
+    {
+      "kind": "relr",
+      "offset": 84176,
+      "addend": 84152
+    },
+    {
+      "kind": "relr",
+      "offset": 84184,
+      "addend": 84168
+    },
+    {
+      "kind": "relr",
+      "offset": 84192,
+      "addend": 84168
+    },
+    {
+      "kind": "relr",
+      "offset": 84200,
+      "addend": 84184
+    },
+    {
+      "kind": "relr",
+      "offset": 84208,
+      "addend": 84184
+    },
+    {
+      "kind": "relr",
+      "offset": 84216,
+      "addend": 84200
+    },
+    {
+      "kind": "relr",
+      "offset": 84224,
+      "addend": 84200
+    },
+    {
+      "kind": "relr",
+      "offset": 84232,
+      "addend": 84216
+    },
+    {
+      "kind": "relr",
+      "offset": 84240,
+      "addend": 84216
+    },
+    {
+      "kind": "relr",
+      "offset": 84248,
+      "addend": 84232
+    },
+    {
+      "kind": "relr",
+      "offset": 84256,
+      "addend": 84232
+    },
+    {
+      "kind": "relr",
+      "offset": 84264,
+      "addend": 84248
+    },
+    {
+      "kind": "relr",
+      "offset": 84272,
+      "addend": 84248
+    },
+    {
+      "kind": "relr",
+      "offset": 84280,
+      "addend": 84264
+    },
+    {
+      "kind": "relr",
+      "offset": 84288,
+      "addend": 84264
+    },
+    {
+      "kind": "relr",
+      "offset": 84296,
+      "addend": 84280
+    },
+    {
+      "kind": "relr",
+      "offset": 84304,
+      "addend": 84280
+    },
+    {
+      "kind": "relr",
+      "offset": 84312,
+      "addend": 84296
+    },
+    {
+      "kind": "relr",
+      "offset": 84320,
+      "addend": 84296
+    },
+    {
+      "kind": "relr",
+      "offset": 84328,
+      "addend": 84312
+    },
+    {
+      "kind": "relr",
+      "offset": 84336,
+      "addend": 84312
+    },
+    {
+      "kind": "relr",
+      "offset": 84344,
+      "addend": 84328
+    },
+    {
+      "kind": "relr",
+      "offset": 84352,
+      "addend": 84328
+    },
+    {
+      "kind": "relr",
+      "offset": 84360,
+      "addend": 84344
+    },
+    {
+      "kind": "relr",
+      "offset": 84368,
+      "addend": 84344
+    },
+    {
+      "kind": "relr",
+      "offset": 84376,
+      "addend": 84360
+    },
+    {
+      "kind": "relr",
+      "offset": 84384,
+      "addend": 84360
+    },
+    {
+      "kind": "relr",
+      "offset": 84392,
+      "addend": 84376
+    },
+    {
+      "kind": "relr",
+      "offset": 84400,
+      "addend": 84376
+    },
+    {
+      "kind": "relr",
+      "offset": 84408,
+      "addend": 84392
+    },
+    {
+      "kind": "relr",
+      "offset": 84416,
+      "addend": 84392
+    },
+    {
+      "kind": "relr",
+      "offset": 84424,
+      "addend": 84408
+    },
+    {
+      "kind": "relr",
+      "offset": 84432,
+      "addend": 84408
+    },
+    {
+      "kind": "relr",
+      "offset": 84440,
+      "addend": 84424
+    },
+    {
+      "kind": "relr",
+      "offset": 84448,
+      "addend": 84424
+    },
+    {
+      "kind": "relr",
+      "offset": 84456,
+      "addend": 84440
+    },
+    {
+      "kind": "relr",
+      "offset": 84464,
+      "addend": 84440
+    },
+    {
+      "kind": "relr",
+      "offset": 84472,
+      "addend": 84456
+    },
+    {
+      "kind": "relr",
+      "offset": 84480,
+      "addend": 84456
+    },
+    {
+      "kind": "relr",
+      "offset": 84488,
+      "addend": 84472
+    },
+    {
+      "kind": "relr",
+      "offset": 84496,
+      "addend": 84472
+    },
+    {
+      "kind": "relr",
+      "offset": 84504,
+      "addend": 84488
+    },
+    {
+      "kind": "relr",
+      "offset": 84512,
+      "addend": 84488
+    },
+    {
+      "kind": "relr",
+      "offset": 84520,
+      "addend": 84504
+    },
+    {
+      "kind": "relr",
+      "offset": 84528,
+      "addend": 84504
+    },
+    {
+      "kind": "relr",
+      "offset": 84536,
+      "addend": 84520
+    },
+    {
+      "kind": "relr",
+      "offset": 84544,
+      "addend": 84520
+    },
+    {
+      "kind": "relr",
+      "offset": 84552,
+      "addend": 84536
+    },
+    {
+      "kind": "relr",
+      "offset": 84560,
+      "addend": 84536
+    },
+    {
+      "kind": "relr",
+      "offset": 84568,
+      "addend": 84552
+    },
+    {
+      "kind": "relr",
+      "offset": 84576,
+      "addend": 84552
+    },
+    {
+      "kind": "relr",
+      "offset": 84584,
+      "addend": 84568
+    },
+    {
+      "kind": "relr",
+      "offset": 84592,
+      "addend": 84568
+    },
+    {
+      "kind": "relr",
+      "offset": 84616,
+      "addend": 96584
+    },
+    {
+      "kind": "relr",
+      "offset": 85080,
+      "addend": 39712
+    },
+    {
+      "kind": "relr",
+      "offset": 85088,
+      "addend": 43744
+    },
+    {
+      "kind": "relr",
+      "offset": 85104,
+      "addend": 66832
+    },
+    {
+      "kind": "relr",
+      "offset": 85112,
+      "addend": 65952
+    },
+    {
+      "kind": "relr",
+      "offset": 85120,
+      "addend": 65800
+    },
+    {
+      "kind": "relr",
+      "offset": 85128,
+      "addend": 65800
+    },
+    {
+      "kind": "relr",
+      "offset": 85136,
+      "addend": 65800
+    },
+    {
+      "kind": "relr",
+      "offset": 85144,
+      "addend": 65800
+    },
+    {
+      "kind": "relr",
+      "offset": 85152,
+      "addend": 65800
+    },
+    {
+      "kind": "relr",
+      "offset": 85160,
+      "addend": 65800
+    },
+    {
+      "kind": "relr",
+      "offset": 85168,
+      "addend": 65800
+    },
+    {
+      "kind": "relr",
+      "offset": 85176,
+      "addend": 65800
+    },
+    {
+      "kind": "relr",
+      "offset": 85184,
+      "addend": 65800
+    },
+    {
+      "kind": "relr",
+      "offset": 85280,
+      "addend": 93504
+    },
+    {
+      "kind": "relr",
+      "offset": 85288,
+      "addend": 93488
+    },
+    {
+      "kind": "relr",
+      "offset": 85296,
+      "addend": 93472
+    },
+    {
+      "kind": "relr",
+      "offset": 93520,
+      "addend": 77840
+    },
+    {
+      "kind": "relr",
+      "offset": 93528,
+      "addend": 77840
+    },
+    {
+      "kind": "relr",
+      "offset": 93536,
+      "addend": 77840
+    }
+  ],
+  "sites": [
+    {
+      "offset": 524,
+      "kind": "mrs",
+      "sysreg": "cntpct_el0",
+      "rt": 23,
+      "word": 3577471031,
+      "function": "main"
+    },
+    {
+      "offset": 656,
+      "kind": "mrs",
+      "sysreg": "cntpct_el0",
+      "rt": 22,
+      "word": 3577471030,
+      "function": "main"
+    },
+    {
+      "offset": 1144,
+      "kind": "svc",
+      "imm": 1,
+      "word": 3556769825,
+      "function": "svcSetHeapSize"
+    },
+    {
+      "offset": 1160,
+      "kind": "svc",
+      "imm": 2,
+      "word": 3556769857,
+      "function": "svcSetMemoryPermission"
+    },
+    {
+      "offset": 1168,
+      "kind": "svc",
+      "imm": 3,
+      "word": 3556769889,
+      "function": "svcSetMemoryAttribute"
+    },
+    {
+      "offset": 1176,
+      "kind": "svc",
+      "imm": 5,
+      "word": 3556769953,
+      "function": "svcUnmapMemory"
+    },
+    {
+      "offset": 1188,
+      "kind": "svc",
+      "imm": 6,
+      "word": 3556769985,
+      "function": "svcQueryMemory"
+    },
+    {
+      "offset": 1204,
+      "kind": "svc",
+      "imm": 7,
+      "word": 3556770017,
+      "function": "svcExitProcess"
+    },
+    {
+      "offset": 1212,
+      "kind": "svc",
+      "imm": 26,
+      "word": 3556770625,
+      "function": "svcArbitrateLock"
+    },
+    {
+      "offset": 1220,
+      "kind": "svc",
+      "imm": 27,
+      "word": 3556770657,
+      "function": "svcArbitrateUnlock"
+    },
+    {
+      "offset": 1228,
+      "kind": "svc",
+      "imm": 38,
+      "word": 3556771009,
+      "function": "svcBreak"
+    },
+    {
+      "offset": 1236,
+      "kind": "svc",
+      "imm": 39,
+      "word": 3556771041,
+      "function": "svcOutputDebugString"
+    },
+    {
+      "offset": 1244,
+      "kind": "svc",
+      "imm": 40,
+      "word": 3556771073,
+      "function": "svcReturnFromException"
+    },
+    {
+      "offset": 1256,
+      "kind": "svc",
+      "imm": 41,
+      "word": 3556771105,
+      "function": "svcGetInfo"
+    },
+    {
+      "offset": 3632,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "__syscall_getreent"
+    },
+    {
+      "offset": 3776,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "newlibSetup"
+    },
+    {
+      "offset": 4628,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "mutexLock"
+    },
+    {
+      "offset": 4832,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "mutexUnlock"
+    },
+    {
+      "offset": 4948,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "mutexIsLockedByCurrentThread"
+    },
+    {
+      "offset": 5188,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "__libnx_init_thread"
+    },
+    {
+      "offset": 5244,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "__libnx_init_thread"
+    }
+  ]
+}

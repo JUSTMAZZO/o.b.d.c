@@ -109,6 +109,14 @@ SHIM_API void *consoleInit(void *console) { (void)console; return NULL; }
 SHIM_API void consoleUpdate(void *console) { (void)console; fflush(stdout); }
 SHIM_API void consoleExit(void *console)   { (void)console; fflush(stdout); }
 
+/* ------------------------------------------------------------------ kernel (svc) */
+/* svcOutputDebugString (svc 0x27): no Switch vai para o log de debug; aqui para o stdout. */
+SHIM_API Result svcOutputDebugString(const char *str, u64 size)
+{
+    fwrite(str, 1, size, stdout);
+    return 0;
+}
+
 /* ------------------------------------------------------------------ timer (arm) */
 /* Contador de sistema do Switch: 19,2 MHz. Emulado a partir de CLOCK_MONOTONIC. */
 #define SHIM_TICK_FREQ 19200000ULL
