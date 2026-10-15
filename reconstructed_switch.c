@@ -12,14 +12,14 @@ int main(void) {
   uint64_t x21;
   uint64_t x23;
   uint64_t x23_2;
-  uint8_t sp_0x10[32];  /* objeto local na pilha (sp+0x10), passado por endereco */
+  PadState sp_0x10;  /* objeto local na pilha (sp+0x10) */
   uint32_t boost;
   uint64_t checksum;
 
   consoleInit(0);
   w21 = 1;
   padConfigureInput(1, 31);
-  padInitializeDefault(sp_0x10);
+  padInitializeDefault(&sp_0x10);
   puts("[+] Switch Particle Bench (libnx HLE shim) iniciado no Android!");
   buf_x19 = (uint32_t *)malloc(400000);
   p0 = malloc(400000);
@@ -40,8 +40,8 @@ int main(void) {
   x21 = armGetSystemTick();
   w22 = 0;
   while (appletMainLoop()) {
-    padUpdate(sp_0x10);
-    x23 = padGetButtonsDown(sp_0x10);
+    padUpdate(&sp_0x10);
+    x23 = padGetButtonsDown(&sp_0x10);
     boost = (((x23 & 1) != 0) ? 65 : 1);
 
     // LOOP_NEON_2

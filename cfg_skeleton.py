@@ -22,7 +22,8 @@ CALLER_SAVED = ({f'x{n}' for n in range(19)} | {f'v{n}' for n in list(range(8)) 
                 | {'nzcv'})
 PTR_RETURNING = {'malloc', 'calloc', 'realloc', 'aligned_alloc'}
 PRINTF_LIKE = {'printf': 0, 'sprintf': 1, 'snprintf': 2, 'fprintf': 1}
-CTYPE = {'u32': 'uint32_t', 'u64': 'uint64_t', 'f64': 'double', 'ptr': 'uint32_t *', 'void*': 'void *'}
+CTYPE = {'u32': 'uint32_t', 'u64': 'uint64_t', 'f64': 'double', 'ptr': 'uint32_t *', 'void*': 'void *',
+         'bptr': 'uint8_t *'}
 CMP_NEG = {'==': '!=', '!=': '==', '<': '>=', '>=': '<', '>': '<=', '<=': '>'}
 CC_OP = {'eq': '==', 'ne': '!=', 'hi': '>', 'hs': '>=', 'cs': '>=', 'lo': '<', 'cc': '<', 'ls': '<=',
          'gt': '>', 'ge': '>=', 'lt': '<', 'le': '<='}
@@ -39,7 +40,7 @@ def parse(line):
     mnem, _, rest = text.strip().partition(' ')
     ops, depth, cur = [], 0, ''
     for ch in rest:
-        depth += (ch == '[') - (ch == ']')
+        depth += (ch in '[{') - (ch in ']}')
         if ch == ',' and depth == 0:
             ops.append(cur.strip())
             cur = ''
@@ -113,6 +114,9 @@ def neg(c):
 class Render:
     def __init__(self, strings):
         self.strings = strings
+        self.layouts = {}      # buffer -> campos uint32 por elemento (1 = array; n = struct)
+        self.ptr_alias = {}    # variavel ponteiro -> buffer tipado com o mesmo valor (copia que domina as leituras)
+        self.addr_of = set()   # objetos de pilha tipados (passados como &obj)
 
     def __call__(self, e, hexa=False):
         k, a = e.k, e.a
@@ -123,8 +127,12 @@ class Render:
             return hex(v) if (hexa or v > 0xFFFFF) and v > 9 else str(v)
         if k == 'fconst':
             return repr(float(a[0]))
-        if k in ('var', 'stack'):
+        if k == 'var':
             return a[0]
+        if k == 'stack':
+            return f"&{a[0]}" if a[0] in self.addr_of else a[0]
+        if k == 'ptradd':
+            return f"((uint8_t *){self(a[0])} + {a[1]})"
         if k == 'chk':
             return 'checksum'
         if k == 'opaque':
@@ -156,8 +164,15 @@ class Render:
         if k == 'load':
             base, off, width = a
             ctype = 'uint32_t' if width == 32 else 'uint64_t'
-            if base.t == 'ptr' and off.const() is not None and off.const() % 4 == 0 and width == 32:
-                return f"{self(base)}[{off.const() // 4}]"
+            root, off0 = (base.a[0], base.a[1]) if base.k == 'ptradd' else (base, 0)
+            if root.k == 'var' and root.a[0] in self.ptr_alias:
+                root = X('var', self.ptr_alias[root.a[0]], t='ptr')
+            if off.const() is not None and root.k == 'var' and root.t == 'ptr' and width == 32:
+                total = off0 + off.const()
+                nf = self.layouts.get(root.a[0], 1)
+                idx, rem = divmod(total, 4 * nf)
+                if rem % 4 == 0:   # elemento (ou campo de struct) do buffer tipado
+                    return f"{root.a[0]}[{idx}]" + (f".f{rem}" if nf > 1 else "")
             return f"*({ctype} *)((uint8_t *){self(base)} + {self(off)})"
         raise SkeletonError(f"expressao sem renderizacao: {k}")
 
@@ -299,23 +314,27 @@ def classify(I, calls):
 
 
 def loop_clobbers(body):
-    """Registradores escritos dentro de um loop NEON (destino ou base com pos-incremento)."""
+    """Registradores escritos dentro de um loop NEON (destinos, listas {..} de ldN e bases com pos-incremento)."""
     out = set()
     for line in body:
         _, mn, ops = parse(line)
-        if mn.startswith('b.') or mn in ('b', 'cmp', 'tst', 'cbz', 'cbnz', 'tbz', 'tbnz'):
+        if mn.startswith('b.') or mn in ('b', 'cbz', 'cbnz', 'tbz', 'tbnz'):
             continue
-        if mn in ('str', 'stp', 'st1'):
-            if len(ops) > 2 and ops[-1].startswith('#') or ops[-1].endswith('!'):
-                out.add(reg(mem(next(o for o in ops if o.startswith('[')))[0])[0])
-            continue
-        r = reg(ops[0])[0]
-        if r:
-            out.add(r)
-        if mn in ('ldr', 'ldp', 'ld1') and len(ops) > 2 and ops[-1].startswith('#'):
-            out.add(reg(mem(next(o for o in ops if o.startswith('[')))[0])[0])
-        if mn in ('subs', 'adds'):
+        if mn in ('cmp', 'cmn', 'tst', 'subs', 'adds'):
             out.add('nzcv')
+            if mn in ('cmp', 'cmn', 'tst'):
+                continue
+        memop = next((o for o in ops if o.startswith('[')), None)
+        if memop is not None and (memop.endswith('!') or ops[-1] is not memop):
+            out.add(reg(mem(memop)[0])[0])          # pos/pre-incremento escreve a base
+        if mn in ('str', 'stp', 'strb', 'strh') or mn[:2] == 'st' and mn[2:].isdigit():
+            continue
+        if ops[0].startswith('{'):
+            out |= {reg(r.strip())[0] for r in ops[0].strip('{}').split(',')}
+        else:
+            out.add(reg(ops[0])[0])
+            if mn == 'ldp':
+                out.add(reg(ops[1])[0])
     return out - {None, 'zr', 'sp'}
 
 
@@ -627,13 +646,16 @@ class Skeleton:
             if len(w.defs) > 1 or any(d[0] < 0 for d in w.defs):
                 w.var = True
                 continue
+            if any(U.kind == 'pseudo' for U, _ in w.uses):   # buffer de loop NEON: sempre variavel nomeada
+                w.var = True
+                continue
             d = next(iter(w.defs))
             I = self.by_idx[d[0]]
             if I.kind == 'pseudo' and d[1] not in I.accs:
                 self.warnings.append(f"valor clobberado pelo loop NEON {I.loop['idx']} usado depois: {d[1]}")
                 w.var = True
                 continue
-            if self.const_like(d):
+            if self.const_like(d) or self.stable(d):
                 continue
             if len(w.uses) != 1:
                 w.var = True
@@ -675,8 +697,53 @@ class Skeleton:
                 self.merged_copy.add(U.idx)
                 break
 
+    def stable(self, d, depth=0):
+        """Expressao pura (sem chamada nem leitura de memoria) calculada uma vez fora de loops, sobre
+        valores que tambem nao mudam depois: pode ser repetida em qualquer uso (ex.: p + 0xc3000)."""
+        if d[0] < 0 or depth > 20:
+            return False
+        I = self.by_idx[d[0]]
+        if I.kind not in ('const', 'movk', 'copy', 'bin', 'stack') or self.in_loop(I.block):
+            return False
+        for u in I.uses:
+            w = self.use_web[(I.idx, u)]
+            if len(w.defs) != 1:
+                return False
+            dd = next(iter(w.defs))
+            if dd[0] < 0 or self.in_loop(self.by_idx[dd[0]].block):
+                return False
+            J = self.by_idx[dd[0]]
+            # chamada/leitura so pode ser referenciada se ja for variavel (mais de um uso)
+            if J.kind in ('call', 'load', 'pseudo') and len(w.uses) < 2:
+                return False
+            if J.kind not in ('call', 'load', 'pseudo') and not (self.const_like(dd) or self.stable(dd, depth + 1)):
+                return False
+        return True
+
+    def in_loop(self, b):
+        return any(b in body for body in self.nat.values())
+
+    def is_ptr_web(self, w, depth=0):
+        """Web que guarda um ponteiro: buffer de loop NEON, retorno de malloc, copia ou deslocamento disso."""
+        if depth > 20:
+            return False
+        for d in w.defs:
+            if d[0] < 0:
+                return False
+            I = self.by_idx[d[0]]
+            if I.kind == 'call' and I.name in PTR_RETURNING or I.kind == 'stack':
+                continue
+            if I.kind in ('copy', 'bin') and I.uses and (I.kind == 'copy' or I.op in '+-' and is_imm(I.srcs[1])):
+                src = self.use_web.get((I.idx, I.uses[0]))
+                if src is not None and (src is w or self.is_ptr_web(src, depth + 1)):
+                    continue
+            return False
+        return True
+
     def web_type(self, w):
         defs = [self.by_idx[d[0]] for d in w.defs if d[0] >= 0]
+        if any(I.kind == 'bin' for I in defs) and self.is_ptr_web(w):
+            return 'bptr'
         if any(I.kind == 'pseudo' for I in defs):
             return 'u64'
         if any(I.kind == 'call' and I.name in PTR_RETURNING for I in defs):
@@ -694,21 +761,33 @@ class Skeleton:
         used = set()
         webs = sorted((w for w in self.webs.values() if w.var and not hasattr(w, 'alias')),
                       key=lambda w: min(d[0] for d in w.defs))
+        layouts = {}
+        for L in self.loops:
+            layouts.update(L.get('layouts', {}))
+        self.structs = {}
         for w in webs:
             buf_use = any(I.kind == 'pseudo' for I, _ in w.uses)
             if buf_use and w.reg in ptr_names:
                 w.name, w.t = ptr_names[w.reg], 'ptr'
+                nf = layouts.get(w.name, 1)
+                self.R.layouts[w.name] = nf
+                if nf > 1:   # acessado com ld2/st2...: array of structs de nf campos uint32
+                    self.structs[f"{w.name}_t"] = nf
+                    w.ctype = f"{w.name}_t *"
+                else:
+                    w.ctype = CTYPE['ptr']
             else:
                 w.t = self.web_type(w)
+                w.ctype = CTYPE[w.t]
                 n = w.reg[1:]
-                base = {'u32': 'w', 'u64': 'x', 'void*': 'p', 'f64': 'd'}[w.t] + n
+                base = {'u32': 'w', 'u64': 'x', 'void*': 'p', 'f64': 'd', 'bptr': 'b'}[w.t] + n
                 w.name, k = base, 2
                 while w.name in used:
                     w.name, k = f"{base}_{k}", k + 1
             used.add(w.name)
         for w in self.webs.values():
             if hasattr(w, 'alias'):
-                w.name, w.t = w.alias.name, w.alias.t
+                w.name, w.t, w.ctype = w.alias.name, w.alias.t, w.alias.ctype
 
     # -- expressoes
     def use(self, I, r):
@@ -748,11 +827,17 @@ class Skeleton:
         elif k == 'bin':
             a, b = self.operand(I, I.srcs[0]), self.operand(I, I.srcs[1])
             if I.shift:
-                b = X('bin', '<<', b, X('const', int(I.shift, 0)), t=t)
+                b = X('const', (b.const() << int(I.shift, 0)) & mask(I.width), t=t) if b.const() is not None                     else X('bin', '<<', b, X('const', int(I.shift, 0)), t=t)
             if a.const() is not None and b.const() is not None:
                 v = eval(f"{a.const()} {I.op} {b.const()}") & mask(I.width)
                 e = X('const', v, t=t)
+            elif I.op in '+-' and a.t in ('ptr', 'void*', 'bptr') and b.const() is not None:
+                # aritmetica de ponteiro em bytes (o binario soma bytes, nao elementos)
+                delta = b.const() if I.op == '+' else -b.const()
+                e = X('ptradd', a.a[0], a.a[1] + delta, t='bptr') if a.k == 'ptradd' else X('ptradd', a, delta, t='bptr')
             else:
+                if t == 'u64':   # operacao de 64 bits sobre valores de 32 (ldr w, mov w): estende antes
+                    a, b = [X('cast', 'uint64_t', v, t='u64') if v.t == 'u32' and v.const() is None else v for v in (a, b)]
                 e = X('bin', I.op, a, b, t=t)
             if d[1] == 'nzcv':
                 e = X('flags', 'cmp', a, b)
@@ -849,8 +934,8 @@ class Skeleton:
 
     def assign(self, w, e):
         rhs = self.render(e)
-        if w.t == 'ptr' and e.t != 'ptr':
-            rhs = f"({CTYPE['ptr']}){rhs}"
+        if w.t in ('ptr', 'bptr') and e.t != w.t:
+            rhs = f"({w.ctype}){rhs}"
         return f"{w.name} = {rhs};"
 
     def stmts(self, b):
@@ -961,8 +1046,47 @@ class Skeleton:
             return f"while ({self.cond(c)}) {{", h.idx + 1
         return "for (;;) {", h.idx
 
+    def stack_types(self):
+        """Objeto de pilha passado a uma funcao do shim cujo parametro e `T *` (T struct do header) -> T."""
+        if not (self.shim_header and os.path.exists(self.shim_header)):
+            return {}
+        src = open(self.shim_header, encoding='utf-8').read()
+        structs = set(re.findall(r'typedef\s+struct\s*\{.*?\}\s*(\w+)\s*;', src, re.S))
+        protos = {}
+        for name, params in re.findall(r'SHIM_API\s+[\w\s\*]+?\b(\w+)\s*\(([^)]*)\)', src):
+            protos[name] = [re.sub(r'\b\w+\s*$', '', q).strip() for q in params.split(',')]
+        found = {}
+        for I in self.insns:
+            if I.kind != 'call' or I.idx not in self.live or I.name not in protos:
+                continue
+            for n, r in enumerate(I.args):
+                if n >= len(protos[I.name]):
+                    break
+                m = re.fullmatch(r'(?:const\s+)?(\w+)\s*\*', protos[I.name][n])
+                if not m or m.group(1) not in structs:
+                    continue
+                for d in I.reach.get(r, ()):
+                    J = self.by_idx.get(d[0])
+                    if J is not None and J.kind == 'stack':
+                        if found.setdefault(J.val, m.group(1)) != m.group(1):
+                            raise SkeletonError(f"sp+{J.val:#x} usado como {found[J.val]} e {m.group(1)}")
+        return found
+
     def code(self):
         self.stack_objs, self.syms = set(), set()
+        typed_stack = self.stack_types()
+        self.R.addr_of = {f"sp_{off:#x}" for off in typed_stack}
+        # p0 = malloc(...); buf = p0; ... leituras via p0 + k  ->  leem buf[i].fN
+        load_blocks = {I.block for I in self.insns if I.kind == 'load' and I.idx in self.live}
+        for w in self.webs.values():
+            if not (w.var and w.t == 'ptr' and len(w.defs) == 1 and not hasattr(w, 'alias')):
+                continue
+            C = self.by_idx.get(next(iter(w.defs))[0])
+            if C is None or C.kind != 'copy':
+                continue
+            P = self.use_web.get((C.idx, C.uses[0]))
+            if P is not None and P.var and len(P.defs) == 1 and all(C.block in self.dom[b] for b in load_blocks):
+                self.R.ptr_alias[P.name] = w.name
         body = self.emit_range(0, len(self.blocks), None)
         frame_offs = sorted({imm(mem(next(o for o in I.ops if o.startswith('[')))[1])
                              for I in self.insns if I.kind == 'frame' and any(o.startswith('[sp') for o in I.ops)
@@ -972,8 +1096,11 @@ class Skeleton:
         for w in sorted(self.webs.values(), key=lambda w: (w.name or '')):
             if w.var and w.name not in seen:
                 seen.add(w.name)
-                decls.append(f"{CTYPE[w.t]}{'' if w.t in ('ptr', 'void*') else ' '}{w.name};")
+                decls.append(f"{w.ctype}{'' if w.ctype.endswith('*') else ' '}{w.name};")
         for off in sorted(self.stack_objs):
+            if off in typed_stack:
+                decls.append(f"{typed_stack[off]} sp_{off:#x};  /* objeto local na pilha (sp+{off:#x}) */")
+                continue
             size = next((o for o in frame_offs if o > off), off + 64) - off
             decls.append(f"uint8_t sp_{off:#x}[{size}];  /* objeto local na pilha (sp+{off:#x}), passado por endereco */")
         for s in sorted(self.syms):
@@ -989,7 +1116,12 @@ class Skeleton:
             shim_fns = set(re.findall(r'SHIM_API\s+[\w\s\*]+?\b(\w+)\s*\(', shim_src))
             if callees & shim_fns:
                 inc.append(f'#include "{os.path.basename(self.shim_header)}"')
-        lines = inc + ['', 'int main(void) {'] + ['  ' + d for d in decls] + [''] + ['  ' + s for s in body] + ['}']
+        typedefs = []
+        for name, nf in sorted(self.structs.items()):
+            fields = ' '.join(f"uint32_t f{4 * j};" for j in range(nf))
+            typedefs.append(f"typedef struct {{ {fields} }} {name};  /* layout recuperado de ld{nf}/st{nf} */")
+        lines = inc + [''] + (typedefs + [''] if typedefs else []) + ['int main(void) {'] + \
+            ['  ' + d for d in decls] + [''] + ['  ' + s for s in body] + ['}']
         return '\n'.join(lines)
 
 
