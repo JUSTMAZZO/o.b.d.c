@@ -58,9 +58,9 @@
       "name": "NEON Symbolic Lifter",
       "file": "neon_lifter.py",
       "status": "in_progress",
-      "progress": 75,
-      "summary": "Elevação simbólica NEON sem código por binário (buffers nomeados pelo registrador, buf_xNN); validação por loop (memória + acumulador) em ~1–2 s; esqueleto do main gerado do CFG; C de referência sem LLM executado no host dá o valor do programa inteiro",
-      "next": "ldN/stN (ld2–ld4/st2–st4) e structs, if/else e switch no estruturador, tipagem de objetos de pilha"
+      "progress": 85,
+      "summary": "Elevação simbólica NEON sem código por binário: memória contígua (ldr/str q, ldp/stp, ld1/st1) e array of structs (ld2/st2, campos .fN), pós-incremento, constantes do main; esqueleto do main gerado do CFG com structs, ponteiros e PadState tipados; C de referência no host",
+      "next": "Testar ld3/ld4 com binário real, if/else e switch no estruturador, várias funções além do main"
     },
     {
       "name": "Local LLM Qwen 2.5 7B",
@@ -119,8 +119,8 @@
     {
       "phase": 2,
       "title": "Memória, Arrays e Ponteiros",
-      "status": "in_progress",
-      "progress": 85,
+      "status": "done",
+      "progress": 100,
       "items": [
         {
           "name": "Modelo de memória simbólico (base + índice × escala)",
@@ -155,8 +155,8 @@
           "done": true
         },
         {
-          "name": "ld1/st1",
-          "done": false
+          "name": "ld1/st1 e ld2/st2 com e sem pós-incremento (array of structs, switch_aos_bench)",
+          "done": true
         },
         {
           "name": "C de referência sem LLM (esqueleto do CFG + loops do lifter) validado no A56 nos 3 benchmarks",
@@ -175,8 +175,8 @@
           "done": true
         },
         {
-          "name": "Recuperação de structs e tipos de ponteiro",
-          "done": false
+          "name": "Recuperação de structs (layout de ld2/st2) e tipos de ponteiro (PadState na pilha pelo header do shim)",
+          "done": true
         }
       ]
     },
@@ -602,6 +602,71 @@
             "ok": true
           }
         ]
+      },
+      {
+        "id": "switch_aos_bench",
+        "title": "Homebrew libnx: 100.000 partículas como array of structs {x, vx} × 60 frames",
+        "ops": "ld2 / st2 (com e sem pós-incremento), dup, add, and, eor, ushr, sub, uaddw/uaddw2 + epílogo escalar",
+        "expected": {
+          "Checksum": "88196450180",
+          "Última partícula": "1734747"
+        },
+        "neon_median_s": 0.0073752,
+        "scalar_median_s": null,
+        "reconstructed": {
+          "binary": "reconstructed_aos.c",
+          "status": "verified",
+          "note": "Mesma física do switch_particle_bench com layout AoS. O lifter modela ld2/st2 como campos de struct (buf_x19[i].f0/.f4); o esqueleto recupera `typedef struct { uint32_t f0; uint32_t f4; }`, o PadState da pilha e o epílogo escalar que o Clang gera para as 8 últimas structs (buf_x19[99992..99999].f0)."
+        },
+        "attempts": [
+          {
+            "n": 1,
+            "input": "Resumo do lifter (ld2/st2) + esqueleto do CFG com structs",
+            "binary": "switch_aos_bench",
+            "formula": true,
+            "iterations": "ok",
+            "result": "88196450180",
+            "llm_seconds": 78.4,
+            "verified_on_device": true,
+            "note": "aprovado pelo gate no host na primeira tentativa"
+          }
+        ],
+        "device_runs": [
+          {
+            "binary": "switch_aos_bench (fonte original, taskset cpu7)",
+            "runs": 15,
+            "median_s": 0.0073752,
+            "min_s": 0.007089,
+            "result": "88196450180"
+          }
+        ],
+        "validation": [
+          {
+            "check": "Referência NumPy (AoS, 60 frames, impulso no frame 30)",
+            "value": "88196450180 / 1734747",
+            "ok": true
+          },
+          {
+            "check": "Binário original no A56 (15×, taskset 80)",
+            "value": "60 / 88196450180 / 1734747",
+            "ok": true
+          },
+          {
+            "check": "Lifter: ld2/st2 concreto × fórmulas simbólicas (memória dos 2 campos + acumulador)",
+            "value": "3/3 loops",
+            "ok": true
+          },
+          {
+            "check": "C de referência sem LLM no host (llvm-mingw, sem flags permissivas)",
+            "value": "60 / 88196450180 / 1734747",
+            "ok": true
+          },
+          {
+            "check": "Gate no host: reconstructed_aos.c do Qwen = C de referência (e conferido no A56, 3×)",
+            "value": "60 / 88196450180 / 1734747",
+            "ok": true
+          }
+        ]
       }
     ]
   },
@@ -646,6 +711,26 @@
         "insn": "stp",
         "kind": "memória",
         "note": "par de registradores Q → array de saída"
+      },
+      {
+        "insn": "ld1",
+        "kind": "memória",
+        "note": "contíguo, 1–4 registradores, pós-incremento por imediato ou registrador"
+      },
+      {
+        "insn": "st1",
+        "kind": "memória",
+        "note": "contíguo, 1–4 registradores, pós-incremento"
+      },
+      {
+        "insn": "ld2",
+        "kind": "memória",
+        "note": "array of structs de 2 campos: registrador j = campo j de 4 structs"
+      },
+      {
+        "insn": "st2",
+        "kind": "memória",
+        "note": "array of structs de 2 campos, com e sem pós-incremento"
       },
       {
         "insn": "add",
@@ -710,6 +795,12 @@
     ],
     "planned": [
       {
+        "insn": "ld3 / ld4 / st3 / st4",
+        "kind": "memória",
+        "phase": 3,
+        "note": "caminho genérico já no lifter; falta binário de teste"
+      },
+      {
         "insn": "orr, bic, mvn",
         "kind": "NEON/escalar",
         "phase": 2
@@ -722,11 +813,6 @@
       {
         "insn": "umull, smull, umlal, smlal",
         "kind": "NEON",
-        "phase": 2
-      },
-      {
-        "insn": "ld1 / st1",
-        "kind": "memória",
         "phase": 2
       },
       {
