@@ -2,7 +2,7 @@
   "project": {
     "name": "o.b.d.c",
     "tagline": "Recompilação estática AArch64 → AArch64: binários de Nintendo Switch rodando nativamente no Android",
-    "updated": "2026-10-14",
+    "updated": "2026-10-15",
     "license": "MIT",
     "repo": "https://github.com/JUSTMAZZO/o.b.d.c",
     "vision": {
@@ -38,6 +38,11 @@
       "name": "Galaxy A56",
       "version": "SM-A566E",
       "role": "4×1,95 GHz + 3×2,6 GHz + 1×2,91 GHz"
+    },
+    {
+      "name": "llvm-mingw",
+      "version": "20260922 (clang 23.1.2, UCRT x86_64)",
+      "role": "Clang nativo do Windows para o gate no host (../tools/, SHA-256 conferido)"
     }
   ],
   "modules": [
@@ -53,16 +58,16 @@
       "name": "NEON Symbolic Lifter",
       "file": "neon_lifter.py",
       "status": "in_progress",
-      "progress": 70,
-      "summary": "Elevação simbólica NEON + esqueleto do main gerado do CFG (cfg_skeleton.py: dominadores, loops naturais, definições alcançantes, webs, estruturação while/if/break/return); --emit-c gera C de referência sem LLM",
-      "next": "ld1/st1, orr/bic/sshr, umull/smull, if/else e switch no estruturador, tipagem de objetos de pilha"
+      "progress": 75,
+      "summary": "Elevação simbólica NEON sem código por binário (buffers nomeados pelo registrador, buf_xNN); validação por loop (memória + acumulador) em ~1–2 s; esqueleto do main gerado do CFG; C de referência sem LLM executado no host dá o valor do programa inteiro",
+      "next": "ldN/stN (ld2–ld4/st2–st4) e structs, if/else e switch no estruturador, tipagem de objetos de pilha"
     },
     {
       "name": "Local LLM Qwen 2.5 7B",
       "file": "qwen2.5-coder:7b (Ollama, CUDA parcial)",
       "status": "in_progress",
-      "progress": 65,
-      "summary": "Nomeia/limpa o C a partir do resumo do lifter + esqueleto do CFG; posição de cada loop conferida por profundidade e pela ordem das chamadas, com 1 nova tentativa guiada",
+      "progress": 75,
+      "summary": "Gera C a partir do resumo do lifter + esqueleto do CFG; antes do ADB passa por checagem de estrutura (profundidade e ordem das chamadas) e pelo gate no host, que compila, executa e compara a saída com o C de referência, com 1 nova tentativa guiada pelo diff",
       "next": "Fazer o Qwen renomear variáveis de registrador (w21, x23, sp_0x10) e tipar PadState"
     },
     {
@@ -115,7 +120,7 @@
       "phase": 2,
       "title": "Memória, Arrays e Ponteiros",
       "status": "in_progress",
-      "progress": 80,
+      "progress": 85,
       "items": [
         {
           "name": "Modelo de memória simbólico (base + índice × escala)",
@@ -155,6 +160,14 @@
         },
         {
           "name": "C de referência sem LLM (esqueleto do CFG + loops do lifter) validado no A56 nos 3 benchmarks",
+          "done": true
+        },
+        {
+          "name": "Lifter sem código específico por binário (sem is_switch; validação genérica por loop)",
+          "done": true
+        },
+        {
+          "name": "Gate no host antes do ADB: C gerado compilado e comparado com o C de referência",
           "done": true
         },
         {
@@ -338,6 +351,11 @@
             "check": "C de referência sem LLM (esqueleto do CFG + lifter, ref_hybrid) no A56, 3×",
             "value": "151550809095744",
             "ok": true
+          },
+          {
+            "check": "Gate no host: reconstructed_arm64.c do Qwen = C de referência (e conferido no A56, 3×)",
+            "value": "151550809095744",
+            "ok": true
           }
         ]
       },
@@ -417,6 +435,11 @@
           },
           {
             "check": "C de referência sem LLM (esqueleto do CFG + lifter, ref_array) no A56, 3×",
+            "value": "12249998500128 / 24500040",
+            "ok": true
+          },
+          {
+            "check": "Gate no host: reconstructed_array.c do Qwen = C de referência (e conferido no A56, 3×)",
             "value": "12249998500128 / 24500040",
             "ok": true
           }
@@ -571,6 +594,11 @@
           {
             "check": "Desempenho do C reconstruído vs original (20 pares intercalados, razão B/A mediana)",
             "value": "1,011×",
+            "ok": true
+          },
+          {
+            "check": "Gate no host: reconstructed_switch.c do Qwen = C de referência (e conferido no A56, 3×)",
+            "value": "60 / 88196450180 / 1734747",
             "ok": true
           }
         ]
