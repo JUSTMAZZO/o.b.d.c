@@ -167,6 +167,20 @@ def render(d):
     out += [f"| ⬜ | `{i['insn']}` | {i['kind']} | planejado — Fase {i['phase']} |" for i in d['isa']['planned']]
     out.append('')
 
+    probe = d.get('environment_probe')
+    if probe:
+        out += ['## 🔬 Ambiente de execução no A56 (sonda empírica)', '',
+                f"{probe['device']} · {probe['date']} · `{probe['source']}`", '',
+                '| Item | Medido | O que significa |', '|---|---|---|']
+        out += [f"| `{r['item']}` | {r['value']} | {r['note']} |" for r in probe['results']]
+        inv = probe.get('nro_inventory')
+        if inv:
+            out += ['', f"**Inventário estático de `{inv['name']}`** ({inv['size']}) com `nro_tool.py`:", '',
+                    f"- Relocations: {inv['relocs']}",
+                    f"- Sítios: {inv['sites']}",
+                    f"- Conferência: {inv['crosscheck']}"]
+        out.append('')
+
     out += ['## 🛠️ Toolchain', '', '| Ferramenta | Versão | Papel |', '|---|---|---|']
     out += [f"| {x['name']} | {x['version']} | {x['role']} |" for x in d['toolchain']]
     if p.get('license'):

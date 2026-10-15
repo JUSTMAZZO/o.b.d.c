@@ -43,6 +43,11 @@
       "name": "llvm-mingw",
       "version": "20260922 (clang 23.1.2, UCRT x86_64)",
       "role": "Clang nativo do Windows para o gate no host (../tools/, SHA-256 conferido)"
+    },
+    {
+      "name": "devkitPro",
+      "version": "devkitA64 16.1.0 (GCC) + libnx 2.10.0",
+      "role": "Gera homebrews de teste (NRO + ELF com símbolos) para a análise da Fase 3"
     }
   ],
   "modules": [
@@ -85,6 +90,14 @@
       "progress": 15,
       "summary": "Tipos e primitivas libnx (console, appletMainLoop, pad/hid determinístico, armGetSystemTick a 19,2 MHz) sobre Bionic/POSIX",
       "next": "Shim de fs/time/sync, entrada real (toque/gamepad), loader ELF/NRO e tradução de svc"
+    },
+    {
+      "name": "Horizon Static Analysis",
+      "file": "horizon_rt/ (nro_tool.py, probe/)",
+      "status": "in_progress",
+      "progress": 30,
+      "summary": "Leitor de NRO (segmentos, MOD0, .dynamic, RELA/RELR) com inventário de svc e leituras de registradores de sistema; sonda empírica do ambiente EL0 do A56",
+      "next": "Mapa dos svc do Horizon para chamadas Bionic/POSIX e inventário de NROs maiores"
     }
   ],
   "roadmap": [
@@ -184,7 +197,7 @@
       "phase": 3,
       "title": "Loader ELF e Tradução de ABI / Syscalls",
       "status": "in_progress",
-      "progress": 15,
+      "progress": 30,
       "items": [
         {
           "name": "Shim HLE de primitivas libnx (console, applet, pad, timer) — switch_hle_shim.h",
@@ -195,8 +208,20 @@
           "done": true
         },
         {
-          "name": "Loader ELF/NSO/NRO (segmentos, MOD0, relocações)",
-          "done": false
+          "name": "Leitor NRO: NRO0, segmentos, MOD0, .dynamic, relocations RELA/RELR (nro_tool.py)",
+          "done": true
+        },
+        {
+          "name": "Inventário de sítios svc / mrs tpidrro_el0 / cntpct_el0 conferido contra o ELF original",
+          "done": true
+        },
+        {
+          "name": "Sonda do ambiente no A56 (registradores de sistema em EL0, x18, preservação de registradores)",
+          "done": true
+        },
+        {
+          "name": "Homebrew mínimo de teste (devkitPro + libnx) com oráculo pelo switch_hle_shim.h",
+          "done": true
         },
         {
           "name": "Mapa de svc do Horizon → chamadas Bionic/POSIX",
@@ -846,5 +871,54 @@
         "phase": 4
       }
     ]
+  },
+  "environment_probe": {
+    "device": "Galaxy A56 (SM-A566E), processo de shell via ADB",
+    "date": "2026-10-15",
+    "source": "horizon_rt/probe/ (probe.c + probe_guest.S)",
+    "results": [
+      {
+        "item": "tpidrro_el0",
+        "value": "0",
+        "note": "TLS do Horizon não existe no Android: toda leitura precisa de tratamento"
+      },
+      {
+        "item": "tpidr_el0",
+        "value": "ponteiro do bionic",
+        "note": "TLS do próprio Android; não pode ser reaproveitado"
+      },
+      {
+        "item": "cntpct_el0",
+        "value": "SIGILL",
+        "note": "Leitura usada por armGetSystemTick() na libnx; no A56 o equivalente é cntvct_el0"
+      },
+      {
+        "item": "cntvct_el0",
+        "value": "legível em EL0",
+        "note": "Fonte de tempo disponível"
+      },
+      {
+        "item": "cntfrq_el0",
+        "value": "0x186a000 = 25,6 MHz",
+        "note": "Switch: 19,2 MHz; ticks precisam de escala ×0,75"
+      },
+      {
+        "item": "x18",
+        "value": "≠ 0",
+        "note": "Shadow Call Stack do bionic: x18 do host precisa ser preservado ao entrar em C"
+      },
+      {
+        "item": "Preservação de registradores",
+        "value": "x1–x29, x18 e NZCV preservados",
+        "note": "Medido com sentinelas antes/depois de uma chamada ao handler em C"
+      }
+    ],
+    "nro_inventory": {
+      "name": "hb_compute.nro",
+      "size": "94.208 bytes (imagem 0x18000)",
+      "relocs": "337 RELATIVE (RELR, todas em .data)",
+      "sites": "12 svc (0x1, 0x2, 0x3, 0x5, 0x6, 0x7, 0x1a, 0x1b, 0x26, 0x27, 0x28, 0x29), 7 mrs tpidrro_el0, 2 mrs cntpct_el0",
+      "crosscheck": "21/21 sítios conferidos contra o disassembly do hb_compute.elf"
+    }
   }
 }

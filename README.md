@@ -5,7 +5,7 @@
 
 ### Recompilação estática AArch64 → AArch64: binários de Nintendo Switch rodando nativamente no Android
 
-![Endgame](https://img.shields.io/badge/Endgame-54%25-orange?style=for-the-badge) ![Fase atual](https://img.shields.io/badge/Fase%20atual-3%20%E2%80%93%20Em%20andamento-yellow?style=for-the-badge) ![ISA](https://img.shields.io/badge/ISA-AArch64%20%E2%86%92%20AArch64-informational?style=for-the-badge&logo=arm&logoColor=white) ![Alvo](https://img.shields.io/badge/Alvo-Galaxy%20A56%20%C2%B7%20Exynos%201580-1428A0?style=for-the-badge&logo=samsung&logoColor=white)
+![Endgame](https://img.shields.io/badge/Endgame-58%25-orange?style=for-the-badge) ![Fase atual](https://img.shields.io/badge/Fase%20atual-3%20%E2%80%93%20Em%20andamento-yellow?style=for-the-badge) ![ISA](https://img.shields.io/badge/ISA-AArch64%20%E2%86%92%20AArch64-informational?style=for-the-badge&logo=arm&logoColor=white) ![Alvo](https://img.shields.io/badge/Alvo-Galaxy%20A56%20%C2%B7%20Exynos%201580-1428A0?style=for-the-badge&logo=samsung&logoColor=white)
 
 ![Validação](https://img.shields.io/badge/Valida%C3%A7%C3%A3o-26%2F26%20OK-brightgreen?style=for-the-badge) ![Benchmarks](https://img.shields.io/badge/Benchmarks-4%20no%20A56-teal?style=for-the-badge&logo=android&logoColor=white) ![Instruções](https://img.shields.io/badge/Instru%C3%A7%C3%B5es-24%20suportadas-blueviolet?style=for-the-badge) ![LLM](https://img.shields.io/badge/LLM-qwen2.5--coder%207b-black?style=for-the-badge&logo=ollama&logoColor=white) ![Atualizado](https://img.shields.io/badge/Atualizado-2026--10--15-lightgrey?style=for-the-badge) [![Licença](https://img.shields.io/badge/Licen%C3%A7a-MIT-green?style=for-the-badge)](LICENSE)
 
@@ -30,7 +30,7 @@ Switch ELF/NSO ──► Ghidra (ASM + CFG + .rodata) ──► Lifter simbólic
 Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── shim ABI/svc ◄──┘
 ```
 
-## 📈 Progresso até o Endgame: `███████████░░░░░░░░░ 54%`
+## 📈 Progresso até o Endgame: `████████████░░░░░░░░ 58%`
 
 ## 🧩 Módulos atuais
 
@@ -41,6 +41,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | **Local LLM Qwen 2.5 7B**<br>`qwen2.5-coder:7b (Ollama, CUDA parcial)` | 🟡 Em andamento | `████████░░ 75%` | Gera C a partir do resumo do lifter + esqueleto do CFG; antes do ADB passa por checagem de estrutura (profundidade e ordem das chamadas) e pelo gate no host, que compila, executa e compara a saída com o C de referência, com 1 nova tentativa guiada pelo diff | Fazer o Qwen renomear variáveis de registrador (w21, x23, sp_0x10) e tipar PadState |
 | **Android AArch64 Runner**<br>`Galaxy A56 via ADB` | 🟡 Em andamento | `████░░░░░░ 45%` | push + chmod + execução em /data/local/tmp, medições intercaladas (15×) | Script único de round-trip (compilar → push → rodar → comparar), afinidade de núcleo (taskset) |
 | **Switch HLE Shim**<br>`switch_hle_shim.h` | 🟡 Em andamento | `██░░░░░░░░ 15%` | Tipos e primitivas libnx (console, appletMainLoop, pad/hid determinístico, armGetSystemTick a 19,2 MHz) sobre Bionic/POSIX | Shim de fs/time/sync, entrada real (toque/gamepad), loader ELF/NRO e tradução de svc |
+| **Horizon Static Analysis**<br>`horizon_rt/ (nro_tool.py, probe/)` | 🟡 Em andamento | `███░░░░░░░ 30%` | Leitor de NRO (segmentos, MOD0, .dynamic, RELA/RELR) com inventário de svc e leituras de registradores de sistema; sonda empírica do ambiente EL0 do A56 | Mapa dos svc do Horizon para chamadas Bionic/POSIX e inventário de NROs maiores |
 
 ## 🗺️ Roadmap de subsistemas
 
@@ -48,7 +49,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 |:---:|---|---|---|
 | **1** | Lifter NEON Aritmético | ✅ Concluído | `██████████ 100%` |
 | **2** | Memória, Arrays e Ponteiros | ✅ Concluído | `██████████ 100%` |
-| **3** | Loader ELF e Tradução de ABI / Syscalls | 🟡 Em andamento | `██░░░░░░░░ 15%` |
+| **3** | Loader ELF e Tradução de ABI / Syscalls | 🟡 Em andamento | `███░░░░░░░ 30%` |
 | **4** | Subsistema de Áudio, Threads e Vulkan Mobile | ⚪ Planejado | `░░░░░░░░░░ 0%` |
 
 <details>
@@ -83,11 +84,14 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 </details>
 
 <details open>
-<summary><b>Fase 3 — Loader ELF e Tradução de ABI / Syscalls</b> (2/7)</summary>
+<summary><b>Fase 3 — Loader ELF e Tradução de ABI / Syscalls</b> (6/10)</summary>
 
 - [x] Shim HLE de primitivas libnx (console, applet, pad, timer) — switch_hle_shim.h
 - [x] Homebrew estilo libnx compilado do fonte e validado no A56 (switch_particle_bench)
-- [ ] Loader ELF/NSO/NRO (segmentos, MOD0, relocações)
+- [x] Leitor NRO: NRO0, segmentos, MOD0, .dynamic, relocations RELA/RELR (nro_tool.py)
+- [x] Inventário de sítios svc / mrs tpidrro_el0 / cntpct_el0 conferido contra o ELF original
+- [x] Sonda do ambiente no A56 (registradores de sistema em EL0, x18, preservação de registradores)
+- [x] Homebrew mínimo de teste (devkitPro + libnx) com oráculo pelo switch_hle_shim.h
 - [ ] Mapa de svc do Horizon → chamadas Bionic/POSIX
 - [ ] Shim de libnx completo (fs, hid real, time, sync)
 - [ ] TLS (tpidrro_el0) / registrador x18 e convenções de ABI
@@ -292,6 +296,26 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | ⬜ | `mrs tpidrro_el0 (TLS)` | sistema | planejado — Fase 3 |
 | ⬜ | `ldxr / stxr / ldaxr / stlxr` | atômico | planejado — Fase 4 |
 
+## 🔬 Ambiente de execução no A56 (sonda empírica)
+
+Galaxy A56 (SM-A566E), processo de shell via ADB · 2026-10-15 · `horizon_rt/probe/ (probe.c + probe_guest.S)`
+
+| Item | Medido | O que significa |
+|---|---|---|
+| `tpidrro_el0` | 0 | TLS do Horizon não existe no Android: toda leitura precisa de tratamento |
+| `tpidr_el0` | ponteiro do bionic | TLS do próprio Android; não pode ser reaproveitado |
+| `cntpct_el0` | SIGILL | Leitura usada por armGetSystemTick() na libnx; no A56 o equivalente é cntvct_el0 |
+| `cntvct_el0` | legível em EL0 | Fonte de tempo disponível |
+| `cntfrq_el0` | 0x186a000 = 25,6 MHz | Switch: 19,2 MHz; ticks precisam de escala ×0,75 |
+| `x18` | ≠ 0 | Shadow Call Stack do bionic: x18 do host precisa ser preservado ao entrar em C |
+| `Preservação de registradores` | x1–x29, x18 e NZCV preservados | Medido com sentinelas antes/depois de uma chamada ao handler em C |
+
+**Inventário estático de `hb_compute.nro`** (94.208 bytes (imagem 0x18000)) com `nro_tool.py`:
+
+- Relocations: 337 RELATIVE (RELR, todas em .data)
+- Sítios: 12 svc (0x1, 0x2, 0x3, 0x5, 0x6, 0x7, 0x1a, 0x1b, 0x26, 0x27, 0x28, 0x29), 7 mrs tpidrro_el0, 2 mrs cntpct_el0
+- Conferência: 21/21 sítios conferidos contra o disassembly do hb_compute.elf
+
 ## 🛠️ Toolchain
 
 | Ferramenta | Versão | Papel |
@@ -302,6 +326,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | qwen2.5-coder:7b | 7.6B · Q4_K_M (GGUF) | 5,38 GB; 4,09 GB (~76%) em VRAM na RTX 4050 Laptop (6 GB), resto em CPU |
 | Galaxy A56 | SM-A566E | 4×1,95 GHz + 3×2,6 GHz + 1×2,91 GHz |
 | llvm-mingw | 20260922 (clang 23.1.2, UCRT x86_64) | Clang nativo do Windows para o gate no host (../tools/, SHA-256 conferido) |
+| devkitPro | devkitA64 16.1.0 (GCC) + libnx 2.10.0 | Gera homebrews de teste (NRO + ELF com símbolos) para a análise da Fase 3 |
 
 ## 📄 Licença
 
