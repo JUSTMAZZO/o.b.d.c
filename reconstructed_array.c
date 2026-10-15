@@ -3,35 +3,36 @@
 #include <stdint.h>
 #include <time.h>
 
-int main(void)
-{
+int main(void) {
+  uint32_t *buf_x19;
+  uint32_t *buf_x20;
+  double d8;
+  uint64_t x21;
+  uint64_t checksum;
+
   puts("[+] Teste NEON Memory/Array iniciado no Android!");
-  int N = 1000000;
-  uint32_t *in_buf = malloc(N * sizeof(uint32_t));
-  uint32_t *out_buf = malloc(N * sizeof(uint32_t));
-  uint64_t checksum = 0;
+  buf_x19 = (uint32_t *)malloc(0x3d0900);
+  buf_x20 = (uint32_t *)malloc(0x3d0900);
 
-  // Loop 1
-  for (int i = 0; i < N; i++) {
-    in_buf[i] = ((i * 7) + 3);
+  // LOOP_NEON_1
+  for (uint32_t i = 0; i < 1000000; i++) {
+    buf_x19[i] = ((i * 7) + 3);
   }
 
-  clock_t start_time = clock();
+  x21 = clock();
+  checksum = 0;
 
-  // Loop 2
-  for (int i = 0; i < N; i++) {
-    uint32_t transformed = ((in_buf[i] << 2) - (in_buf[i] >> 1)) ^ 0x5a;
-    out_buf[i] = transformed;
-    checksum += transformed;
+  // LOOP_NEON_2
+  for (uint32_t i = 0; i < 1000000; i++) {
+    buf_x20[i] = (((buf_x19[i] << 2) - (buf_x19[i] >> 1)) ^ 0x5a);
+    checksum += (((buf_x19[i] << 2) - (buf_x19[i] >> 1)) ^ 0x5a);
   }
 
-  clock_t end_time = clock();
-
+  d8 = ((double)(int64_t)((clock() - x21)) / 1000000.0);
   printf("[+] Checksum: %llu\n", (unsigned long long)checksum);
-  printf("[+] Ultimo elemento: %u\n", out_buf[N - 1]);
-  printf("[+] Tempo decorrido: %.4f s\n", (double)(end_time - start_time) / CLOCKS_PER_SEC);
-
-  free(in_buf);
-  free(out_buf);
+  printf("[+] Ultimo elemento: %u\n", (unsigned int)buf_x20[999999]);
+  printf("[+] Tempo decorrido: %.4f s\n", d8);
+  free(buf_x19);
+  free(buf_x20);
   return 0;
 }

@@ -3,10 +3,10 @@
 Uso:
   python neon_lifter.py ghidra_extraction_switch.json --expected 88196450180 --qwen reconstructed_switch.c
 """
-import argparse, json, re, sys, urllib.request
+import argparse, glob, json, os, re, subprocess, sys, tempfile, urllib.request
 
 import cfg_skeleton
-from collections import Counter
+from collections import Counter, defaultdict
 
 M32, M64 = 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF
 BT3 = chr(96) * 3
@@ -28,6 +28,13 @@ class E:
         if self.op in ('const', 'sym'):
             return set()
         return self.a[0].offsets() | self.a[1].offsets()
+
+    def arrays(self):
+        if self.op == 'mem':
+            return {self.a[0]}
+        if self.op in ('var', 'const', 'sym'):
+            return set()
+        return self.a[0].arrays() | self.a[1].arrays()
 
     def show(self, x='i', relative=False):
         if self.op == 'var':
@@ -147,14 +154,13 @@ def imm(op):
 
 
 # ---------------------------------------------------------------- pre-cabecalho
-def resolve_preheader(preheader, resolved_data, body, is_switch=False):
+def resolve_preheader(preheader, resolved_data, body):
     scal, vec, sym_vecs, notes = {}, {}, {}, []
     sp_q = None
-    malloc_names = ['pos_x', 'vel_x'] if is_switch else ['in_buf', 'out_buf']
-    # x19/x20 guardam os dois buffers do malloc na funcao inteira; loops posteriores
-    # (ex.: mov x9, x19) dependem deles mesmo sem o malloc no proprio pre-cabecalho.
-    ptr_names = {'19': malloc_names[0], '20': malloc_names[1]}
-    malloc_count = 0
+    # Registradores callee-saved (x19..x28) vivem a funcao inteira: um buffer guardado neles
+    # (ex.: retorno do malloc) e reaproveitado por loops posteriores via copia (mov x9, x19).
+    # O nome vem do registrador; o LLM nao renomeia, porque as formulas servem de ancora.
+    ptr_names = {str(n): f"buf_x{n}" for n in range(19, 29)}
 
     for line in preheader:
         addr, mn, ops = parse(line)
@@ -168,13 +174,9 @@ def resolve_preheader(preheader, resolved_data, body, is_switch=False):
             elif src.startswith('#') or src.startswith('0x') or src.isdigit():
                 scal[dst] = imm(src)
                 notes.append(f"{line}  =>  {ops[0]} = {scal[dst]:#x}")
-            elif src == 'x0':
-                if dst in ('19', '20') and malloc_count < 2:
-                    name = malloc_names[min(malloc_count, 1)]
-                    malloc_count += 1
-                    ptr_names[dst] = name
-                    scal[dst] = 0
-                    notes.append(f"{line}  =>  x{dst} = ponteiro `{name}`")
+            elif src == 'x0' and dst in ptr_names:
+                scal[dst] = 0
+                notes.append(f"{line}  =>  x{dst} = ponteiro `{ptr_names[dst]}` (retorno de chamada)")
             elif src[1:] in ptr_names:
                 ptr_names[dst] = ptr_names[src[1:]]
                 scal[dst] = 0
@@ -294,7 +296,9 @@ def step(body, vec, scal, sem, ptr_names=None, sym_mode=False, contrib=None, sto
         elif mn == 'stp' and ops[0][0].lower() == 'q':
             v1, v2 = qreg(ops[0]), qreg(ops[1])
             base_reg = ops[2].strip('[]')[1:]
-            arr_name, _, byte_off = addr_map.get(base_reg, ('out_buf', '8', 0))
+            if base_reg not in addr_map:
+                raise LiftError(f"stp com base de endereco desconhecida: {line}")
+            arr_name, _, byte_off = addr_map[base_reg]
             elem_off = byte_off // 4
             if sym_mode and stores is not None:
                 for k, val in enumerate(vec[v1] + vec[v2]):
@@ -316,9 +320,9 @@ def step(body, vec, scal, sem, ptr_names=None, sym_mode=False, contrib=None, sto
     return branch
 
 
-def lift_single_loop(loop, resolved_data, idx, is_switch=False):
+def lift_single_loop(loop, resolved_data, idx):
     body = loop['body']
-    scal, vec, ptr_names, sym_vecs, notes = resolve_preheader(loop['preheader'], resolved_data, body, is_switch)
+    scal, vec, ptr_names, sym_vecs, notes = resolve_preheader(loop['preheader'], resolved_data, body)
 
     svec = {}
     for n, v in vec.items():
@@ -380,63 +384,51 @@ def lift_single_loop(loop, resolved_data, idx, is_switch=False):
         acc_str, uses = next(iter(templates.items()))
         acc_tmpl = uses[0][3]
 
-    return dict(idx=idx, start=loop['start'], end=loop['end'], notes=notes, ind=ind, i0=i0, stride=stride, trips=trips, total=total,
+    arrays = {arr for arr, _, _ in store_list}
+    for _, tmpl, _ in store_list:
+        arrays |= tmpl.arrays()
+    if acc_tmpl is not None:
+        arrays |= acc_tmpl.arrays()
+
+    return dict(idx=idx, start=loop['start'], end=loop['end'], arrays=arrays,
+                notes=notes, ind=ind, i0=i0, stride=stride, trips=trips, total=total,
                 stores=store_list, tmpl=acc_tmpl, tmpl_str=acc_str, uses=uses,
                 accs=sorted({u[0] for u in uses}), scal=scal, vec=vec, ptr_names=ptr_names,
                 sym_vecs=sym_vecs, body=body)
 
 
-def validate_all(loops, is_switch=False, trips_check=500):
-    n_check = trips_check * loops[0]['stride']
-    buf_names = ['pos_x', 'vel_x'] if is_switch else ['in_buf', 'out_buf']
-    mem_c = {k: [0] * n_check for k in buf_names}
-    mem_s = {k: [0] * n_check for k in buf_names}
-
+def validate_all(loops, trips_check=500):
+    """Por loop, na mesma memoria compartilhada: execucao concreta das instrucoes NEON x formulas
+    simbolicas. Devolve [(loop, o que foi comparado, concreto, simbolico)]. O valor do programa
+    inteiro (frames, chamadas, printf) vem da execucao do C de referencia no host."""
+    n_check = min(trips_check * max(L['stride'] for L in loops), min(L['total'] for L in loops))
+    mem_c = defaultdict(lambda: [0] * n_check)
+    mem_s = defaultdict(lambda: [0] * n_check)
+    results = []
     for L in loops:
-        t_loops = (trips_check * 2) if (is_switch and L['stride'] == 4) else trips_check
         vec = {n: list(v['lanes']) for n, v in L['vec'].items()}
         scal = dict(L['scal'])
-        for _ in range(t_loops):
+        for _ in range(n_check // L['stride']):
             step(L['body'], vec, scal, CON, ptr_names=L['ptr_names'], sym_mode=False, mem_bufs=mem_c)
 
+        load = lambda a, idx: mem_s[a][idx]
         sym_acc = 0
         for i in range(n_check):
+            x = i + L['i0']
             # todas as formulas leem os valores carregados no inicio da volta (ldr q antes de str q)
-            new_vals = [(arr, tmpl.eval(i, lambda a, idx: mem_s[a][idx], {'boost': 1})) for arr, tmpl, _ in L['stores']]
+            new_vals = [(arr, tmpl.eval(x, load)) for arr, tmpl, _ in L['stores']]
             for arr, v in new_vals:
                 mem_s[arr][i] = v
-            if L['tmpl']:
-                sym_acc = (sym_acc + L['tmpl'].eval(i, lambda a, idx: mem_s[a][idx], {'boost': 1})) & M64
+            if L['tmpl'] is not None:
+                sym_acc = (sym_acc + L['tmpl'].eval(x, load)) & M64
+        for arr in sorted({a for a, _, _ in L['stores']}):
+            # soma so para exibir; o veredito compara o array inteiro
+            results.append((L['idx'], f"memoria {arr}[0..{n_check - 1}] (soma)", sum(mem_c[arr]), sum(mem_s[arr]),
+                            mem_c[arr] == mem_s[arr]))
         if L['accs']:
             con_acc = sum(sum(vec[a]) for a in L['accs']) & M64
-
-    # Calculo completo sobre N elementos
-    total_n = loops[-1]['total']
-    if is_switch:
-        # Validacao rapida de equivalencia + execucao de todos os 60 frames sobre N=100.000
-        pos_x = [loops[0]['stores'][0][1].eval(i) for i in range(total_n)]
-        vel_x = [loops[0]['stores'][1][1].eval(i) for i in range(total_n)]
-        vel_tmpl = next(t for a, t, _ in loops[1]['stores'] if a == 'vel_x')
-        pos_tmpl = next(t for a, t, _ in loops[1]['stores'] if a == 'pos_x')
-        for frame in range(1, 61):
-            b_val = 65 if frame == 30 else 1
-            env = {'boost': b_val}
-            load = lambda a, idx: vel_x[idx] if a == 'vel_x' else pos_x[idx]
-            for i in range(total_n):
-                nv = vel_tmpl.eval(i, load, env)
-                np = pos_tmpl.eval(i, load, env)
-                vel_x[i], pos_x[i] = nv, np
-        full_acc = sum(pos_x) & M64
-    elif loops[0]['stores']:
-        full_acc = 0
-        for i in range(total_n):
-            in_val = loops[0]['stores'][0][1].eval(i)
-            elem = loops[-1]['tmpl'].eval(i, lambda a, idx: in_val)
-            full_acc = (full_acc + elem) & M64
-    else:
-        full_acc = sum(loops[0]['tmpl'].eval(i) for i in range(loops[0]['i0'], loops[0]['i0'] + total_n)) & M64
-
-    return con_acc, sym_acc, full_acc
+            results.append((L['idx'], f"acumulador ({n_check} elementos)", con_acc, sym_acc, con_acc == sym_acc))
+    return results
 
 
 def sequential_stores(stores):
@@ -512,16 +504,25 @@ def check_placement(skel, code, loops):
         if L['tmpl']:
             anchors.append(f"checksum+={L['tmpl_str']}")
         hits = [flat.find(squash(a)) for a in anchors]
-        if any(h < 0 for h in hits):
-            problems.append(f"LOOP_NEON_{L['idx']}: formula do lifter ausente ou alterada")
-            continue
-        got = brace_depth(flat, min(hits)) - 1  # descontar a chave do proprio for
+        if all(h >= 0 for h in hits):
+            pos = min(hits)
+            got = brace_depth(flat, pos) - 1  # descontar a chave do proprio for
+        else:
+            # formula reescrita (ex.: temporario compartilhado): localiza pelo k-esimo `for`; a
+            # equivalencia da formula fica com o gate do host, que compara a saida impressa
+            order = [int(n) for n in re.findall(r'<LOOP_NEON_(\d+)>', skel)].index(L['idx'])
+            fors = [m.start() for m in re.finditer(r'(?<![A-Za-z_0-9])for\(', flat)]
+            if order >= len(fors):
+                problems.append(f"LOOP_NEON_{L['idx']}: loop ausente no codigo gerado")
+                continue
+            pos = fors[order]
+            got = brace_depth(flat, pos)
         if got != want:
             problems.append(f"LOOP_NEON_{L['idx']} esta em profundidade {got}, mas o placeholder esta em {want} "
                             f"(o loop foi movido para {'dentro' if got > want else 'fora'} de um bloco)")
         # chamadas antes do loop: mesmas, e na mesma quantidade, que antes do placeholder
         ph_pos = squash(skel).find(squash(f"/* <LOOP_NEON_{L['idx']}> */"))
-        want_calls, got_calls = calls_before(squash(skel), ph_pos), calls_before(flat, min(hits))
+        want_calls, got_calls = calls_before(squash(skel), ph_pos), calls_before(flat, pos)
         if want_calls != got_calls:
             moved = sorted(set(want_calls.elements()) ^ set(got_calls.elements()))
             problems.append(f"LOOP_NEON_{L['idx']} mudou de posicao em relacao as chamadas {moved}: "
@@ -569,7 +570,73 @@ def qwen_chat(messages):
     return content, (m.group(1).strip() + '\n' if m else content)
 
 
-def ask_qwen(summ, skel, out, loops, retries=1):
+# ---------------------------------------------------------------- gate no host (antes do ADB)
+HERE = os.path.dirname(os.path.abspath(__file__))
+TIMING = re.compile(r'^-?[\d.,]+\s*(ms|s|us|ns)$')
+
+
+def host_cc():
+    """Clang nativo do host: $OBDC_HOST_CC ou o llvm-mingw em ../tools/."""
+    env = os.environ.get('OBDC_HOST_CC')
+    if env:
+        return env
+    found = sorted(glob.glob(os.path.join(HERE, '..', 'tools', 'llvm-mingw-*', 'bin', 'clang.exe')))
+    return found[-1] if found else None
+
+
+def host_run(c_path):
+    """Compila e executa o C no host. Devolve (saida [(rotulo, valor)] sem tempos, erro ou None)."""
+    cc = host_cc()
+    if cc is None:
+        return None, "compilador do host nao encontrado (defina OBDC_HOST_CC ou instale llvm-mingw em ../tools/)"
+    exe = os.path.abspath(os.path.splitext(c_path)[0] + '_host.exe')
+    # objetos de pilha ainda sem tipo (uint8_t[] passado como PadState *): erro no clang 23, aviso no NDK
+    comp = subprocess.run([cc, '-O2', '-w', '-Wno-error=incompatible-pointer-types', '-I', HERE, c_path, '-o', exe, '-lpthread'],
+                          capture_output=True, text=True)
+    if comp.returncode != 0:
+        errs = [l for l in comp.stderr.splitlines() if 'error' in l][:5]
+        return None, "nao compila no host:\n    " + "\n    ".join(errs or comp.stderr.splitlines()[:5])
+    try:
+        run = subprocess.run([exe], capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        return None, "execucao no host passou de 120 s"
+    if run.returncode != 0:
+        return None, f"execucao no host terminou com codigo {run.returncode}"
+    values = []
+    for line in run.stdout.splitlines():
+        m = re.match(r'^\[\+\]\s*(.+?):\s*(.+?)\s*$', line)
+        if m and not TIMING.match(m.group(2)):
+            values.append((m.group(1), m.group(2)))
+    return values, None
+
+
+def output_diff(ref, got):
+    """Linhas `- ref` / `+ gerado` para os valores impressos que divergem."""
+    diff = []
+    for k in range(max(len(ref), len(got))):
+        r = ref[k] if k < len(ref) else None
+        g = got[k] if k < len(got) else None
+        if r != g:
+            if r:
+                diff.append(f"- {r[0]}: {r[1]}   (referencia)")
+            if g:
+                diff.append(f"+ {g[0]}: {g[1]}   (gerado)")
+    return diff
+
+
+def host_gate(code, ref_values, out):
+    """Compila e roda o C gerado no host e compara a saida com a do C de referencia."""
+    path = os.path.join(tempfile.gettempdir(), os.path.splitext(os.path.basename(out))[0] + '_gate.c')
+    with open(path, 'w', encoding='utf-8', newline='\n') as f:
+        f.write(code)
+    got, err = host_run(path)
+    if err:
+        return [err], []
+    diff = output_diff(ref_values, got)
+    return (["a saida difere da referencia do lifter:\n    " + "\n    ".join(diff)] if diff else []), got
+
+
+def ask_qwen(summ, skel, out, loops, ref_values=None, retries=1):
     prompt = (
         "Um lifter simbolico deterministico analisou os loops vetorizados (NEON) da funcao `main` de um binario AArch64. "
         "Use as formulas abaixo como verdade absoluta:\n\n"
@@ -585,68 +652,88 @@ def ask_qwen(summ, skel, out, loops, retries=1):
         "2. Mantenha todas as chamadas de funcao do esqueleto, com os mesmos argumentos e na mesma ordem.\n"
         "3. O esqueleto foi gerado do CFG: variaveis com nome de registrador (`w21`, `x23`, `p0`...) e objetos de "
         "pilha (`sp_0x10`) devem ganhar nomes e tipos semanticos coerentes com as funcoes chamadas, "
-        "sem mudar o comportamento.\n"
+        "sem mudar o comportamento. Os buffers `buf_xNN` aparecem nas formulas: mantenha esses nomes.\n"
         f"4. Responda apenas com o bloco {BT3}c contendo o codigo final compilavel."
     )
     messages = [{"role": "user", "content": prompt}]
     for attempt in range(retries + 1):
         content, code = qwen_chat(messages)
         problems = check_placement(skel, code, loops)
+        if problems:
+            print("[qwen] estrutura divergente do esqueleto:\n  - " + "\n  - ".join(problems))
+        elif ref_values is not None:
+            problems, got = host_gate(code, ref_values, out)
+            if problems:
+                print("[gate host] REPROVADO - nao envie ao aparelho:\n  - " + "\n  - ".join(problems))
+            else:
+                print(f"[gate host] OK: {len(got)} valores impressos identicos a referencia "
+                      f"({', '.join(f'{k}={v}' for k, v in got)})")
         if not problems:
             break
-        print("[qwen] estrutura divergente do esqueleto:\n  - " + "\n  - ".join(problems))
         messages += [{"role": "assistant", "content": content},
-                     {"role": "user", "content": "O codigo nao respeita o esqueleto:\n- " + "\n- ".join(problems) +
+                     {"role": "user", "content": "O codigo esta errado:\n- " + "\n- ".join(problems) +
                       f"\nCorrija e responda apenas com o bloco {BT3}c completo."}]
-    with open(out, 'w', encoding='utf-8') as f:
+    with open(out, 'w', encoding='utf-8', newline='\n') as f:
         f.write(code)
     if problems:
-        sys.exit(f"[qwen] estrutura ainda divergente apos {retries + 1} tentativas; codigo salvo em {out} para inspecao")
-    print(f"[qwen] estrutura conferida com o esqueleto -> {out}")
+        sys.exit(f"[qwen] codigo ainda reprovado apos {retries + 1} tentativas; salvo em {out} para inspecao")
+    print(f"[qwen] estrutura e saida conferidas -> {out}")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('json')
-    ap.add_argument('--expected', type=int, help='resultado observado no aparelho')
-    ap.add_argument('--qwen', metavar='OUT', help='envia ao Qwen e grava o codigo C em OUT')
+    ap.add_argument('--expected', type=int, help='checksum observado no aparelho (conferido contra o C de referencia)')
+    ap.add_argument('--qwen', metavar='OUT', help='envia ao Qwen e grava o codigo C em OUT (com gate no host)')
     ap.add_argument('--emit-c', metavar='OUT', help='grava o C de referencia: esqueleto do CFG + loops do lifter, sem LLM')
-    ap.add_argument('--skip-validation', action='store_true', help='pula a validacao deterministica (lenta no caso Switch)')
     args = ap.parse_args()
 
     with open(args.json, encoding='utf-8') as f:
         data = json.load(f)
-    is_switch = 'switch' in data.get('binary_name', '').lower()
     fn = next(x for x in data['functions'] if x['name'] == 'main')
 
     # Filtra apenas loops folha NEON (ignora loops de controle que contem chamadas 'bl ')
     neon_loops = [lp for lp in fn['loops'] if not any(': bl ' in insn for insn in lp['body'])]
 
-    loops = [lift_single_loop(lp, fn['resolved_data'], i + 1, is_switch) for i, lp in enumerate(neon_loops)]
+    loops = [lift_single_loop(lp, fn['resolved_data'], i + 1) for i, lp in enumerate(neon_loops)]
     summ = summary_all(loops)
     print(summ)
 
-    if not args.skip_validation:
-        concrete, symbolic, full = validate_all(loops, is_switch)
-        print("\n## Validacao Deterministica")
-        print(f"- Execucao concreta NEON (500 voltas): {concrete}")
-        print(f"- Formula simbolica nos mesmos i:      {symbolic}  -> {'OK' if concrete == symbolic else 'DIVERGE'}")
-        print(f"- Checksum total ({loops[-1]['total']} elementos):   {full}"
-              + (f"  -> aparelho {args.expected}: {'OK' if full == args.expected else 'DIVERGE'}" if args.expected else ''))
-        if concrete != symbolic or (args.expected and full != args.expected):
-            sys.exit("[lifter] validacao falhou; abortando.")
+    print("\n## Validacao Deterministica (por loop: instrucoes NEON x formulas)")
+    results = validate_all(loops)
+    for idx, what, con, sym, ok in results:
+        print(f"- Loop {idx}, {what}: concreto {con} / simbolico {sym}  -> {'OK' if ok else 'DIVERGE'}")
+    if not all(r[4] for r in results):
+        sys.exit("[lifter] validacao por loop falhou; abortando.")
 
     try:
         skel = cfg_skeleton.build(fn, data, loops)
     except cfg_skeleton.SkeletonError as e:
         sys.exit(f"[esqueleto] {e}")
     print("\n## Esqueleto do CFG\n" + skel)
-    if args.emit_c:
-        with open(args.emit_c, 'w', encoding='utf-8', newline='\n') as f:
-            f.write(fill_loops(skel, loops) + '\n')
-        print(f"\n[lifter] C de referencia (sem LLM) -> {args.emit_c}")
+
+    # C de referencia (sem LLM) executado no host: valor do programa inteiro
+    base = os.path.splitext(os.path.basename(args.json))[0]
+    ref_path = args.emit_c or os.path.join(tempfile.gettempdir(), f"{base}_ref.c")
+    with open(ref_path, 'w', encoding='utf-8', newline='\n') as f:
+        f.write(fill_loops(skel, loops) + '\n')
+    print(f"\n## C de referencia (esqueleto do CFG + loops do lifter, sem LLM) -> {ref_path}")
+    ref_values, err = host_run(ref_path)
+    if err:
+        print(f"- [host] {err}; gate desativado")
+        if args.expected:
+            sys.exit("[lifter] sem execucao no host nao da para conferir --expected; abortando.")
+    else:
+        for k, v in ref_values:
+            print(f"- [host] {k}: {v}")
+        if args.expected is not None:
+            hit = any(v == str(args.expected) for _, v in ref_values)
+            print(f"- aparelho {args.expected}: {'OK' if hit else 'DIVERGE'}")
+            if not hit:
+                sys.exit("[lifter] o C de referencia nao reproduz o valor do aparelho; abortando.")
+
     if args.qwen:
-        ask_qwen(summ, skel, args.qwen, loops)
+        ask_qwen(summ, skel, args.qwen, loops, ref_values)
 
 
 if __name__ == '__main__':

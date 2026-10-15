@@ -4,9 +4,9 @@
 #include "switch_hle_shim.h"
 
 int main(void) {
+  uint32_t *buf_x19;
+  uint32_t *buf_x20;
   void *p0;
-  uint32_t *pos_x;
-  uint32_t *vel_x;
   uint32_t w21;
   uint32_t w22;
   uint64_t x21;
@@ -21,20 +21,20 @@ int main(void) {
   padConfigureInput(1, 31);
   padInitializeDefault(sp_0x10);
   puts("[+] Switch Particle Bench (libnx HLE shim) iniciado no Android!");
-  pos_x = (uint32_t *)malloc(400000);
+  buf_x19 = (uint32_t *)malloc(400000);
   p0 = malloc(400000);
-  if (pos_x == 0) {
+  if (buf_x19 == 0) {
     return w21;
   }
-  vel_x = (uint32_t *)p0;
+  buf_x20 = (uint32_t *)p0;
   if (p0 == 0) {
     return w21;
   }
 
   // LOOP_NEON_1
   for (uint32_t i = 0; i < 100000; i++) {
-    pos_x[i] = (i * 3);
-    vel_x[i] = (i & 0xff);
+    buf_x19[i] = (i * 3);
+    buf_x20[i] = (i & 0xff);
   }
 
   x21 = armGetSystemTick();
@@ -46,8 +46,8 @@ int main(void) {
 
     // LOOP_NEON_2
     for (uint32_t i = 0; i < 100000; i++) {
-      vel_x[i] = (((vel_x[i] + boost) & 0xffff) ^ (i >> 2));
-      pos_x[i] = ((pos_x[i] - (vel_x[i] >> 3)) + (vel_x[i] << 1));
+      buf_x20[i] = (((buf_x20[i] + boost) & 0xffff) ^ (i >> 2));
+      buf_x19[i] = ((buf_x19[i] - (buf_x20[i] >> 3)) + (buf_x20[i] << 1));
     }
 
     w22 = (w22 + 1);
@@ -60,15 +60,15 @@ int main(void) {
 
   // LOOP_NEON_3
   for (uint32_t i = 0; i < 100000; i++) {
-    checksum += pos_x[i];
+    checksum += buf_x19[i];
   }
 
   printf("[+] Frames: %u\n", (unsigned int)w22);
   printf("[+] Checksum: %llu\n", (unsigned long long)checksum);
-  printf("[+] Ultima particula: %u\n", (unsigned int)pos_x[99999]);
+  printf("[+] Ultima particula: %u\n", (unsigned int)buf_x19[99999]);
   printf("[+] Tempo (60 frames): %.4f ms\n", ((double)(uint64_t)(armTicksToNs((x23_2 - x21))) / 1000000.0));
-  free(pos_x);
-  free(vel_x);
+  free(buf_x19);
+  free(buf_x20);
   consoleExit(0);
   w21 = 0;
   return w21;

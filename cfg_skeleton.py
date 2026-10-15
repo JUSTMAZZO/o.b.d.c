@@ -371,10 +371,8 @@ def collapse_neon(blocks, by_addr, loops, calls):
             raise SkeletonError(f"loop NEON {L['idx']} nao ocupa exatamente um bloco basico")
         p = Insn(b.insns[0].idx, b.insns[0].line)
         p.kind, p.loop, p.block = 'pseudo', L, b
-        # buffers que o loop realmente le/escreve (direto ou via copia no pre-cabecalho, ex.: mov x9, x19)
-        touched = {reg(o)[0] for line in L['body'] for o in parse(line)[2]} - {None}
-        names = {v for k, v in L['ptr_names'].items() if f'x{k}' in touched}
-        p.uses = sorted(f'x{k}' for k, v in L['ptr_names'].items() if int(k) >= 19 and v in names)
+        # buffers que o loop realmente le/escreve (o lifter registra em L['arrays'])
+        p.uses = sorted(f'x{k}' for k, v in L['ptr_names'].items() if int(k) >= 19 and v in L['arrays'])
         accs = {a for a in L['accs']}
         p.defs = sorted(accs | (loop_clobbers(L['body']) - accs))
         p.accs = accs
