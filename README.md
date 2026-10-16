@@ -5,9 +5,9 @@
 
 ### Recompilação estática AArch64 → AArch64: binários de Nintendo Switch rodando nativamente no Android
 
-![Endgame](https://img.shields.io/badge/Endgame-65%25-orange?style=for-the-badge) ![Fase atual](https://img.shields.io/badge/Fase%20atual-3%20%E2%80%93%20Em%20andamento-yellow?style=for-the-badge) ![ISA](https://img.shields.io/badge/ISA-AArch64%20%E2%86%92%20AArch64-informational?style=for-the-badge&logo=arm&logoColor=white) ![Alvo](https://img.shields.io/badge/Alvo-Galaxy%20A56%20%C2%B7%20Exynos%201580-1428A0?style=for-the-badge&logo=samsung&logoColor=white)
+![Endgame](https://img.shields.io/badge/Endgame-68%25-orange?style=for-the-badge) ![Fase atual](https://img.shields.io/badge/Fase%20atual-3%20%E2%80%93%20Em%20andamento-yellow?style=for-the-badge) ![ISA](https://img.shields.io/badge/ISA-AArch64%20%E2%86%92%20AArch64-informational?style=for-the-badge&logo=arm&logoColor=white) ![Alvo](https://img.shields.io/badge/Alvo-Galaxy%20A56%20%C2%B7%20Exynos%201580-1428A0?style=for-the-badge&logo=samsung&logoColor=white)
 
-![Validação](https://img.shields.io/badge/Valida%C3%A7%C3%A3o-38%2F38%20OK-brightgreen?style=for-the-badge) ![Benchmarks](https://img.shields.io/badge/Benchmarks-6%20no%20A56-teal?style=for-the-badge&logo=android&logoColor=white) ![Instruções](https://img.shields.io/badge/Instru%C3%A7%C3%B5es-24%20suportadas-blueviolet?style=for-the-badge) ![LLM](https://img.shields.io/badge/LLM-qwen2.5--coder%207b-black?style=for-the-badge&logo=ollama&logoColor=white) ![Atualizado](https://img.shields.io/badge/Atualizado-2026--10--16-lightgrey?style=for-the-badge) [![Licença](https://img.shields.io/badge/Licen%C3%A7a-MIT-green?style=for-the-badge)](LICENSE)
+![Validação](https://img.shields.io/badge/Valida%C3%A7%C3%A3o-42%2F42%20OK-brightgreen?style=for-the-badge) ![Benchmarks](https://img.shields.io/badge/Benchmarks-7%20no%20A56-teal?style=for-the-badge&logo=android&logoColor=white) ![Instruções](https://img.shields.io/badge/Instru%C3%A7%C3%B5es-24%20suportadas-blueviolet?style=for-the-badge) ![LLM](https://img.shields.io/badge/LLM-qwen2.5--coder%207b-black?style=for-the-badge&logo=ollama&logoColor=white) ![Atualizado](https://img.shields.io/badge/Atualizado-2026--10--16-lightgrey?style=for-the-badge) [![Licença](https://img.shields.io/badge/Licen%C3%A7a-MIT-green?style=for-the-badge)](LICENSE)
 
 </div>
 
@@ -30,7 +30,7 @@ Switch ELF/NSO ──► Ghidra (ASM + CFG + .rodata) ──► Lifter simbólic
 Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── shim ABI/svc ◄──┘
 ```
 
-## 📈 Progresso até o Endgame: `█████████████░░░░░░░ 65%`
+## 📈 Progresso até o Endgame: `██████████████░░░░░░ 68%`
 
 ## 🧩 Módulos atuais
 
@@ -38,10 +38,10 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 |---|---|---|---|---|
 | **Ghidra Extractor**<br>`ExtractMain.java` | ✅ Concluído | `████████░░ 80%` | C descompilado + ASM AArch64 + .rodata + isolamento de loops + nomes dos alvos de bl e strings carregadas (formatos de printf) | Tipos de ponteiro/structs, várias funções além do main |
 | **NEON Symbolic Lifter**<br>`neon_lifter.py` | 🟡 Em andamento | `█████████░ 88%` | Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG | if/else e switch no estruturador, várias funções com loops, ld3/ld4 com binário real |
-| **Local LLM Qwen 2.5 7B**<br>`qwen2.5-coder:7b (Ollama, CUDA parcial)` | 🟡 Em andamento | `████████░░ 75%` | Gera C a partir do resumo do lifter + esqueleto do CFG; antes do ADB passa por checagem de estrutura (profundidade e ordem das chamadas) e pelo gate no host, que compila, executa e compara a saída com o C de referência, com 1 nova tentativa guiada pelo diff | No hb_compute (GCC) o Qwen tira o segundo armGetSystemTick e o loop de física de dentro do for (;;) mesmo com dicas e nova tentativa; a checagem barra, o C de referência segue validado |
+| **Local LLM Qwen 2.5 7B**<br>`qwen2.5-coder:7b (Ollama, CUDA parcial)` | 🟡 Em andamento | `████████░░ 80%` | Gera C a partir do resumo do lifter + esqueleto do CFG; checagem de estrutura e gate no host antes do ADB, com 1 nova tentativa guiada. Se o Qwen esgota as tentativas (ou o Ollama falha), o pipeline usa o C de referência determinístico e registra o motivo em <saida>.pipeline.json | Fazer o Qwen respeitar for (;;) com break do GCC e renomear variáveis de registrador |
 | **Android AArch64 Runner**<br>`Galaxy A56 via ADB` | 🟡 Em andamento | `████░░░░░░ 45%` | push + chmod + execução em /data/local/tmp, medições intercaladas (15×) | Script único de round-trip (compilar → push → rodar → comparar), afinidade de núcleo (taskset) |
-| **Switch HLE Shim**<br>`switch_hle_shim.h` | 🟡 Em andamento | `█████░░░░░ 50%` | Primitivas libnx (console, applet, pad, timer), 21 SVCs do kernel (heap, memória, mutex, condvar, threads, sleep, espera, info, debug, exit, break) e a API Thread/Mutex/RMutex/CondVar sobre Bionic/POSIX, com os tipos e resultados da libnx 2.10.0 | Eventos (svcCreateEvent), serviços IPC (sm, fs, hid) e tempo (svcGetSystemTick, time) |
-| **Horizon Static Analysis**<br>`horizon_rt/ (nro_tool.py, probe/)` | 🟡 Em andamento | `██████░░░░ 55%` | Leitor de NRO com inventário de svc/mrs conferido contra o ELF em 2 homebrews (hb_compute: 21 sítios, hb_threads: 36); sonda do ambiente EL0 do A56; tabela de 21 SVCs para Bionic/POSIX | Inventário de NROs maiores (serviços IPC: sm, fs, hid) e SVCs de threads/sincronização |
+| **Switch HLE Shim**<br>`switch_hle_shim.h` | 🟡 Em andamento | `██████░░░░ 55%` | Primitivas libnx, 27 SVCs do kernel (21 implementados sobre Bionic/POSIX e 6 de IPC/memória compartilhada como dummies), API Thread/Mutex/RMutex/CondVar e inicialização de sm/applet/hid/fs dummy, com os tipos e resultados da libnx 2.10.0 | Emular as respostas IPC (CMIF) de sm, hid e fs no buffer da TLS em vez de dummies |
+| **Horizon Static Analysis**<br>`horizon_rt/ (nro_tool.py, probe/)` | 🟡 Em andamento | `██████░░░░ 65%` | Leitor de NRO com inventário de svc/mrs conferido contra o ELF em 3 homebrews (hb_compute: 21 sítios, hb_threads: 36, hb_services: 110); quem chama cada SVC de IPC, porta sm: e nomes de serviço no binário; tabela de 27 SVCs | Decodificar as mensagens CMIF (comandos por serviço) a partir das chamadas a serviceDispatch |
 
 ## 🗺️ Roadmap de subsistemas
 
@@ -49,7 +49,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 |:---:|---|---|---|
 | **1** | Lifter NEON Aritmético | ✅ Concluído | `██████████ 100%` |
 | **2** | Memória, Arrays e Ponteiros | ✅ Concluído | `██████████ 100%` |
-| **3** | Loader ELF e Tradução de ABI / Syscalls | 🟡 Em andamento | `██████░░░░ 60%` |
+| **3** | Loader ELF e Tradução de ABI / Syscalls | 🟡 Em andamento | `███████░░░ 70%` |
 | **4** | Subsistema de Áudio, Threads e Vulkan Mobile | ⚪ Planejado | `░░░░░░░░░░ 0%` |
 
 <details>
@@ -84,7 +84,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 </details>
 
 <details open>
-<summary><b>Fase 3 — Loader ELF e Tradução de ABI / Syscalls</b> (11/14)</summary>
+<summary><b>Fase 3 — Loader ELF e Tradução de ABI / Syscalls</b> (13/16)</summary>
 
 - [x] Shim HLE de primitivas libnx (console, applet, pad, timer) — switch_hle_shim.h
 - [x] Homebrew estilo libnx compilado do fonte e validado no A56 (switch_particle_bench)
@@ -97,6 +97,8 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 - [x] C reconstruído do hb_compute.elf (devkitA64/GCC) pelo pipeline: lifter + esqueleto do CFG, validado no host e no A56
 - [x] Threads, sleep e sincronização da libnx no shim (9 SVCs + Thread/Mutex/RMutex/CondVar), svc_shim_test 46/46 no A56
 - [x] Homebrew multi-thread hb_threads (devkitA64) inventariado e com oráculo no A56 em 1 e 4 núcleos
+- [x] Fallback determinístico no pipeline: Qwen reprovado → C de referência validado no gate (hb_compute)
+- [x] Inventário IPC com hb_services (sm, applet, hid, fs): 6 SVCs de IPC/memória compartilhada mapeados, dummies no shim
 - [ ] Shim de libnx completo (fs, hid real, time, serviços IPC)
 - [ ] TLS (tpidrro_el0) / registrador x18 e convenções de ABI
 - [ ] Primeiro homebrew binário (NRO) traduzido rodando no A56
@@ -122,8 +124,9 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | **`benchmark_array_neon`**<br>Loop duplo com arrays in_buf/out_buf | ldp/stp, shl, ushr, sub, eor, uaddw/uaddw2 | Checksum: `12249998500128`<br>Último elemento: `24500040` | 0.0021 s | — | — | 📱 `reconstructed_array_bin` |
 | **`switch_particle_bench`**<br>Homebrew libnx: física de 100.000 partículas × 60 frames (shim HLE) | ldr q, str q (pós-incremento), dup, add, and, eor, ushr, sub | Checksum: `88196450180`<br>Última partícula: `1734747` | 0.0046 s | — | — | 📱 `reconstructed_switch_bin` |
 | **`switch_aos_bench`**<br>Homebrew libnx: 100.000 partículas como array of structs {x, vx} × 60 frames | ld2 / st2 (com e sem pós-incremento), dup, add, and, eor, ushr, sub, uaddw/uaddw2 + epílogo escalar | Checksum: `88196450180`<br>Última partícula: `1734747` | 0.0074 s | — | — | 📱 `reconstructed_aos.c` |
-| **`hb_compute`**<br>Homebrew mínimo libnx (sem serviços): 100.000 partículas × 60 frames, saída por svcOutputDebugString | ELF do devkitA64 (GCC 16.1.0): str/ldr q [base, índice], dup, eor, and, ushr, loop escalar ldr w pós-incremento, mrs cntpct_el0, ccmp, umulh | Checksum: `88196450180`<br>Última partícula: `1734747` | 0.0043 s | — | — | 📱 `hb_compute_ref.c` |
+| **`hb_compute`**<br>Homebrew mínimo libnx (sem serviços): 100.000 partículas × 60 frames, saída por svcOutputDebugString | ELF do devkitA64 (GCC 16.1.0): str/ldr q [base, índice], dup, eor, and, ushr, loop escalar ldr w pós-incremento, mrs cntpct_el0, ccmp, umulh | Checksum: `88196450180`<br>Última partícula: `1734747` | 0.0043 s | — | — | 📱 `reconstructed_hb_compute.c` |
 | **`hb_threads`**<br>Homebrew libnx multi-thread: 4 threads × 25.000 partículas × 60 frames, Mutex + CondVar + sleep | threadCreate/Start/WaitForExit/Close, mutexLock/Unlock, condvarWait/WakeAll, svcSleepThread (oráculo pelo shim) | Checksum: `88196450180`<br>Última partícula: `1734747`<br>Threads: `4` | 0.0061 s | — | — | 🎮 `hb_threads_oracle` |
+| **`hb_services`**<br>Homebrew libnx com serviços: sm, applet, hid e fs abertos e fechados, 60 frames de padUpdate | smInitialize, appletInitialize, hidInitialize, fsInitialize, padUpdate, appletMainLoop (IPC dummy no shim) | Servicos abertos: `4`<br>Frames: `60`<br>Botoes pressionados: `2` | — | — | — | 🎮 `hb_services_oracle` |
 
 📱 = C reconstruído validado no aparelho · 🎮 = fonte libnx portado via shim HLE e validado · ⏳ = aguardando aparelho · ❌ = diverge
 
@@ -263,13 +266,14 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 
 ### `hb_compute` — Homebrew mínimo libnx (sem serviços): 100.000 partículas × 60 frames, saída por svcOutputDebugString
 
-> 📱 C reconstruído do hb_compute.elf (devkitA64) pelo pipeline: Ghidra extrai main e out(); o lifter eleva os 2 loops NEON e o loop escalar do checksum; o esqueleto do CFG traz out() com chamada de cauda, mrs cntpct_el0 -> armGetSystemTick(), ccmp e a conversão de ticks com umulh. Validado no host e no A56. O Qwen foi reprovado pela checagem de estrutura nas duas tentativas.
+> 📱 C reconstruído do hb_compute.elf (devkitA64) pelo pipeline: Ghidra extrai main e out(); o lifter eleva os 2 loops NEON e o loop escalar; o esqueleto do CFG traz out() com chamada de cauda, mrs cntpct_el0 -> armGetSystemTick(), ccmp e umulh. O Qwen foi reprovado nas duas tentativas e o pipeline aplicou o fallback determinístico: reconstructed_hb_compute.c é o C de referência (relatório em reconstructed_hb_compute.pipeline.json).
 
 **Round-trip binário → LLM → C**
 
 | # | Entrada para o LLM | Binário | Fórmula | Iterações | Resultado da reconstrução | LLM (s) |
 |:---:|---|---|:---:|:---:|---|---:|
 | 1 | Resumo do lifter + esqueleto do CFG (main + out) | `hb_compute.elf` | ✅ | ❌ | —<br><sub>Qwen moveu armGetSystemTick e o loop de física para fora do for (;;) e removeu w2 = 1; barrado pela checagem (2 tentativas)</sub> | 59.1 |
+| 2 | Mesmo resumo + regra de copiar o esqueleto linha por linha | `hb_compute.elf` | ✅ | ❌ | —<br><sub>reprovado de novo pela checagem de estrutura; fallback determinístico aplicado (C final = C de referência)</sub> | 78.3 |
 
 📱 = recompilado e executado no Galaxy A56 · 🐍 = verificado em Python · ❌ = diverge do esperado
 
@@ -281,6 +285,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | hb_ref (C reconstruído do ELF, taskset cpu7) | 15 | 0.0063 s | 0.0058 s | `88196450180` ✅ |
 | hb_oracle (intercalado A/B, cpu7) | 20 | 0.0045 s | 0.0043 s | `88196450180` ✅ |
 | hb_ref (intercalado A/B, cpu7) | 20 | 0.0052 s | 0.0044 s | `88196450180` ✅ |
+| reconstructed_hb_compute_bin (fallback determinístico, taskset cpu7) | 15 | 0.0066 s | 0.0063 s | `88196450180` ✅ |
 
 **Validação**
 
@@ -294,6 +299,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | C reconstruído do ELF no host (llvm-mingw) | `60 / 88196450180 / 1734747` | ✅ |
 | C reconstruído do ELF no A56 (15×, taskset 80) | `60 / 88196450180 / 1734747` | ✅ |
 | Desempenho do C reconstruído vs fonte via shim (20 pares intercalados, razão mediana) | `1,051×` | ✅ |
+| Fallback determinístico: C final idêntico ao de referência, gate no host e A56 (15×) | `60 / 88196450180 / 1734747` | ✅ |
 
 ### `hb_threads` — Homebrew libnx multi-thread: 4 threads × 25.000 partículas × 60 frames, Mutex + CondVar + sleep
 
@@ -313,7 +319,25 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | hb_threads.nro: sítios do nro_tool.py conferidos contra o hb_threads.elf | `36/36 (21 svc)` | ✅ |
 | Oráculo no A56 em 1 núcleo (15×) | `60 / 4 / 88196450180 / 1734747` | ✅ |
 | Oráculo no A56 em 4 núcleos (15×) | `60 / 4 / 88196450180 / 1734747` | ✅ |
-| svc_shim_test no A56 (21 SVCs + Thread/Mutex/RMutex/CondVar) | `46/46` | ✅ |
+| svc_shim_test no A56 (27 SVCs + Thread/Mutex/RMutex/CondVar + IPC dummy) | `54/54` | ✅ |
+
+### `hb_services` — Homebrew libnx com serviços: sm, applet, hid e fs abertos e fechados, 60 frames de padUpdate
+
+> 🎮 Inventário do NRO (devkitA64): 21 SVCs, 6 novos de IPC/memória compartilhada (0x13, 0x14, 0x17, 0x1F, 0x21, 0x52), porta sm: e 80 leituras de tpidrro_el0 (buffer de IPC da TLS). O oráculo roda pelos dummies do shim: o pad determinístico dá A no frame 30 e Plus no 60.
+
+**Execução no aparelho**
+
+| Binário | Execuções | Mediana | Mínimo | Resultado |
+|---|:---:|---:|---:|---|
+| hb_services_oracle (taskset cpu7) | 1 | — | — | `4 / 60 / 2` ❌ |
+
+**Validação**
+
+| Verificação | Valor | |
+|---|---|:---:|
+| hb_services.nro: 110 sítios do nro_tool.py conferidos contra o hb_services.elf | `110/110 (21 svc)` | ✅ |
+| Oráculo no A56 e no host (llvm-mingw) | `4 serviços / 60 frames / 2 botões` | ✅ |
+| svc_shim_test no A56 com os SVCs de IPC dummy | `54/54` | ✅ |
 
 ## 🧮 Instruções ARM64/NEON no lifter
 
@@ -378,7 +402,7 @@ Galaxy A56 (SM-A566E), processo de shell via ADB · 2026-10-15 · `horizon_rt/pr
 
 ## 🧷 SVCs do Horizon → Bionic/POSIX
 
-21 SVCs (libnx 2.10.0) · especificação em `horizon_rt/svc_table.json` · handlers em `switch_hle_shim.h` · teste `horizon_rt/svc_shim_test.c`
+27 SVCs (libnx 2.10.0) · especificação em `horizon_rt/svc_table.json` · handlers em `switch_hle_shim.h` · teste `horizon_rt/svc_shim_test.c`
 
 | SVC | Função | Tradução Bionic/POSIX | Testado no A56 |
 |:---:|---|---|---|
@@ -393,16 +417,24 @@ Galaxy A56 (SM-A566E), processo de shell via ADB · 2026-10-15 · `horizon_rt/pr
 | `0x09` | `svcStartThread` | `pthread_create` | 4 threads via threadStart; handle invalido recusado |
 | `0x0A` | `svcExitThread` | `sinaliza o handle (pthread_cond_broadcast)`<br>`pthread_exit` | thread que chama svcExitThread no meio da funcao: codigo depois dele nao roda e quem espera acorda |
 | `0x0B` | `svcSleepThread` | `nanosleep (repetido em EINTR)`<br>`sched_yield (nano <= 0)` | 15 ms dormiu 15,13 ms; 0 e -1 fazem yield |
+| `0x13` | `svcMapSharedMemory` | 🧪 **dummy** · — <sub>Dummy: valida alinhamento e devolve sucesso sem mapear. Na libnx: shmemMap (usado por hidInitialize).</sub> | sucesso e endereco desalinhado |
+| `0x14` | `svcUnmapSharedMemory` | 🧪 **dummy** · — <sub>Dummy. Na libnx: shmemUnmap (hidExit).</sub> | devolve sucesso |
 | `0x16` | `svcCloseHandle` | `pthread_join (thread ja terminada)`<br>`pthread_detach (ainda rodando: o objeto e liberado quando ela termina)` | threadClose depois de threadWaitForExit; thread criada e nunca iniciada |
+| `0x17` | `svcResetSignal` | 🧪 **dummy** · — <sub>Dummy. Na libnx: waitObjects (espera de eventos).</sub> | devolve sucesso |
 | `0x18` | `svcWaitSynchronization` | `pthread_cond_wait / pthread_cond_timedwait (CLOCK_REALTIME)` | threadWaitForExit x5; 20 ms numa thread parada -> TimedOut em 20,1 ms |
 | `0x1A` | `svcArbitrateLock` | `futex(FUTEX_WAIT \| FUTEX_PRIVATE_FLAG)`<br>`__atomic_compare_exchange para tomar a posse quando a tag vira 0` | mutex no algoritmo da libnx, 4 threads x 200.000 secoes criticas, contagem exata |
 | `0x1B` | `svcArbitrateUnlock` | `store atomico de 0`<br>`futex(FUTEX_WAKE, 1)` | mesmo teste de 4 threads; mutex termina em 0 |
 | `0x1C` | `svcWaitProcessWideKeyAtomic` | `futex(FUTEX_WAIT \| FUTEX_PRIVATE_FLAG, timeout relativo) na chave`<br>`mutexUnlock / mutexLock da libnx sobre svcArbitrateLock/Unlock` | produtor/consumidor com 1.000 itens; condvarWaitTimeout(10 ms) -> TimedOut e volta com o mutex |
 | `0x1D` | `svcSignalProcessWideKey` | `incremento atomico da chave`<br>`futex(FUTEX_WAKE)` | condvarWakeAll no produtor/consumidor e no portao de largada do hb_threads |
+| `0x1F` | `svcConnectToNamedPort` | 🧪 **dummy** · `tabela de handles do shim (sessao ficticia)` | "sm:" devolve sessao; nome longo recusado |
+| `0x21` | `svcSendSyncRequest` | 🧪 **dummy** · — <sub>Dummy: valida a sessao e devolve sucesso sem processar a mensagem. Na libnx: serviceDispatch/cmif via smInitialize, appletInitialize, hidInitialize, fsInitialize e os cleanups (27 chamadas em _appletCleanup).</sub> | sessao valida, invalida e fechada |
 | `0x26` | `svcBreak` | `fprintf(stderr)`<br>`abort() (SIGABRT) quando nao e so notificacao` | notificacao volta 0; Panic encerra o filho com SIGABRT |
 | `0x27` | `svcOutputDebugString` | `fflush(stdout)`<br>`write(STDOUT_FILENO)` | saida do svc_shim_test e do oraculo hb_compute |
 | `0x28` | `svcReturnFromException` | `abort() (SIGABRT)` | encerra o filho com SIGABRT |
 | `0x29` | `svcGetInfo` | `sched_getaffinity (CoreMask)`<br>`sysinfo (TotalMemorySize)`<br>`/proc/self/statm (UsedMemorySize)`<br>`/proc/self/status TracerPid (DebuggerAttached)`<br>`getrandom (RandomEntropy)`<br>`regioes reservadas pelo shim (Heap/Alias)` | Alias/Heap, CoreMask, memoria total e usada, depurador, entropia, tipo 65000, handle invalido |
+| `0x52` | `svcUnmapTransferMemory` | 🧪 **dummy** · — <sub>Dummy. Na libnx: tmemUnmap (applet).</sub> | devolve sucesso |
+
+🧪 6 SVCs de IPC/memória compartilhada são dummies do mapeamento (devolvem sucesso sem emular o serviço); porta `sm:` e serviços vistos no `hb_services`: `hid`, `fsp-srv`, `set:sys`, `time:u`, `time:a`, `time:s`, `apm`.
 
 ## 🛠️ Toolchain
 

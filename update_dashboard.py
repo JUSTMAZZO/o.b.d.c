@@ -192,7 +192,14 @@ def render(d, src_path="status.json"):
         cell = lambda t: t.replace('|', '\\|')   # | dentro da celula quebraria a tabela
         for s in st['svcs']:
             posix = '<br>'.join(f"`{cell(p)}`" for p in s['posix']) or f"— <sub>{cell(s.get('note', ''))}</sub>"
+            if s.get('status') == 'dummy':   # so mapeia a comunicacao: devolve sucesso sem emular
+                posix = f"🧪 **dummy** · {posix}"
             out.append(f"| `{s['id']}` | `{s['name']}` | {posix} | {cell(s['tested'])} |")
+        n_dummy = sum(s.get('status') == 'dummy' for s in st['svcs'])
+        if n_dummy:
+            out += ['', f"🧪 {n_dummy} SVCs de IPC/memória compartilhada são dummies do mapeamento (devolvem sucesso sem "
+                        f"emular o serviço); porta `{', '.join(st.get('ipc', {}).get('ports', []))}` e serviços vistos "
+                        f"no `hb_services`: {', '.join(f'`{x}`' for x in st.get('ipc', {}).get('service_names_in_binary', []))}."]
         out.append('')
 
     out += ['## 🛠️ Toolchain', '', '| Ferramenta | Versão | Papel |', '|---|---|---|']

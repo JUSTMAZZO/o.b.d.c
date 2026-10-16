@@ -71,9 +71,9 @@
       "name": "Local LLM Qwen 2.5 7B",
       "file": "qwen2.5-coder:7b (Ollama, CUDA parcial)",
       "status": "in_progress",
-      "progress": 75,
-      "summary": "Gera C a partir do resumo do lifter + esqueleto do CFG; antes do ADB passa por checagem de estrutura (profundidade e ordem das chamadas) e pelo gate no host, que compila, executa e compara a saída com o C de referência, com 1 nova tentativa guiada pelo diff",
-      "next": "No hb_compute (GCC) o Qwen tira o segundo armGetSystemTick e o loop de física de dentro do for (;;) mesmo com dicas e nova tentativa; a checagem barra, o C de referência segue validado"
+      "progress": 80,
+      "summary": "Gera C a partir do resumo do lifter + esqueleto do CFG; checagem de estrutura e gate no host antes do ADB, com 1 nova tentativa guiada. Se o Qwen esgota as tentativas (ou o Ollama falha), o pipeline usa o C de referência determinístico e registra o motivo em <saida>.pipeline.json",
+      "next": "Fazer o Qwen respeitar for (;;) com break do GCC e renomear variáveis de registrador"
     },
     {
       "name": "Android AArch64 Runner",
@@ -87,17 +87,17 @@
       "name": "Switch HLE Shim",
       "file": "switch_hle_shim.h",
       "status": "in_progress",
-      "progress": 50,
-      "summary": "Primitivas libnx (console, applet, pad, timer), 21 SVCs do kernel (heap, memória, mutex, condvar, threads, sleep, espera, info, debug, exit, break) e a API Thread/Mutex/RMutex/CondVar sobre Bionic/POSIX, com os tipos e resultados da libnx 2.10.0",
-      "next": "Eventos (svcCreateEvent), serviços IPC (sm, fs, hid) e tempo (svcGetSystemTick, time)"
+      "progress": 55,
+      "summary": "Primitivas libnx, 27 SVCs do kernel (21 implementados sobre Bionic/POSIX e 6 de IPC/memória compartilhada como dummies), API Thread/Mutex/RMutex/CondVar e inicialização de sm/applet/hid/fs dummy, com os tipos e resultados da libnx 2.10.0",
+      "next": "Emular as respostas IPC (CMIF) de sm, hid e fs no buffer da TLS em vez de dummies"
     },
     {
       "name": "Horizon Static Analysis",
       "file": "horizon_rt/ (nro_tool.py, probe/)",
       "status": "in_progress",
-      "progress": 55,
-      "summary": "Leitor de NRO com inventário de svc/mrs conferido contra o ELF em 2 homebrews (hb_compute: 21 sítios, hb_threads: 36); sonda do ambiente EL0 do A56; tabela de 21 SVCs para Bionic/POSIX",
-      "next": "Inventário de NROs maiores (serviços IPC: sm, fs, hid) e SVCs de threads/sincronização"
+      "progress": 65,
+      "summary": "Leitor de NRO com inventário de svc/mrs conferido contra o ELF em 3 homebrews (hb_compute: 21 sítios, hb_threads: 36, hb_services: 110); quem chama cada SVC de IPC, porta sm: e nomes de serviço no binário; tabela de 27 SVCs",
+      "next": "Decodificar as mensagens CMIF (comandos por serviço) a partir das chamadas a serviceDispatch"
     }
   ],
   "roadmap": [
@@ -197,7 +197,7 @@
       "phase": 3,
       "title": "Loader ELF e Tradução de ABI / Syscalls",
       "status": "in_progress",
-      "progress": 60,
+      "progress": 70,
       "items": [
         {
           "name": "Shim HLE de primitivas libnx (console, applet, pad, timer) — switch_hle_shim.h",
@@ -241,6 +241,14 @@
         },
         {
           "name": "Homebrew multi-thread hb_threads (devkitA64) inventariado e com oráculo no A56 em 1 e 4 núcleos",
+          "done": true
+        },
+        {
+          "name": "Fallback determinístico no pipeline: Qwen reprovado → C de referência validado no gate (hb_compute)",
+          "done": true
+        },
+        {
+          "name": "Inventário IPC com hb_services (sm, applet, hid, fs): 6 SVCs de IPC/memória compartilhada mapeados, dummies no shim",
           "done": true
         },
         {
@@ -720,9 +728,9 @@
         "neon_median_s": 0.0043204,
         "scalar_median_s": null,
         "reconstructed": {
-          "binary": "hb_compute_ref.c",
+          "binary": "reconstructed_hb_compute.c",
           "status": "verified",
-          "note": "C reconstruído do hb_compute.elf (devkitA64) pelo pipeline: Ghidra extrai main e out(); o lifter eleva os 2 loops NEON e o loop escalar do checksum; o esqueleto do CFG traz out() com chamada de cauda, mrs cntpct_el0 -> armGetSystemTick(), ccmp e a conversão de ticks com umulh. Validado no host e no A56. O Qwen foi reprovado pela checagem de estrutura nas duas tentativas."
+          "note": "C reconstruído do hb_compute.elf (devkitA64) pelo pipeline: Ghidra extrai main e out(); o lifter eleva os 2 loops NEON e o loop escalar; o esqueleto do CFG traz out() com chamada de cauda, mrs cntpct_el0 -> armGetSystemTick(), ccmp e umulh. O Qwen foi reprovado nas duas tentativas e o pipeline aplicou o fallback determinístico: reconstructed_hb_compute.c é o C de referência (relatório em reconstructed_hb_compute.pipeline.json)."
         },
         "attempts": [
           {
@@ -734,6 +742,16 @@
             "result": "—",
             "llm_seconds": 59.1,
             "note": "Qwen moveu armGetSystemTick e o loop de física para fora do for (;;) e removeu w2 = 1; barrado pela checagem (2 tentativas)"
+          },
+          {
+            "n": 2,
+            "input": "Mesmo resumo + regra de copiar o esqueleto linha por linha",
+            "binary": "hb_compute.elf",
+            "formula": true,
+            "iterations": "erro",
+            "result": "—",
+            "llm_seconds": 78.3,
+            "note": "reprovado de novo pela checagem de estrutura; fallback determinístico aplicado (C final = C de referência)"
           }
         ],
         "device_runs": [
@@ -763,6 +781,13 @@
             "runs": 20,
             "median_s": 0.005151,
             "min_s": 0.004358,
+            "result": "88196450180"
+          },
+          {
+            "binary": "reconstructed_hb_compute_bin (fallback determinístico, taskset cpu7)",
+            "runs": 15,
+            "median_s": 0.0065659,
+            "min_s": 0.0062711,
             "result": "88196450180"
           }
         ],
@@ -805,6 +830,11 @@
           {
             "check": "Desempenho do C reconstruído vs fonte via shim (20 pares intercalados, razão mediana)",
             "value": "1,051×",
+            "ok": true
+          },
+          {
+            "check": "Fallback determinístico: C final idêntico ao de referência, gate no host e A56 (15×)",
+            "value": "60 / 88196450180 / 1734747",
             "ok": true
           }
         ]
@@ -859,8 +889,52 @@
             "ok": true
           },
           {
-            "check": "svc_shim_test no A56 (21 SVCs + Thread/Mutex/RMutex/CondVar)",
-            "value": "46/46",
+            "check": "svc_shim_test no A56 (27 SVCs + Thread/Mutex/RMutex/CondVar + IPC dummy)",
+            "value": "54/54",
+            "ok": true
+          }
+        ]
+      },
+      {
+        "id": "hb_services",
+        "title": "Homebrew libnx com serviços: sm, applet, hid e fs abertos e fechados, 60 frames de padUpdate",
+        "ops": "smInitialize, appletInitialize, hidInitialize, fsInitialize, padUpdate, appletMainLoop (IPC dummy no shim)",
+        "expected": {
+          "Servicos abertos": "4",
+          "Frames": "60",
+          "Botoes pressionados": "2"
+        },
+        "neon_median_s": null,
+        "scalar_median_s": null,
+        "reconstructed": {
+          "binary": "hb_services_oracle",
+          "status": "hle_port",
+          "note": "Inventário do NRO (devkitA64): 21 SVCs, 6 novos de IPC/memória compartilhada (0x13, 0x14, 0x17, 0x1F, 0x21, 0x52), porta sm: e 80 leituras de tpidrro_el0 (buffer de IPC da TLS). O oráculo roda pelos dummies do shim: o pad determinístico dá A no frame 30 e Plus no 60."
+        },
+        "attempts": [],
+        "device_runs": [
+          {
+            "binary": "hb_services_oracle (taskset cpu7)",
+            "runs": 1,
+            "median_s": null,
+            "min_s": null,
+            "result": "4 / 60 / 2"
+          }
+        ],
+        "validation": [
+          {
+            "check": "hb_services.nro: 110 sítios do nro_tool.py conferidos contra o hb_services.elf",
+            "value": "110/110 (21 svc)",
+            "ok": true
+          },
+          {
+            "check": "Oráculo no A56 e no host (llvm-mingw)",
+            "value": "4 serviços / 60 frames / 2 botões",
+            "ok": true
+          },
+          {
+            "check": "svc_shim_test no A56 com os SVCs de IPC dummy",
+            "value": "54/54",
             "ok": true
           }
         ]
