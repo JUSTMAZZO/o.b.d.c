@@ -1,0 +1,132 @@
+{
+  "description": "Traducao dos SVCs do Horizon usados pelo hb_compute (hb_compute.sites.json) para Bionic/POSIX. Implementacao: switch_hle_shim.h (secao kernel). Teste: horizon_rt/svc_shim_test.c no Galaxy A56.",
+  "libnx": "2.10.0",
+  "source_sites": "horizon_rt/hb_compute/hb_compute.sites.json",
+  "implementation": "switch_hle_shim.h",
+  "test": "horizon_rt/svc_shim_test.c",
+  "results": {
+    "InvalidSize": "0xca01",
+    "InvalidAddress": "0xcc01",
+    "OutOfMemory": "0xd001",
+    "InvalidMemoryState": "0xd401",
+    "InvalidMemoryPermissions": "0xd801",
+    "InvalidMemoryRange": "0xdc01",
+    "InvalidHandle": "0xe401",
+    "InvalidCombination": "0xe801",
+    "OutOfRange": "0xee01",
+    "InvalidEnumValue": "0xf001",
+    "InvalidState": "0xfa01"
+  },
+  "svcs": [
+    {
+      "id": "0x01", "name": "svcSetHeapSize",
+      "prototype": "Result svcSetHeapSize(void** out_addr, u64 size)",
+      "horizon": "Cresce ou encolhe a heap do processo no lugar (tamanho multiplo de 2 MiB) e devolve a base da HeapRegion.",
+      "posix": ["memfd_create + ftruncate (reserva de 4 GiB)", "mmap(PROT_NONE, MAP_SHARED|MAP_NORESERVE)", "mprotect(PROT_READ|PROT_WRITE) para crescer", "madvise(MADV_REMOVE) + mprotect(PROT_NONE) para encolher"],
+      "errors": ["InvalidSize (nao multiplo de 2 MiB)", "OutOfMemory (acima da regiao)"],
+      "tested": "4 MiB, escrita/leitura, encolher para 2 MiB, tamanho invalido"
+    },
+    {
+      "id": "0x02", "name": "svcSetMemoryPermission",
+      "prototype": "Result svcSetMemoryPermission(void* addr, u64 size, u32 perm)",
+      "horizon": "Muda a permissao de paginas da heap; so Perm_None, Perm_R e Perm_Rw sao aceitas.",
+      "posix": ["mprotect"],
+      "errors": ["InvalidAddress / InvalidSize (desalinhado a 4 KiB)", "InvalidMemoryPermissions (X ou W sozinho)", "InvalidMemoryState (fora da heap)"],
+      "tested": "Perm_R, Perm_Rw, Perm_Rx invalido, endereco desalinhado"
+    },
+    {
+      "id": "0x03", "name": "svcSetMemoryAttribute",
+      "prototype": "Result svcSetMemoryAttribute(void* addr, u64 size, u32 val0, u32 val1)",
+      "horizon": "Liga/desliga MemAttr_IsUncached (mascara val0, valor val1) em paginas da heap.",
+      "posix": [],
+      "note": "Sem equivalente POSIX (cache de pagina nao e controlavel em user space): o atributo e validado e registrado, e aparece no svcQueryMemory; nao altera o hardware.",
+      "errors": ["InvalidCombination (bits fora de IsUncached ou valor fora da mascara)", "InvalidAddress / InvalidSize", "InvalidMemoryState"],
+      "tested": "liga e limpa IsUncached, IsBorrowed recusado"
+    },
+    {
+      "id": "0x04", "name": "svcMapMemory",
+      "prototype": "Result svcMapMemory(void* dst_addr, void* src_addr, u64 size)",
+      "horizon": "Cria um alias da heap na AliasRegion; a origem fica Perm_None com MemAttr_IsBorrowed.",
+      "posix": ["mmap(dst, MAP_SHARED|MAP_FIXED, memfd da heap, offset da origem)", "mprotect(origem, PROT_NONE)"],
+      "note": "Nao aparece no hb_compute; implementado como contraparte necessaria do svcUnmapMemory (0x05).",
+      "errors": ["InvalidAddress / InvalidSize", "InvalidMemoryRange (origem fora da heap ou destino fora da AliasRegion)", "OutOfRange (tabela de aliases cheia)"],
+      "tested": "alias le e escreve a mesma memoria da origem; origem None + IsBorrowed"
+    },
+    {
+      "id": "0x05", "name": "svcUnmapMemory",
+      "prototype": "Result svcUnmapMemory(void* dst_addr, void* src_addr, u64 size)",
+      "horizon": "Desfaz um svcMapMemory: remove o alias e devolve a origem a Perm_Rw.",
+      "posix": ["mmap(dst, PROT_NONE, MAP_ANONYMOUS|MAP_FIXED|MAP_NORESERVE) (volta a reserva)", "mprotect(origem, PROT_READ|PROT_WRITE)"],
+      "errors": ["InvalidMemoryRange (nao corresponde a um svcMapMemory)"],
+      "tested": "dado escrito pelo alias permanece na origem; argumentos errados recusados"
+    },
+    {
+      "id": "0x06", "name": "svcQueryMemory",
+      "prototype": "Result svcQueryMemory(MemoryInfo* meminfo_ptr, u32 *pageinfo, u64 addr)",
+      "horizon": "Descreve o bloco de memoria que contem addr (endereco, tamanho, tipo, atributos, permissao).",
+      "posix": ["leitura de /proc/self/maps"],
+      "note": "Reservas PROT_NONE contam como Unmapped; tipo Heap na HeapRegion, MappedMemory na AliasRegion, Normal no resto; atributos vem das tabelas de alias e de svcSetMemoryAttribute.",
+      "errors": ["InvalidMemoryState (/proc/self/maps ilegivel)"],
+      "tested": "heap, heap encolhida, origem emprestada, alias mapeado e desmapeado"
+    },
+    {
+      "id": "0x07", "name": "svcExitProcess",
+      "prototype": "void NX_NORETURN svcExitProcess(void)",
+      "horizon": "Encerra o processo.",
+      "posix": ["fflush(NULL)", "_exit(0) (exit_group)"],
+      "errors": [],
+      "tested": "fim do svc_shim_test com codigo 0"
+    },
+    {
+      "id": "0x1A", "name": "svcArbitrateLock",
+      "prototype": "Result svcArbitrateLock(u32 wait_tag, u32* tag_location, u32 self_tag)",
+      "horizon": "Bloqueia enquanto *tag_location == (wait_tag | HANDLE_WAIT_MASK); a libnx rele a tag e tenta de novo se ela mudou.",
+      "posix": ["futex(FUTEX_WAIT | FUTEX_PRIVATE_FLAG)", "__atomic_compare_exchange para tomar a posse quando a tag vira 0"],
+      "note": "O kernel do Horizon entrega a posse no unlock; aqui o esperador acordado a toma com CAS (self_tag | WAIT_MASK), mantendo a mascara para que o proximo unlock tambem passe pelo svc.",
+      "errors": ["InvalidAddress (tag desalinhada)"],
+      "tested": "mutex no algoritmo da libnx, 4 threads x 200.000 secoes criticas, contagem exata"
+    },
+    {
+      "id": "0x1B", "name": "svcArbitrateUnlock",
+      "prototype": "Result svcArbitrateUnlock(u32* tag_location)",
+      "horizon": "Solta um mutex com esperadores e acorda o proximo.",
+      "posix": ["store atomico de 0", "futex(FUTEX_WAKE, 1)"],
+      "errors": ["InvalidAddress (tag desalinhada)"],
+      "tested": "mesmo teste de 4 threads; mutex termina em 0"
+    },
+    {
+      "id": "0x26", "name": "svcBreak",
+      "prototype": "Result svcBreak(u32 breakReason, uintptr_t address, uintptr_t size)",
+      "horizon": "Sinaliza um erro fatal ao kernel/debugger; com BreakReason_NotificationOnlyFlag so notifica e volta.",
+      "posix": ["fprintf(stderr)", "abort() (SIGABRT) quando nao e so notificacao"],
+      "errors": [],
+      "tested": "notificacao volta 0; Panic encerra o filho com SIGABRT"
+    },
+    {
+      "id": "0x27", "name": "svcOutputDebugString",
+      "prototype": "Result svcOutputDebugString(const char *str, u64 size)",
+      "horizon": "Escreve no log de debug do kernel.",
+      "posix": ["fflush(stdout)", "write(STDOUT_FILENO)"],
+      "errors": [],
+      "tested": "saida do svc_shim_test e do oraculo hb_compute"
+    },
+    {
+      "id": "0x28", "name": "svcReturnFromException",
+      "prototype": "void NX_NORETURN svcReturnFromException(Result res)",
+      "horizon": "Retorna de um handler de excecao do usuario.",
+      "posix": ["abort() (SIGABRT)"],
+      "note": "O shim nao entrega excecoes do Horizon; o analogo POSIX seria retornar de um handler de sinal (sigreturn). Fora de um handler e erro fatal.",
+      "errors": [],
+      "tested": "encerra o filho com SIGABRT"
+    },
+    {
+      "id": "0x29", "name": "svcGetInfo",
+      "prototype": "Result svcGetInfo(u64* out, u32 id0, Handle handle, u64 id1)",
+      "horizon": "Informacoes do processo/sistema por InfoType.",
+      "posix": ["sched_getaffinity (CoreMask)", "sysinfo (TotalMemorySize)", "/proc/self/statm (UsedMemorySize)", "/proc/self/status TracerPid (DebuggerAttached)", "getrandom (RandomEntropy)", "regioes reservadas pelo shim (Heap/Alias)"],
+      "note": "StackRegion* devolve InvalidEnumValue (a pilha vem do Bionic); ProgramId e um id ficticio de homebrew; tipos nao mapeados devolvem InvalidEnumValue, como em kernels sem Mesosphere para o InfoType 65000.",
+      "errors": ["InvalidHandle (handle diferente do esperado pelo tipo)", "InvalidCombination (id1 != 0)", "InvalidEnumValue (tipo nao mapeado)"],
+      "tested": "Alias/Heap, CoreMask, memoria total e usada, depurador, entropia, tipo 65000, handle invalido"
+    }
+  ]
+}
