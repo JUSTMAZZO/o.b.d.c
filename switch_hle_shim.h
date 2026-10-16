@@ -52,7 +52,7 @@ typedef u32      Result;
 
 #define MAKERESULT(module, description) ((((module) & 0x1FF)) | ((description) & 0x1FFF) << 9)
 enum { Module_Libnx = 345 };
-enum { LibnxError_IoError = 10, LibnxError_BadInput = 11 };
+enum { LibnxError_OutOfMemory = 2, LibnxError_IoError = 10, LibnxError_BadInput = 11 };
 #define LIBNXRESULT(description) MAKERESULT(Module_Libnx, LibnxError_##description)
 
 /* A, B e Plus ficam com BIT (u32) como antes, para nao mudar o codigo gerado dos benchmarks ja validados;
@@ -271,12 +271,177 @@ SHIM_API HidAnalogStickState padGetStickPos(const PadState *pad, unsigned i)
 }
 
 /* ------------------------------------------------------------------ applet / console */
+/*
+ * Ciclo de vida do applet. Na libnx o appletMainLoop processa as mensagens do sistema (foco, modo de
+ * operacao, pedido de saida...), atualiza o estado e chama os hooks (appletHook) antes de devolver true ou
+ * false. Aqui as mensagens vem de uma fila alimentada por shimAppletPost* (simulam o sistema) e sao
+ * entregues no proximo appletMainLoop, na mesma ordem dos hooks da libnx (o ultimo registrado primeiro).
+ * Pedido de saida: o appletMainLoop passa a devolver false para sempre (termino limpo do laco). Na libnx
+ * isso so acontece com appletLockExit; sem a trava o sistema mata o processo sem aviso, o shim sempre
+ * deixa o laco terminar. Fora de foco o shim nao suspende o appletMainLoop (so atualiza o estado e chama
+ * os hooks), para nao travar oraculos sem ninguem para devolver o foco.
+ * Sem mensagens, o limite deterministico de SHIM_FRAMES quadros continua valendo.
+ */
+enum { LibnxError_AlreadyInitialized = 7, LibnxError_NotInitialized = 8 };
+
+typedef enum {
+    AppletFocusState_InFocus    = 1,
+    AppletFocusState_OutOfFocus = 2,
+    AppletFocusState_Background = 3,
+} AppletFocusState;
+
+typedef enum { AppletOperationMode_Handheld = 0, AppletOperationMode_Console = 1 } AppletOperationMode;
+
+typedef enum {
+    AppletFocusHandlingMode_SuspendHomeSleep = 0,
+    AppletFocusHandlingMode_NoSuspend,
+    AppletFocusHandlingMode_SuspendHomeSleepNotify,
+    AppletFocusHandlingMode_AlwaysSuspend,
+    AppletFocusHandlingMode_Max,
+} AppletFocusHandlingMode;
+
+typedef enum {
+    AppletHookType_OnFocusState = 0,
+    AppletHookType_OnOperationMode,
+    AppletHookType_OnPerformanceMode,
+    AppletHookType_OnExitRequest,
+    AppletHookType_OnResume,
+    AppletHookType_OnCaptureButtonShortPressed,
+    AppletHookType_OnAlbumScreenShotTaken,
+    AppletHookType_RequestToDisplay,
+    AppletHookType_Max,
+} AppletHookType;
+
+typedef void (*AppletHookFn)(AppletHookType hook, void *param);
+typedef struct AppletHookCookie AppletHookCookie;
+struct AppletHookCookie {
+    AppletHookCookie *next;
+    AppletHookFn callback;
+    void *param;
+};
+
+#define SHIM_APPLET_QUEUE 16
+
+typedef struct { AppletHookType type; u32 value; } ShimAppletMsg;
+
+static AppletHookCookie g_shim_hook_root;          /* lista: g_shim_hook_root.next = mais recente */
+static ShimAppletMsg g_shim_applet_queue[SHIM_APPLET_QUEUE];
+static u32 g_shim_applet_head, g_shim_applet_count;
+static AppletFocusState g_shim_focus = AppletFocusState_InFocus;
+static AppletOperationMode g_shim_opmode = AppletOperationMode_Handheld;
+static AppletFocusHandlingMode g_shim_focus_mode = AppletFocusHandlingMode_SuspendHomeSleep;
+static bool g_shim_exit_requested, g_shim_exit_locked, g_shim_auto_power_down;
+
+SHIM_API void appletHook(AppletHookCookie *cookie, AppletHookFn callback, void *param)
+{
+    if (!callback)
+        return;
+    cookie->callback = callback;
+    cookie->param = param;
+    cookie->next = g_shim_hook_root.next;
+    g_shim_hook_root.next = cookie;
+}
+
+SHIM_API void appletUnhook(AppletHookCookie *cookie)
+{
+    for (AppletHookCookie *c = &g_shim_hook_root; c->next; c = c->next)
+        if (c->next == cookie) {
+            c->next = cookie->next;
+            break;
+        }
+    cookie->next = NULL;
+}
+
+static void shim_applet_call_hooks(AppletHookType type)
+{
+    for (AppletHookCookie *c = g_shim_hook_root.next; c; ) {
+        AppletHookCookie *next = c->next;      /* o hook pode se desregistrar */
+        if (c->callback)
+            c->callback(type, c->param);
+        c = next;
+    }
+}
+
+/* Enfileira uma mensagem do "sistema"; false se a fila estiver cheia. */
+static bool shim_applet_post(AppletHookType type, u32 value)
+{
+    if (g_shim_applet_count >= SHIM_APPLET_QUEUE)
+        return false;
+    g_shim_applet_queue[(g_shim_applet_head + g_shim_applet_count++) % SHIM_APPLET_QUEUE] = (ShimAppletMsg){ type, value };
+    return true;
+}
+
+SHIM_API bool shimAppletPostFocusState(AppletFocusState state)  { return shim_applet_post(AppletHookType_OnFocusState, (u32)state); }
+SHIM_API bool shimAppletPostOperationMode(AppletOperationMode mode) { return shim_applet_post(AppletHookType_OnOperationMode, (u32)mode); }
+SHIM_API bool shimAppletRequestExit(void)                      { return shim_applet_post(AppletHookType_OnExitRequest, 0); }
+SHIM_API void shimAppletSetAutoPowerDownRequested(bool requested) { g_shim_auto_power_down = requested; }
+
+/* Volta ao estado inicial (foco, modo, fila, pedido de saida, quadro 0). Os hooks continuam registrados. */
+SHIM_API void shimAppletReset(void)
+{
+    g_shim_applet_head = g_shim_applet_count = 0;
+    g_shim_focus = AppletFocusState_InFocus;
+    g_shim_opmode = AppletOperationMode_Handheld;
+    g_shim_focus_mode = AppletFocusHandlingMode_SuspendHomeSleep;
+    g_shim_exit_requested = g_shim_exit_locked = g_shim_auto_power_down = false;
+    g_shim_frame = 0;
+}
+
+static void shim_applet_process(void)
+{
+    while (g_shim_applet_count) {
+        ShimAppletMsg m = g_shim_applet_queue[g_shim_applet_head];
+        g_shim_applet_head = (g_shim_applet_head + 1) % SHIM_APPLET_QUEUE;
+        g_shim_applet_count--;
+        if (m.type == AppletHookType_OnFocusState) {
+            if (g_shim_focus == (AppletFocusState)m.value)
+                continue;
+            g_shim_focus = (AppletFocusState)m.value;
+        } else if (m.type == AppletHookType_OnOperationMode) {
+            if (g_shim_opmode == (AppletOperationMode)m.value)
+                continue;
+            g_shim_opmode = (AppletOperationMode)m.value;
+        } else if (m.type == AppletHookType_OnExitRequest) {
+            g_shim_exit_requested = true;
+        }
+        shim_applet_call_hooks(m.type);
+    }
+}
+
 SHIM_API bool appletMainLoop(void)
 {
+    shim_applet_process();
+    if (g_shim_exit_requested)
+        return false;
     if (g_shim_frame >= SHIM_FRAMES)
         return false;
     g_shim_frame++;
     return true;
+}
+
+SHIM_API AppletFocusState appletGetFocusState(void)         { return g_shim_focus; }
+SHIM_API AppletOperationMode appletGetOperationMode(void)   { return g_shim_opmode; }
+SHIM_API Result appletLockExit(void)                        { g_shim_exit_locked = true; return 0; }
+SHIM_API Result appletUnlockExit(void)                      { g_shim_exit_locked = false; return 0; }
+SHIM_API bool shimAppletIsExitLocked(void)                  { return g_shim_exit_locked; }   /* libnx: destravar antes de main() voltar */
+SHIM_API AppletFocusHandlingMode shimAppletGetFocusHandlingMode(void) { return g_shim_focus_mode; }
+
+SHIM_API Result appletSetFocusHandlingMode(AppletFocusHandlingMode mode)
+{
+    if ((u32)mode >= AppletFocusHandlingMode_Max)
+        return LIBNXRESULT(BadInput);
+    g_shim_focus_mode = mode;
+    return 0;
+}
+
+/* Na libnx so funciona para SystemApplet (7.0.0+) ou LibraryApplet/OverlayApplet (15.0.0+); um homebrew
+ * como Application recebe erro no Switch. Aqui devolve o valor de shimAppletSetAutoPowerDownRequested. */
+SHIM_API Result appletIsAutoPowerDownRequested(bool *out)
+{
+    if (!out)
+        return LIBNXRESULT(BadInput);
+    *out = g_shim_auto_power_down;
+    return 0;
 }
 
 /* No Switch o console desenha no framebuffer; aqui vai para o stdout do Bionic. */
@@ -2380,6 +2545,356 @@ SHIM_API u64 armGetSystemTick(void)
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return armNsToTicks((u64)ts.tv_sec * 1000000000ULL + (u64)ts.tv_nsec);
+}
+
+/* ------------------------------------------------------------------ time (time:u) */
+/*
+ * timeGetCurrentTime devolve segundos POSIX (UTC), como a libnx. Os tres relogios do Horizon (usuario,
+ * rede, local) leem o mesmo CLOCK_REALTIME do host. shimTimeGetCurrentTimeUs da o mesmo instante em
+ * microssegundos (na libnx o equivalente e gettimeofday do newlib). O steady clock usa CLOCK_MONOTONIC.
+ * timeToCalendarTimeWithMyRule / timeToPosixTimeWithMyRule usam o fuso do host (localtime/mktime): no
+ * Switch a "MyRule" e o fuso configurado no console.
+ * Sem timeInitialize as consultas devolvem LibnxError_NotInitialized.
+ */
+typedef enum {
+    TimeServiceType_User = 0, TimeServiceType_Menu = 1, TimeServiceType_System = 2,
+    TimeServiceType_Repair = 3, TimeServiceType_SystemUser = 4,
+} TimeServiceType;
+
+typedef enum {
+    TimeType_UserSystemClock,
+    TimeType_NetworkSystemClock,
+    TimeType_LocalSystemClock,
+    TimeType_Default = TimeType_UserSystemClock,
+} TimeType;
+
+typedef struct { u8 uuid[0x10]; } Uuid;
+
+typedef struct {
+    s64 time_point;          /* segundos monotonicos */
+    Uuid source_id;
+} TimeSteadyClockTimePoint;
+
+typedef struct {
+    u16 year;
+    u8 month;                /* 1..12 */
+    u8 day;
+    u8 hour;
+    u8 minute;
+    u8 second;
+    u8 pad;
+} TimeCalendarTime;
+
+typedef struct {
+    u32 wday;                /* 0 = domingo */
+    u32 yday;                /* 0..365 */
+    char timezoneName[8];
+    u32 DST;
+    s32 offset;              /* segundos em relacao ao UTC */
+} TimeCalendarAdditionalInfo;
+
+static int g_shim_time_refs;
+
+SHIM_API Result timeInitialize(void) { g_shim_time_refs++; return 0; }
+SHIM_API void timeExit(void) { if (g_shim_time_refs > 0) g_shim_time_refs--; }
+
+static Result shim_time_realtime(TimeType type, struct timespec *ts)
+{
+    if (g_shim_time_refs <= 0)
+        return LIBNXRESULT(NotInitialized);
+    if ((u32)type > TimeType_LocalSystemClock)
+        return LIBNXRESULT(BadInput);
+    return clock_gettime(CLOCK_REALTIME, ts) ? LIBNXRESULT(IoError) : 0;
+}
+
+SHIM_API Result timeGetCurrentTime(TimeType type, u64 *timestamp)
+{
+    struct timespec ts;
+    Result rc = timestamp ? shim_time_realtime(type, &ts) : LIBNXRESULT(BadInput);
+    if (R_SUCCEEDED(rc))
+        *timestamp = (u64)ts.tv_sec;
+    return rc;
+}
+
+/* Mesmo relogio em microssegundos: timestamp_us / 1000000 == timeGetCurrentTime no mesmo instante. */
+SHIM_API Result shimTimeGetCurrentTimeUs(TimeType type, u64 *timestamp_us)
+{
+    struct timespec ts;
+    Result rc = timestamp_us ? shim_time_realtime(type, &ts) : LIBNXRESULT(BadInput);
+    if (R_SUCCEEDED(rc))
+        *timestamp_us = (u64)ts.tv_sec * 1000000ULL + (u64)ts.tv_nsec / 1000ULL;
+    return rc;
+}
+
+SHIM_API Result timeGetStandardSteadyClockTimePoint(TimeSteadyClockTimePoint *out)
+{
+    static const Uuid source = { { 'o', 'b', 'd', 'c', '-', 's', 't', 'e', 'a', 'd', 'y', '-', 'c', 'l', 'k', 0 } };
+    struct timespec ts;
+    if (g_shim_time_refs <= 0)
+        return LIBNXRESULT(NotInitialized);
+    if (!out || clock_gettime(CLOCK_MONOTONIC, &ts))
+        return LIBNXRESULT(BadInput);
+    out->time_point = (s64)ts.tv_sec;
+    out->source_id = source;
+    return 0;
+}
+
+SHIM_API Result timeToCalendarTimeWithMyRule(u64 timestamp, TimeCalendarTime *caltime, TimeCalendarAdditionalInfo *info)
+{
+    if (g_shim_time_refs <= 0)
+        return LIBNXRESULT(NotInitialized);
+    if (!caltime)
+        return LIBNXRESULT(BadInput);
+    time_t t = (time_t)timestamp;
+    struct tm tm;
+#if defined(_WIN32)
+    if (localtime_s(&tm, &t) != 0)
+        return LIBNXRESULT(BadInput);
+    s32 offset = (s32)(_mkgmtime(&tm) - t);
+#else
+    if (!localtime_r(&t, &tm))
+        return LIBNXRESULT(BadInput);
+    s32 offset = (s32)tm.tm_gmtoff;
+#endif
+    *caltime = (TimeCalendarTime){ (u16)(tm.tm_year + 1900), (u8)(tm.tm_mon + 1), (u8)tm.tm_mday,
+                                   (u8)tm.tm_hour, (u8)tm.tm_min, (u8)tm.tm_sec, 0 };
+    if (info) {
+        memset(info, 0, sizeof *info);
+        info->wday = (u32)tm.tm_wday;
+        info->yday = (u32)tm.tm_yday;
+        info->DST = tm.tm_isdst > 0;
+        info->offset = offset;
+#if defined(_WIN32)
+        char tz[64] = "";                            /* nomes do Windows sao longos: corta em 7 caracteres */
+        size_t n = 0;
+        if (_get_tzname(&n, tz, sizeof tz, tm.tm_isdst > 0) != 0)
+            tz[0] = '\0';
+        snprintf(info->timezoneName, sizeof info->timezoneName, "%s", tz);
+#else
+        snprintf(info->timezoneName, sizeof info->timezoneName, "%s", tm.tm_zone ? tm.tm_zone : "");
+#endif
+    }
+    return 0;
+}
+
+/* Calendario local -> segundos POSIX (1 resultado; o Horizon pode devolver 2 na virada de horario de verao). */
+SHIM_API Result timeToPosixTimeWithMyRule(const TimeCalendarTime *caltime, u64 *timestamp_list, s32 timestamp_list_count, s32 *timestamp_count)
+{
+    if (g_shim_time_refs <= 0)
+        return LIBNXRESULT(NotInitialized);
+    if (!caltime || !timestamp_list || timestamp_list_count < 1 || !timestamp_count)
+        return LIBNXRESULT(BadInput);
+    struct tm tm = {0};
+    tm.tm_year = caltime->year - 1900;
+    tm.tm_mon = caltime->month - 1;
+    tm.tm_mday = caltime->day;
+    tm.tm_hour = caltime->hour;
+    tm.tm_min = caltime->minute;
+    tm.tm_sec = caltime->second;
+    tm.tm_isdst = -1;
+    time_t t = mktime(&tm);
+    if (t == (time_t)-1)
+        return LIBNXRESULT(BadInput);
+    timestamp_list[0] = (u64)t;
+    *timestamp_count = 1;
+    return 0;
+}
+
+/* ------------------------------------------------------------------ framebuffer linear (ponte de render por software) */
+/*
+ * Tela simulada em memoria. framebufferCreate configura a janela (NWindow) e aloca num_fbs buffers;
+ * framebufferBegin devolve o buffer linear (framebufferMakeLinear) ou o buffer da vez; framebufferEnd
+ * "apresenta": copia o quadro para o buffer da vez e o marca como a imagem na tela. O layout block linear
+ * da Tegra nao e emulado: sem framebufferMakeLinear o buffer tambem e linear (na libnx seria swizzled).
+ * Alinhamento: largura em multiplos de 64 pixels e altura de 128 linhas, como na libnx (stride 5120 em
+ * 1280 x RGBA8888).
+ * Validacao de oraculo: shimFramebufferChecksum = FNV-1a 64 dos bytes visiveis (largura x bpp por linha,
+ * sem o preenchimento do stride) da ultima imagem apresentada; shimFramebufferDumpPPM grava essa imagem
+ * como PPM P6 (RGB 8 bits; aceita sdmc:/ e romfs:/ via shimFopen).
+ */
+enum {
+    PIXEL_FORMAT_RGBA_8888 = 1U,
+    PIXEL_FORMAT_RGBX_8888 = 2U,
+    PIXEL_FORMAT_RGB_565   = 4U,
+    PIXEL_FORMAT_BGRA_8888 = 5U,
+    PIXEL_FORMAT_RGBA_4444 = 7U,
+};
+
+#define RGBA8(r, g, b, a)          (((r) & 0xff) | (((g) & 0xff) << 8) | (((b) & 0xff) << 16) | (((u32)(a) & 0xff) << 24))
+#define RGBA8_MAXALPHA(r, g, b)    RGBA8((r), (g), (b), 0xff)
+#define RGBX8(r, g, b)             RGBA8((r), (g), (b), 0)
+#define RGB565(r, g, b)            (((b) & 0x1f) | (((g) & 0x3f) << 5) | (((r) & 0x1f) << 11))
+#define RGB565_FROM_RGB8(r, g, b)  RGB565((r) >> 3, (g) >> 2, (b) >> 3)
+#define BGRA8(r, g, b, a)          RGBA8((b), (g), (r), (a))
+#define BGRA8_MAXALPHA(r, g, b)    RGBA8((b), (g), (r), 0xff)
+#define RGBA4(r, g, b, a)          (((r) & 0xf) | (((g) & 0xf) << 4) | (((b) & 0xf) << 8) | (((a) & 0xf) << 12))
+#define RGBA4_MAXALPHA(r, g, b)    RGBA4((r), (g), (b), 0xf)
+
+#define SHIM_FB_MAX_W 1920
+#define SHIM_FB_MAX_H 1080
+
+typedef struct NWindow {
+    u32 width, height, format, bpp;
+    bool has_fb;
+    const u8 *presented;      /* imagem na tela (um dos buffers do framebuffer) */
+    u32 stride;
+    u64 present_count;
+} NWindow;
+
+typedef struct { u32 handle, id, size; void *cpu_addr; } NvMap;
+
+typedef struct Framebuffer {
+    NWindow *win;
+    NvMap map;
+    void *buf;                /* num_fbs buffers de fb_size bytes */
+    void *buf_linear;         /* buffer de sombra (framebufferMakeLinear) */
+    u32 stride;
+    u32 width_aligned;
+    u32 height_aligned;
+    u32 num_fbs;
+    u32 fb_size;
+    bool has_init;
+} Framebuffer;
+
+static NWindow g_shim_window = { 1280, 720, PIXEL_FORMAT_RGBA_8888, 4, false, NULL, 0, 0 };
+static u32 g_shim_fb_slot;    /* buffer da vez do framebuffer da janela padrao */
+
+SHIM_API NWindow *nwindowGetDefault(void) { return &g_shim_window; }
+
+SHIM_API Result framebufferCreate(Framebuffer *fb, NWindow *win, u32 width, u32 height, u32 format, u32 num_fbs)
+{
+    u32 bpp = format == PIXEL_FORMAT_RGBA_8888 || format == PIXEL_FORMAT_RGBX_8888 || format == PIXEL_FORMAT_BGRA_8888 ? 4
+            : format == PIXEL_FORMAT_RGB_565 || format == PIXEL_FORMAT_RGBA_4444 ? 2 : 0;
+    if (!fb || !win || !bpp || width == 0 || height == 0 || width > SHIM_FB_MAX_W || height > SHIM_FB_MAX_H ||
+        num_fbs < 1 || num_fbs > 3)
+        return LIBNXRESULT(BadInput);
+    if (win->has_fb)
+        return LIBNXRESULT(AlreadyInitialized);
+    memset(fb, 0, sizeof *fb);
+    fb->width_aligned = (width + 63) & ~63U;
+    fb->height_aligned = (height + 127) & ~127U;
+    fb->stride = fb->width_aligned * bpp;
+    fb->fb_size = fb->stride * fb->height_aligned;
+    fb->num_fbs = num_fbs;
+    fb->buf = calloc(num_fbs, fb->fb_size);
+    if (!fb->buf)
+        return LIBNXRESULT(OutOfMemory);
+    fb->win = win;
+    win->width = width;
+    win->height = height;
+    win->format = format;
+    win->bpp = bpp;
+    win->stride = fb->stride;
+    win->presented = NULL;
+    win->present_count = 0;
+    win->has_fb = true;
+    g_shim_fb_slot = 0;
+    fb->has_init = true;
+    return 0;
+}
+
+SHIM_API Result framebufferMakeLinear(Framebuffer *fb)
+{
+    if (!fb || !fb->has_init)
+        return LIBNXRESULT(NotInitialized);
+    if (!fb->buf_linear) {
+        fb->buf_linear = calloc(1, fb->fb_size);
+        if (!fb->buf_linear)
+            return LIBNXRESULT(OutOfMemory);
+    }
+    return 0;
+}
+
+SHIM_API void *framebufferBegin(Framebuffer *fb, u32 *out_stride)
+{
+    if (!fb || !fb->has_init)
+        return NULL;
+    if (out_stride)
+        *out_stride = fb->stride;
+    return fb->buf_linear ? fb->buf_linear : (u8 *)fb->buf + (size_t)g_shim_fb_slot * fb->fb_size;
+}
+
+SHIM_API void framebufferEnd(Framebuffer *fb)
+{
+    if (!fb || !fb->has_init)
+        return;
+    u8 *slot = (u8 *)fb->buf + (size_t)g_shim_fb_slot * fb->fb_size;
+    if (fb->buf_linear)
+        memcpy(slot, fb->buf_linear, fb->fb_size);
+    fb->win->presented = slot;
+    fb->win->present_count++;
+    g_shim_fb_slot = (g_shim_fb_slot + 1) % fb->num_fbs;
+}
+
+SHIM_API void framebufferClose(Framebuffer *fb)
+{
+    if (!fb || !fb->has_init)
+        return;
+    fb->win->has_fb = false;
+    fb->win->presented = NULL;
+    free(fb->buf);
+    free(fb->buf_linear);
+    memset(fb, 0, sizeof *fb);
+}
+
+/* FNV-1a 64 da ultima imagem apresentada na janela padrao (0 se nada foi apresentado). */
+SHIM_API u64 shimFramebufferChecksum(void)
+{
+    const NWindow *w = &g_shim_window;
+    if (!w->has_fb || !w->presented)
+        return 0;
+    u64 h = 0xcbf29ce484222325ULL;
+    for (u32 y = 0; y < w->height; y++) {
+        const u8 *row = w->presented + (size_t)y * w->stride;
+        for (u32 k = 0; k < w->width * w->bpp; k++)
+            h = (h ^ row[k]) * 0x100000001b3ULL;
+    }
+    return h;
+}
+
+SHIM_API u64 shimFramebufferPresentCount(void) { return g_shim_window.present_count; }
+
+static void shim_fb_rgb(const NWindow *w, const u8 *p, u8 rgb[3])
+{
+    u32 v = w->bpp == 4 ? (u32)p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 : (u32)p[0] | (u32)p[1] << 8;
+    switch (w->format) {
+    case PIXEL_FORMAT_BGRA_8888:
+        rgb[0] = (u8)(v >> 16); rgb[1] = (u8)(v >> 8); rgb[2] = (u8)v;
+        break;
+    case PIXEL_FORMAT_RGB_565: {
+        u32 r = (v >> 11) & 0x1f, g = (v >> 5) & 0x3f, b = v & 0x1f;
+        rgb[0] = (u8)(r << 3 | r >> 2); rgb[1] = (u8)(g << 2 | g >> 4); rgb[2] = (u8)(b << 3 | b >> 2);
+        break;
+    }
+    case PIXEL_FORMAT_RGBA_4444:
+        rgb[0] = (u8)((v & 0xf) * 17); rgb[1] = (u8)(((v >> 4) & 0xf) * 17); rgb[2] = (u8)(((v >> 8) & 0xf) * 17);
+        break;
+    default:                                         /* RGBA8888 / RGBX8888 */
+        rgb[0] = (u8)v; rgb[1] = (u8)(v >> 8); rgb[2] = (u8)(v >> 16);
+        break;
+    }
+}
+
+/* Grava a ultima imagem apresentada como PPM P6 (sem alfa). */
+SHIM_API Result shimFramebufferDumpPPM(const char *path)
+{
+    const NWindow *w = &g_shim_window;
+    if (!w->has_fb || !w->presented)
+        return LIBNXRESULT(NotInitialized);
+    FILE *f = shimFopen(path, "wb");
+    if (!f)
+        return LIBNXRESULT(IoError);
+    u8 *row = (u8 *)malloc((size_t)w->width * 3);
+    int ok = row && fprintf(f, "P6\n%u %u\n255\n", w->width, w->height) > 0;
+    for (u32 y = 0; ok && y < w->height; y++) {
+        const u8 *src = w->presented + (size_t)y * w->stride;
+        for (u32 x = 0; x < w->width; x++)
+            shim_fb_rgb(w, src + (size_t)x * w->bpp, row + (size_t)x * 3);
+        ok = fwrite(row, 3, w->width, f) == w->width;
+    }
+    free(row);
+    ok = fclose(f) == 0 && ok;
+    return ok ? 0 : LIBNXRESULT(IoError);
 }
 
 /* ------------------------------------------------------------------ roteamento do stdio (sdmc:/ e romfs:/) */

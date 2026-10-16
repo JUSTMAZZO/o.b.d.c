@@ -431,6 +431,191 @@ static void test_devices(void)
     rmdir(TEST_ROOT);
 }
 
+/* ---------------------------------------------- time:u, ciclo de vida do applet e framebuffer linear */
+static s64 days_from_civil(s64 y, u32 m, u32 d)   /* dias desde 1970-01-01 (algoritmo de H. Hinnant) */
+{
+    y -= m <= 2;
+    s64 era = (y >= 0 ? y : y - 399) / 400;
+    u32 yoe = (u32)(y - era * 400);
+    u32 doy = (153 * (m + (m > 2 ? (u32)-3 : 9)) + 2) / 5 + d - 1;
+    u32 doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + (s64)doe - 719468;
+}
+
+static void test_time(void)
+{
+    u64 t = 0, us = 0;
+    CHECK(timeGetCurrentTime(TimeType_Default, &t) == LIBNXRESULT(NotInitialized), "timeGetCurrentTime sem timeInitialize -> NotInitialized (0x%x)", LIBNXRESULT(NotInitialized));
+    CHECK(timeInitialize() == 0, "timeInitialize");
+    u64 t0 = (u64)time(NULL);
+    Result rc = timeGetCurrentTime(TimeType_Default, &t);
+    u64 t1 = (u64)time(NULL);
+    CHECK(rc == 0 && t >= t0 && t <= t1, "timeGetCurrentTime(Default) = time(NULL) (%llu)", (unsigned long long)t);
+    u64 tu = 0, tn = 0, tl = 0;
+    CHECK(timeGetCurrentTime(TimeType_UserSystemClock, &tu) == 0 && timeGetCurrentTime(TimeType_NetworkSystemClock, &tn) == 0 &&
+          timeGetCurrentTime(TimeType_LocalSystemClock, &tl) == 0 && tn - tu <= 1 && tl - tu <= 1, "UserSystemClock / NetworkSystemClock / LocalSystemClock coerentes");
+    CHECK(timeGetCurrentTime((TimeType)3, &t) == LIBNXRESULT(BadInput), "TimeType invalido -> BadInput");
+    u64 s0 = 0, s1 = 0;
+    timeGetCurrentTime(TimeType_Default, &s0);
+    shimTimeGetCurrentTimeUs(TimeType_Default, &us);
+    timeGetCurrentTime(TimeType_Default, &s1);
+    CHECK(us / 1000000ULL >= s0 && us / 1000000ULL <= s1, "shimTimeGetCurrentTimeUs: %llu us -> %llu s (entre %llu e %llu)",
+          (unsigned long long)us, (unsigned long long)(us / 1000000ULL), (unsigned long long)s0, (unsigned long long)s1);
+    u64 us2 = 0;
+    shimTimeGetCurrentTimeUs(TimeType_Default, &us2);
+    CHECK(us2 >= us, "microssegundos nao voltam (%llu -> %llu)", (unsigned long long)us, (unsigned long long)us2);
+
+    TimeSteadyClockTimePoint p0, p1;
+    CHECK(timeGetStandardSteadyClockTimePoint(&p0) == 0 && timeGetStandardSteadyClockTimePoint(&p1) == 0 && p1.time_point >= p0.time_point &&
+          !memcmp(p0.source_id.uuid, p1.source_id.uuid, 16), "timeGetStandardSteadyClockTimePoint monotonico, mesma source_id");
+
+    /* 1700000000 = 2023-11-14 22:13:20 UTC; o calendario local menos o offset tem de voltar ao mesmo instante */
+    TimeCalendarTime cal;
+    TimeCalendarAdditionalInfo info;
+    CHECK(timeToCalendarTimeWithMyRule(1700000000ULL, &cal, &info) == 0, "timeToCalendarTimeWithMyRule(1700000000) -> %04u-%02u-%02u %02u:%02u:%02u %s (UTC%+d s)",
+          cal.year, cal.month, cal.day, cal.hour, cal.minute, cal.second, info.timezoneName, info.offset);
+    s64 local = days_from_civil(cal.year, cal.month, cal.day) * 86400 + cal.hour * 3600 + cal.minute * 60 + cal.second;
+    CHECK(local - info.offset == 1700000000LL, "calendario local - offset = 1700000000 (dias pelo algoritmo civil)");
+    s64 wday_ref = (days_from_civil(cal.year, cal.month, cal.day) % 7 + 11) % 7;   /* 1970-01-01 = quinta (4) */
+    CHECK((s64)info.wday == wday_ref && info.yday == (u32)(days_from_civil(cal.year, cal.month, cal.day) - days_from_civil(cal.year, 1, 1)),
+          "wday = %u, yday = %u", info.wday, info.yday);
+    u64 back[2] = {0};
+    s32 nback = 0;
+    CHECK(timeToPosixTimeWithMyRule(&cal, back, 2, &nback) == 0 && nback == 1 && back[0] == 1700000000ULL, "timeToPosixTimeWithMyRule volta a 1700000000");
+    timeExit();
+    CHECK(timeGetCurrentTime(TimeType_Default, &t) == LIBNXRESULT(NotInitialized), "timeExit -> NotInitialized de novo");
+}
+
+static int s_hook_calls[AppletHookType_Max], s_hook_order[8], s_hook_n;
+static void hook_a(AppletHookType type, void *param) { (void)param; s_hook_calls[type]++; if (s_hook_n < 8) s_hook_order[s_hook_n++] = 1; }
+static void hook_b(AppletHookType type, void *param) { (void)type; if (s_hook_n < 8) s_hook_order[s_hook_n++] = 2; *(int *)param += 1; }
+
+static void test_applet(void)
+{
+    shimAppletReset();
+    CHECK(appletGetFocusState() == AppletFocusState_InFocus && appletGetOperationMode() == AppletOperationMode_Handheld,
+          "appletGetFocusState = InFocus, appletGetOperationMode = Handheld");
+    bool apd = true;
+    CHECK(appletIsAutoPowerDownRequested(&apd) == 0 && !apd, "appletIsAutoPowerDownRequested -> false");
+    shimAppletSetAutoPowerDownRequested(true);
+    CHECK(appletIsAutoPowerDownRequested(&apd) == 0 && apd, "pedido de auto power down simulado -> true");
+    CHECK(appletSetFocusHandlingMode(AppletFocusHandlingMode_NoSuspend) == 0 && shimAppletGetFocusHandlingMode() == AppletFocusHandlingMode_NoSuspend &&
+          appletSetFocusHandlingMode(AppletFocusHandlingMode_Max) == LIBNXRESULT(BadInput), "appletSetFocusHandlingMode; Max -> BadInput");
+
+    AppletHookCookie ca, cb;
+    int b_calls = 0;
+    appletHook(&ca, hook_a, NULL);
+    appletHook(&cb, hook_b, &b_calls);
+    CHECK(appletMainLoop() && s_hook_n == 0, "sem mensagens: appletMainLoop true, nenhum hook");
+    shimAppletPostFocusState(AppletFocusState_Background);
+    shimAppletPostOperationMode(AppletOperationMode_Console);
+    shimAppletPostOperationMode(AppletOperationMode_Console);     /* repetido: sem mudanca, sem hook */
+    CHECK(appletGetFocusState() == AppletFocusState_InFocus, "mensagem so vale no proximo appletMainLoop");
+    CHECK(appletMainLoop() && appletGetFocusState() == AppletFocusState_Background && appletGetOperationMode() == AppletOperationMode_Console &&
+          s_hook_calls[AppletHookType_OnFocusState] == 1 && s_hook_calls[AppletHookType_OnOperationMode] == 1 && b_calls == 2,
+          "foco Background + modo Console entregues com hooks (1 + 1)");
+    CHECK(s_hook_n == 4 && s_hook_order[0] == 2 && s_hook_order[1] == 1, "ordem dos hooks: o ultimo registrado primeiro (como na libnx)");
+    shimAppletPostFocusState(AppletFocusState_InFocus);
+    CHECK(appletMainLoop() && appletGetFocusState() == AppletFocusState_InFocus && s_hook_calls[AppletHookType_OnFocusState] == 2, "foco volta a InFocus");
+
+    appletUnhook(&cb);
+    appletLockExit();
+    u32 frame_before = g_shim_frame;
+    shimAppletRequestExit();
+    CHECK(!appletMainLoop() && s_hook_calls[AppletHookType_OnExitRequest] == 1 && b_calls == 3 && g_shim_frame == frame_before,
+          "pedido de saida: appletMainLoop false, OnExitRequest so no hook ainda registrado, quadro nao avanca");
+    CHECK(!appletMainLoop() && !appletMainLoop() && s_hook_calls[AppletHookType_OnExitRequest] == 1, "depois do pedido continua false (termino limpo do laco)");
+    CHECK(shimAppletIsExitLocked() && appletUnlockExit() == 0 && !shimAppletIsExitLocked(), "appletLockExit / appletUnlockExit");
+    appletUnhook(&ca);
+    shimAppletReset();
+    u32 frames = 0;
+    while (appletMainLoop())
+        frames++;
+    CHECK(frames == SHIM_FRAMES && s_hook_calls[AppletHookType_OnExitRequest] == 1, "shimAppletReset: laco volta a %u quadros, sem hooks", frames);
+    shimAppletReset();
+}
+
+static u64 fnv_rows(const u8 *p, u32 stride, u32 row_bytes, u32 rows)
+{
+    u64 h = 0xcbf29ce484222325ULL;
+    for (u32 y = 0; y < rows; y++)
+        for (u32 k = 0; k < row_bytes; k++)
+            h = (h ^ p[(size_t)y * stride + k]) * 0x100000001b3ULL;
+    return h;
+}
+
+static void test_framebuffer(void)
+{
+    Framebuffer fb, fb2;
+    NWindow *win = nwindowGetDefault();
+    CHECK(framebufferCreate(&fb, win, 1280, 720, 3, 2) == LIBNXRESULT(BadInput) && framebufferCreate(&fb, win, 1280, 720, PIXEL_FORMAT_RGBA_8888, 4) == LIBNXRESULT(BadInput) &&
+          framebufferCreate(&fb, win, 0, 720, PIXEL_FORMAT_RGBA_8888, 2) == LIBNXRESULT(BadInput), "framebufferCreate: formato 3, 4 buffers ou largura 0 -> BadInput");
+    CHECK(shimFramebufferChecksum() == 0 && shimFramebufferDumpPPM(TEST_ROOT "_x.ppm") == LIBNXRESULT(NotInitialized), "sem framebuffer: checksum 0, PPM -> NotInitialized");
+    CHECK(framebufferCreate(&fb, win, 1280, 720, PIXEL_FORMAT_RGBA_8888, 2) == 0 && fb.stride == 5120 && fb.width_aligned == 1280 && fb.height_aligned == 768,
+          "framebufferCreate(1280x720 RGBA8888, 2 buffers) -> stride %u, %ux%u alinhado", fb.stride, fb.width_aligned, fb.height_aligned);
+    CHECK(framebufferCreate(&fb2, win, 1280, 720, PIXEL_FORMAT_RGBA_8888, 2) == LIBNXRESULT(AlreadyInitialized), "segunda framebufferCreate na mesma janela -> AlreadyInitialized");
+    CHECK(framebufferMakeLinear(&fb) == 0, "framebufferMakeLinear");
+    u32 stride = 0;
+    u32 *px = (u32 *)framebufferBegin(&fb, &stride);
+    CHECK(px != NULL && stride == 5120 && px[0] == 0, "framebufferBegin -> buffer linear zerado, stride 5120");
+    for (u32 y = 0; y < 720; y++)
+        for (u32 x = 0; x < 1280; x++)
+            px[y * (stride / 4) + x] = RGBA8_MAXALPHA(x & 0xFF, y & 0xFF, (x ^ y) & 0xFF);
+    u64 expect = fnv_rows((const u8 *)px, stride, 1280 * 4, 720);
+    framebufferEnd(&fb);
+    CHECK(shimFramebufferChecksum() == expect && shimFramebufferPresentCount() == 1, "framebufferEnd apresenta: FNV-1a da tela = do quadro (0x%016llx)", (unsigned long long)expect);
+    px = (u32 *)framebufferBegin(&fb, &stride);
+    CHECK(px[1] == RGBA8_MAXALPHA(1, 0, 1), "buffer linear mantem o quadro anterior (como o shadow buffer da libnx)");
+    px[0] = RGBA8_MAXALPHA(0xFF, 0, 0);
+    framebufferEnd(&fb);
+    CHECK(shimFramebufferChecksum() != expect && shimFramebufferPresentCount() == 2, "segundo quadro muda o checksum (outro buffer da troca dupla)");
+
+    CHECK(shimFramebufferDumpPPM(TEST_ROOT "_fb.ppm") == 0, "shimFramebufferDumpPPM(" TEST_ROOT "_fb.ppm)");
+    FILE *f = fopen(TEST_ROOT "_fb.ppm", "rb");
+    char hdr[17] = "";                     /* "P6\n1280 720\n255\n" = 16 bytes */
+    u8 rgb[6] = {0};
+    long size = 0;
+    if (f) {
+        if (fread(hdr, 1, 16, f) == 16 && fread(rgb, 1, 6, f) == 6) {
+            fseek(f, 0, SEEK_END);
+            size = ftell(f);
+        }
+        fclose(f);
+    }
+    CHECK(!memcmp(hdr, "P6\n1280 720\n255\n", 16) && size == 16 + 1280L * 720 * 3 && rgb[0] == 0xFF && rgb[1] == 0 && rgb[2] == 0 &&
+          rgb[3] == 1 && rgb[4] == 0 && rgb[5] == 1, "PPM P6 1280x720: cabecalho, tamanho %ld, pixels (0,0) e (1,0)", size);
+    remove(TEST_ROOT "_fb.ppm");
+    framebufferClose(&fb);
+    CHECK(framebufferBegin(&fb, &stride) == NULL && shimFramebufferChecksum() == 0, "framebufferClose: Begin -> NULL, sem imagem na tela");
+
+    /* formatos de 16 bits e BGRA: conversao para RGB no PPM */
+    const u32 fmts[3] = { PIXEL_FORMAT_BGRA_8888, PIXEL_FORMAT_RGB_565, PIXEL_FORMAT_RGBA_4444 };
+    int conv_ok = 1;
+    for (int k = 0; k < 3; k++) {
+        conv_ok &= framebufferCreate(&fb, win, 64, 32, fmts[k], 1) == 0 && fb.stride == (k == 0 ? 256u : 128u) && fb.height_aligned == 128;
+        u8 *p = (u8 *)framebufferBegin(&fb, &stride);
+        if (k == 0)
+            *(u32 *)p = BGRA8_MAXALPHA(0x12, 0x34, 0x56);
+        else if (k == 1)
+            *(u16 *)p = (u16)RGB565(31, 0, 31);
+        else
+            *(u16 *)p = (u16)RGBA4_MAXALPHA(0xF, 0x8, 0x0);
+        framebufferEnd(&fb);
+        conv_ok &= shimFramebufferDumpPPM(TEST_ROOT "_fb.ppm") == 0;
+        f = fopen(TEST_ROOT "_fb.ppm", "rb");
+        u8 px3[3] = {0};
+        conv_ok &= f && fseek(f, 13, SEEK_SET) == 0 && fread(px3, 1, 3, f) == 3;   /* "P6\n64 32\n255\n" = 13 bytes */
+        if (f)
+            fclose(f);
+        remove(TEST_ROOT "_fb.ppm");
+        conv_ok &= k == 0 ? px3[0] == 0x12 && px3[1] == 0x34 && px3[2] == 0x56
+                 : k == 1 ? px3[0] == 0xFF && px3[1] == 0 && px3[2] == 0xFF
+                          : px3[0] == 0xFF && px3[1] == 0x88 && px3[2] == 0;
+        framebufferClose(&fb);
+    }
+    CHECK(conv_ok, "BGRA8888 / RGB565 / RGBA4444 (64x32, 1 buffer): stride e cor no PPM");
+}
+
 #if defined(__linux__)
 /* ---------------------------------------------- seqlock do buffer ao vivo: produtor x padUpdate */
 #define LIVE_WRITES 200000
@@ -573,6 +758,9 @@ int main(void)
     test_input();
     test_fs();
     test_devices();
+    test_time();
+    test_applet();
+    test_framebuffer();
 
 #if defined(__linux__)
     test_input_live_threads();

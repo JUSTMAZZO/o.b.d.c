@@ -87,9 +87,9 @@
       "name": "Switch HLE Shim",
       "file": "switch_hle_shim.h",
       "status": "in_progress",
-      "progress": 80,
-      "summary": "Primitivas libnx, 27 SVCs do kernel (21 implementados sobre Bionic/POSIX e 6 de IPC/memória compartilhada como dummies), API Thread/Mutex/RMutex/CondVar, fs de alto nível (fsOpenSdCardFileSystem + fsFs/fsFile/fsDir sobre um diretório do host, portátil Bionic/Windows, caminhos normalizados contra \"..\"), dispositivos do stdio (fsdevMountSdmc/MountDevice/TranslatePath e romfsInit/MountSelf somente leitura, com fopen/opendir/stat/... roteados para sdmc:/ e romfs:/) e entrada desacoplada (roteiro por quadro + buffer ao vivo com seqlock, botões e analógicos, PadState compacta inalterada), com os tipos e resultados da libnx 2.10.0",
-      "next": "padRepeater, time:u, caminhos relativos a partir de sdmc:/ (chdir do __appInit); depois emular as respostas IPC (CMIF) de sm, hid e fs no buffer da TLS"
+      "progress": 90,
+      "summary": "Primitivas libnx, 27 SVCs do kernel (21 implementados sobre Bionic/POSIX e 6 de IPC/memória compartilhada como dummies), API Thread/Mutex/RMutex/CondVar, time:u (timeGetCurrentTime sobre CLOCK_REALTIME, microssegundos, steady clock, calendário local), ciclo de vida do applet (hooks, foco, modo de operação, pedido de saída com appletLockExit, fila de mensagens entregue no appletMainLoop), framebuffer linear simulado (framebufferCreate/MakeLinear/Begin/End, RGBA8888/RGBX/BGRA/565/4444, checksum FNV-1a e PPM da tela), fs de alto nível (fsOpenSdCardFileSystem + fsFs/fsFile/fsDir sobre um diretório do host, portátil Bionic/Windows, caminhos normalizados contra \"..\"), dispositivos do stdio (fsdevMountSdmc/MountDevice/TranslatePath e romfsInit/MountSelf somente leitura, com fopen/opendir/stat/... roteados para sdmc:/ e romfs:/) e entrada desacoplada (roteiro por quadro + buffer ao vivo com seqlock, botões e analógicos, PadState compacta inalterada), com os tipos e resultados da libnx 2.10.0",
+      "next": "svcCreateTransferMemory (0x15, visto no hb_fb.nro), padRepeater, caminhos relativos a partir de sdmc:/; depois emular as respostas IPC (CMIF) de sm, hid e fs no buffer da TLS"
     },
     {
       "name": "Horizon Static Analysis",
@@ -197,7 +197,7 @@
       "phase": 3,
       "title": "Loader ELF e Tradução de ABI / Syscalls",
       "status": "in_progress",
-      "progress": 80,
+      "progress": 90,
       "items": [
         {
           "name": "Shim HLE de primitivas libnx (console, applet, pad, timer) — switch_hle_shim.h",
@@ -257,6 +257,10 @@
         },
         {
           "name": "RomFS (romfs:/ somente leitura) e fsdev (sdmc:/) com stdio roteado no shim; svc_shim_test 153/153 no A56 e 99/99 no host; hb_assets validado",
+          "done": true
+        },
+        {
+          "name": "time:u, ciclo de vida do applet (foco, hooks, pedido de saída) e framebuffer linear 1280x720 no shim; svc_shim_test 192/192 no A56 e 138/138 no host; hb_fb validado (checksum e PPM = referência numpy)",
           "done": true
         },
         {
@@ -1078,6 +1082,76 @@
           },
           {
             "check": "-Wall -Wextra sem warnings: shim + suíte (NDK r28 e llvm-mingw) e hb_assets (devkitA64)",
+            "value": "0 warnings",
+            "ok": true
+          }
+        ]
+      },
+      {
+        "id": "hb_fb",
+        "title": "Homebrew libnx com framebuffer linear: 60 frames 1280x720 RGBA8888 por software + relógio + ciclo de vida do applet",
+        "ops": "timeInitialize/timeGetCurrentTime/timeToCalendarTimeWithMyRule, appletLockExit/appletHook/appletGetFocusState/appletIsAutoPowerDownRequested, framebufferCreate/MakeLinear/Begin/End/Close, appletMainLoop até o pedido de saída",
+        "expected": {
+          "Frames": "60",
+          "Soma ponderada (60 frames)": "0x1b5c804513888ea0",
+          "FNV-1a do último frame": "0x2a45a5f1c5fad331",
+          "Saída": "pedido do sistema (OnExitRequest x1)"
+        },
+        "neon_median_s": 0.002824,
+        "scalar_median_s": null,
+        "reconstructed": {
+          "binary": "hb_fb_oracle",
+          "status": "hle_port",
+          "note": "Barras de cor rolando, degradê animado e quadrado em movimento; a animação depende só do número do quadro (o tick do sistema só mede o tempo de render), por isso o checksum é determinístico. O mesmo hb_fb.c compila com a libnx 2.10.0 real (devkitA64, 0 warnings) e como oráculo pelo shim, no qual o sistema pede a saída depois do quadro 60 (appletLockExit + hook OnExitRequest, appletMainLoop devolve false). A tela apresentada pelo shim é conferida com o FNV-1a calculado pelo app e gravada em PPM, idêntico byte a byte à referência numpy (ref_hb_fb.py) no host e no A56. Render por software no A56: mediana 2,82 ms/frame (2,79–2,91, 15×, cpu7). O hb_fb.nro real usa svcCreateTransferMemory (0x15), ainda fora do shim."
+        },
+        "attempts": [],
+        "device_runs": [
+          {
+            "binary": "hb_fb_oracle (taskset cpu7, tempo de render por frame)",
+            "runs": 15,
+            "median_s": 0.002824,
+            "min_s": 0.002788,
+            "result": "0x2a45a5f1c5fad331"
+          }
+        ],
+        "validation": [
+          {
+            "check": "Referência numpy (ref_hb_fb.py): soma ponderada dos 60 frames e FNV-1a do último",
+            "value": "0x1b5c804513888ea0 / 0x2a45a5f1c5fad331",
+            "ok": true
+          },
+          {
+            "check": "Oráculo no host (llvm-mingw) e no A56 (15×, taskset 80): saída idêntica",
+            "value": "60 frames / 0x1b5c804513888ea0 / 0x2a45a5f1c5fad331 / OnExitRequest x1",
+            "ok": true
+          },
+          {
+            "check": "PPM da tela (shimFramebufferDumpPPM) = último frame da referência, host e A56",
+            "value": "2.764.816 bytes, idêntico",
+            "ok": true
+          },
+          {
+            "check": "hb_fb.nro: sítios do nro_tool.py conferidos contra o hb_fb.elf",
+            "value": "210 (24 svc, 0x15 novo), OK",
+            "ok": true
+          },
+          {
+            "check": "svc_shim_test: time, applet e framebuffer portáveis no host (llvm-mingw)",
+            "value": "138/138",
+            "ok": true
+          },
+          {
+            "check": "svc_shim_test no A56 (10× taskset 80 + 5× taskset f0)",
+            "value": "192/192",
+            "ok": true
+          },
+          {
+            "check": "Regressão: 11 binários da suíte com o shim novo × anterior no A56 (15× taskset 80; hb_threads também f0) e no host; main() igual instrução a instrução",
+            "value": "11/11",
+            "ok": true
+          },
+          {
+            "check": "-Wall -Wextra sem warnings: shim + suíte (NDK r28 e llvm-mingw) e hb_fb (devkitA64)",
             "value": "0 warnings",
             "ok": true
           }
