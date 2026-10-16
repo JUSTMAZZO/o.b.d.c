@@ -87,9 +87,9 @@
       "name": "Switch HLE Shim",
       "file": "switch_hle_shim.h",
       "status": "in_progress",
-      "progress": 55,
-      "summary": "Primitivas libnx, 27 SVCs do kernel (21 implementados sobre Bionic/POSIX e 6 de IPC/memória compartilhada como dummies), API Thread/Mutex/RMutex/CondVar e inicialização de sm/applet/hid/fs dummy, com os tipos e resultados da libnx 2.10.0",
-      "next": "Emular as respostas IPC (CMIF) de sm, hid e fs no buffer da TLS em vez de dummies"
+      "progress": 70,
+      "summary": "Primitivas libnx, 27 SVCs do kernel (21 implementados sobre Bionic/POSIX e 6 de IPC/memória compartilhada como dummies), API Thread/Mutex/RMutex/CondVar, fs de alto nível (fsOpenSdCardFileSystem + fsFs/fsFile/fsDir sobre um diretório do host, portátil Bionic/Windows, caminhos normalizados contra \"..\") e entrada desacoplada (roteiro por quadro + buffer ao vivo com seqlock, botões e analógicos, PadState compacta inalterada), com os tipos e resultados da libnx 2.10.0",
+      "next": "fsdev (sdmc:/ pelo stdio do newlib), padRepeater, time:u; depois emular as respostas IPC (CMIF) de sm, hid e fs no buffer da TLS"
     },
     {
       "name": "Horizon Static Analysis",
@@ -197,7 +197,7 @@
       "phase": 3,
       "title": "Loader ELF e Tradução de ABI / Syscalls",
       "status": "in_progress",
-      "progress": 70,
+      "progress": 75,
       "items": [
         {
           "name": "Shim HLE de primitivas libnx (console, applet, pad, timer) — switch_hle_shim.h",
@@ -249,6 +249,10 @@
         },
         {
           "name": "Inventário IPC com hb_services (sm, applet, hid, fs): 6 SVCs de IPC/memória compartilhada mapeados, dummies no shim",
+          "done": true
+        },
+        {
+          "name": "fs (cartão SD sobre diretório do host) e entrada desacoplada (roteiro + buffer ao vivo, analógicos) no shim; svc_shim_test 124/124 no A56 e 70/70 no host; hb_io validado",
           "done": true
         },
         {
@@ -935,6 +939,76 @@
           {
             "check": "svc_shim_test no A56 com os SVCs de IPC dummy",
             "value": "54/54",
+            "ok": true
+          }
+        ]
+      },
+      {
+        "id": "hb_io",
+        "title": "Homebrew libnx com cartão SD e analógicos: 1 MiB escrito e lido pelo fs + 60 frames de pad",
+        "ops": "fsOpenSdCardFileSystem, fsFsCreateDirectory/CreateFile/OpenFile/RenameFile/OpenDirectory/DeleteDirectoryRecursively, fsFileWrite (Append)/Read/GetSize/Flush, fsDirGetEntryCount, padUpdate, padGetStickPos",
+        "expected": {
+          "FNV-1a (1 MiB)": "0x3cc5e3ccd09fa325",
+          "Frames": "60",
+          "Botoes pressionados": "2",
+          "Analógicos (Σ lx / ly / rx)": "-46080 / 514560 / 655340"
+        },
+        "neon_median_s": null,
+        "scalar_median_s": null,
+        "reconstructed": {
+          "binary": "hb_io_oracle",
+          "status": "hle_port",
+          "note": "Mesmo hb_io.c compilado com a libnx 2.10.0 real (devkitA64, -Wall -Wextra sem warnings: as assinaturas do shim batem com o switch.h) e como oráculo pelo shim (NDK r28 e llvm-mingw). No NRO, fs e hid passam por IPC (svcSendSyncRequest): 148 sítios, 23 SVCs, todos já tratados pelo shim. No oráculo o cartão SD é ./sdcard e o pad segue um roteiro (A no 30, Plus no 60, analógico esquerdo em rampa, direito no máximo do 20 ao 39)."
+        },
+        "attempts": [],
+        "device_runs": [
+          {
+            "binary": "hb_io_oracle (taskset cpu7)",
+            "runs": 15,
+            "median_s": null,
+            "min_s": null,
+            "result": "0x3cc5e3ccd09fa325"
+          }
+        ],
+        "validation": [
+          {
+            "check": "Referência Python (FNV-1a do padrão de 1 MiB e somas do roteiro de analógicos)",
+            "value": "0x3cc5e3ccd09fa325 / -46080 / 514560 / 655340",
+            "ok": true
+          },
+          {
+            "check": "Oráculo no host (llvm-mingw) e no A56 (15×, taskset 80): saída idêntica",
+            "value": "0x3cc5e3ccd09fa325 / 60 / 2 / -46080 / 514560 / 655340",
+            "ok": true
+          },
+          {
+            "check": "hb_io.nro: sítios do nro_tool.py conferidos contra o hb_io.elf",
+            "value": "148 (23 svc), OK",
+            "ok": true
+          },
+          {
+            "check": "svc_shim_test: fs + entrada portáveis no host (llvm-mingw)",
+            "value": "70/70",
+            "ok": true
+          },
+          {
+            "check": "svc_shim_test no A56 (taskset 80 e 5× taskset f0: seqlock sem estados misturados, symlink fora da raiz preservado)",
+            "value": "124/124",
+            "ok": true
+          },
+          {
+            "check": "Regressão: 9 binários da suíte com o shim novo × antigo no A56 (15× taskset 80; hb_threads também f0) e no host",
+            "value": "saída idêntica, valores do status.json",
+            "ok": true
+          },
+          {
+            "check": "Regressão: main() dos 9 binários (NDK r28) igual instrução a instrução, só endereços de .rodata mudam; frames de pilha idênticos",
+            "value": "9/9",
+            "ok": true
+          },
+          {
+            "check": "-Wall -Wextra sem warnings: shim + suíte (NDK r28 e llvm-mingw) e hb_io (devkitA64)",
+            "value": "0 warnings",
             "ok": true
           }
         ]
