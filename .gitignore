@@ -36,3 +36,6 @@ horizon_rt/**/*.elf
 horizon_rt/**/*.nro
 horizon_rt/**/*.map
 horizon_rt/**/*.dis
+
+# Executaveis do gate no host gerados ao lado do --emit-c
+*_host.exe

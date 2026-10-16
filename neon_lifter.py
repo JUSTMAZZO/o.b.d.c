@@ -189,8 +189,13 @@ def fn_consts(assembly, upto):
     return consts
 
 
-def resolve_preheader(preheader, resolved_data, body, consts=None):
+def resolve_preheader(preheader, resolved_data, body, consts=None, prior=None):
+    """prior = [(inicio, fim, estado_de_saida)] dos loops anteriores: as instrucoes deles no
+    pre-cabecalho nao sao replicadas (rodam N vezes, nao uma); no lugar entra o estado com que o
+    loop termina (ex.: indice = limite)."""
     consts = consts or {}
+    prior = sorted(prior or [])
+    applied = set()
     vec, sym_vecs, notes = {}, {}, []
     # callee-saved com valor constante definido antes (ex.: limite em bytes no topo do main)
     scal = {r: v for r, v in consts.items() if int(r) >= 19}
@@ -202,6 +207,15 @@ def resolve_preheader(preheader, resolved_data, body, consts=None):
 
     for line in preheader:
         addr, mn, ops = parse(line)
+        a = int(addr, 16)
+        for k, (lo, hi, exit_state) in enumerate(prior):
+            if k not in applied and a > hi:
+                scal.update(exit_state)
+                applied.add(k)
+                notes.append(f"(fim do loop {lo:#x}-{hi:#x})  =>  " +
+                             ', '.join(f"x{r} = {v:#x}" for r, v in exit_state.items()))
+        if any(lo <= a <= hi for lo, hi, _ in prior):
+            continue
         if mn == 'mov' and ops[0].startswith('v'):
             d, s = vreg(ops[0])[0], vreg(ops[1])[0]
             vec[d] = {'lanes': list(vec[s]['lanes']), 'width': vec[s]['width']}
@@ -217,7 +231,14 @@ def resolve_preheader(preheader, resolved_data, body, consts=None):
                 notes.append(f"{line}  =>  x{dst} = ponteiro `{ptr_names[dst]}` (retorno de chamada)")
             elif src[1:] in ptr_names:
                 ptr_names[dst] = ptr_names[src[1:]]
-                scal[dst] = 0
+                scal[dst] = scal.get(src[1:], 0)
+        elif mn == 'add' and ops[0][0] in 'wx' and len(ops) == 3 and ops[1][1:] in ptr_names \
+                and ops[2][0] in 'wx':
+            # ponteiro = buffer + deslocamento em bytes (ex.: fim do array para um loop por ponteiro)
+            dst, base, off = ops[0][1:], ops[1][1:], ops[2][1:]
+            ptr_names[dst] = ptr_names[base]
+            scal[dst] = (scal.get(base, 0) + scal.get(off, 0)) & M64
+            notes.append(f"{line}  =>  x{dst} = `{ptr_names[dst]}` + {scal[dst]:#x}")
         elif mn in ('add', 'sub') and ops[0][0] in 'wx' and len(ops) == 3 and ops[2].startswith('#')                 and ops[1][0] in 'wx' and ops[1] not in ('sp', 'wsp'):
             dst, src = ops[0][1:], ops[1][1:]
             base = scal.get(src, consts.get(src))
@@ -233,6 +254,10 @@ def resolve_preheader(preheader, resolved_data, body, consts=None):
         elif mn == 'movi':
             name, n, w = vreg(ops[0])
             val = imm(ops[1])
+            if len(ops) > 2:   # LSL #s desloca; MSL #s desloca preenchendo com uns (ex.: 0xff, MSL #8 = 0xffff)
+                kind, sh = ops[2].split()
+                sh = imm(sh)
+                val = (val << sh) | ((1 << sh) - 1 if kind.upper() == 'MSL' else 0)
             if w == 64 and val > M32 and (val & M32) == ((val >> 32) & M32):
                 vec[name] = {'lanes': [val & M32] * 4, 'width': 32}
             else:
@@ -268,10 +293,13 @@ def resolve_preheader(preheader, resolved_data, body, consts=None):
             notes.append(f"{line}  =>  {key} => {vname} = {lanes}")
         elif mn in ('adrp', 'adr', 'sub', 'str', 'add', 'mul', 'cmp', 'stp', 'ldp',
                     'b.ne', 'tst', 'csinc', 'ushr', 'subs', 'and', 'eor', 'shl',
-                    'ld1', 'ld2', 'ld3', 'ld4', 'st1', 'st2', 'st3', 'st4', 'uaddw', 'uaddw2'):
+                    'ld1', 'ld2', 'ld3', 'ld4', 'st1', 'st2', 'st3', 'st4', 'uaddw', 'uaddw2', 'ccmp', 'mrs'):
             pass
         else:
             raise LiftError(f"instrucao de pre-cabecalho nao suportada: {line}")
+    for k, (lo, hi, exit_state) in enumerate(prior):
+        if k not in applied:
+            scal.update(exit_state)
     return scal, vec, ptr_names, sym_vecs, notes
 
 
@@ -282,22 +310,29 @@ def step(body, vec, scal, sem, ptr_names=None, sym_mode=False, contrib=None, sto
     layouts[arr] = campos por elemento (1 = array contiguo; n = struct de n uint32, via ldN/stN)."""
     branch = None
     alias = {}
+    post_inc = {}   # registrador -> incremento do pos-incremento nesta volta
     layouts = {} if layouts is None else layouts
 
-    def access(load, regs, nf, mem_op, post, line):
-        """ldr/str q, ldp/stp q, ld1-4/st1-4 [base], com pos-incremento opcional (#imm ou registrador)."""
-        r = mem_op.strip('[]')[1:]
+    def access(load, regs, nf, mem_op, post, line, nlanes=4):
+        """ldr/str q, ldp/stp q, ld1-4/st1-4, ldr/str w: [base] ou [base, xidx], com pos-incremento
+        opcional (#imm ou registrador). nlanes = 1 para registrador escalar de 32 bits."""
+        parts = [x.strip() for x in mem_op.strip('[]').split(',')]
+        r = parts[0][1:]
         arr = alias.get(r) or ptr_names.get(r)
         if arr is None:
             raise LiftError(f"base de endereco desconhecida: {line}")
         if layouts.setdefault(arr, nf) != nf:
             raise LiftError(f"{arr} acessado como {layouts[arr]} e {nf} campos por elemento: {line}")
         off = scal.get(r, 0)
+        if len(parts) > 1:
+            if not parts[1][0] in 'wx':
+                raise LiftError(f"deslocamento de endereco nao suportado: {line}")
+            off = (off + scal.get(parts[1].split('#')[0][1:], 0)) & M64
         if off % (4 * nf):
             raise LiftError(f"acesso desalinhado ao elemento de {arr}: {line}")
         for j, reg in enumerate(regs):
             lanes = []
-            for k in range(4):
+            for k in range(nlanes):
                 if nf == 1:      # contiguo: registrador j, lane k -> elemento 4j+k
                     word = off // 4 + 4 * j + k
                     sym = E('mem', arr, word)
@@ -314,7 +349,9 @@ def step(body, vec, scal, sem, ptr_names=None, sym_mode=False, contrib=None, sto
             if load:
                 vec[reg] = lanes
         if post:
-            scal[r] = off + (imm(post) if post.startswith('#') else scal.get(post.strip()[1:], 0))
+            inc = imm(post) if post.startswith('#') else scal.get(post.strip()[1:], 0)
+            scal[r] = off + inc
+            post_inc[r] = inc
 
     for line in body:
         addr, mn, ops = parse(line)
@@ -331,6 +368,13 @@ def step(body, vec, scal, sem, ptr_names=None, sym_mode=False, contrib=None, sto
             if contrib is not None:
                 contrib.extend((d, k, x) for k, x in enumerate(src_lanes))
             vec[d] = [sem['uaddw'](x, y) for x, y in zip(vec[a], src_lanes)]
+        elif mn == 'add' and ops[0][0] in 'wx' and ops[1][1:] == ops[0][1:] and \
+                f"x{ops[2][1:]}" in vec and f"x{ops[0][1:]}" in vec:
+            # acumulador escalar: xA += xV (V carregado da memoria nesta volta)
+            d, v = f"x{ops[0][1:]}", f"x{ops[2][1:]}"
+            if contrib is not None:
+                contrib.append((d, 0, vec[v][0]))
+            vec[d] = [sem['uaddw'](vec[d][0], vec[v][0])]
         elif mn == 'add' and ops[0][0] in 'wx':
             dst, s1, s2 = ops[0][1:], ops[1][1:], ops[2]
             if s2.startswith('#'):
@@ -344,6 +388,8 @@ def step(body, vec, scal, sem, ptr_names=None, sym_mode=False, contrib=None, sto
                     scal[dst] = (scal.get(s1, 0) + scal.get(r2, 0)) & M64
         elif mn in ('ldr', 'str') and ops[0][0].lower() == 'q':
             access(mn == 'ldr', [qreg(ops[0])], 1, ops[1], ops[2] if len(ops) > 2 else None, line)
+        elif mn in ('ldr', 'str') and ops[0][0].lower() == 'w':
+            access(mn == 'ldr', [f"x{ops[0][1:]}"], 1, ops[1], ops[2] if len(ops) > 2 else None, line, nlanes=1)
         elif mn in ('ldp', 'stp') and ops[0][0].lower() == 'q':
             access(mn == 'ldp', [qreg(ops[0]), qreg(ops[1])], 1, ops[2], ops[3] if len(ops) > 3 else None, line)
         elif re.fullmatch(r'(ld|st)[1-4]', mn):
@@ -361,9 +407,14 @@ def step(body, vec, scal, sem, ptr_names=None, sym_mode=False, contrib=None, sto
             branch = ('counter', ops[0][1:], imm(ops[2]))
             scal[ops[0][1:]] = (scal[ops[0][1:]] - imm(ops[2])) & M32
         elif mn == 'cmp' and ops[0][0] in 'wx':
-            lim_reg, idx_reg = ops[0][1:], ops[1][1:]
-            if branch and branch[0] == 'byte_offset':
-                branch = ('cmp_bytes', lim_reg, idx_reg, branch[2])
+            a, b = ops[0][1:], ops[1][1:]
+            # o indice e o registrador que avanca nesta volta (add #imm ou pos-incremento); o outro e o limite
+            stepped = {branch[1]: branch[2]} if branch and branch[0] == 'byte_offset' else {}
+            stepped.update(post_inc)
+            if a in stepped or b in stepped:
+                idx_reg = a if a in stepped else b
+                lim_reg = b if idx_reg == a else a
+                branch = ('cmp_bytes', lim_reg, idx_reg, stepped[idx_reg])
         elif mn == 'b.ne':
             pass
         else:
@@ -371,9 +422,15 @@ def step(body, vec, scal, sem, ptr_names=None, sym_mode=False, contrib=None, sto
     return branch
 
 
-def lift_single_loop(loop, resolved_data, idx, consts=None):
+def lift_single_loop(loop, resolved_data, idx, consts=None, prior=None):
     body = loop['body']
-    scal, vec, ptr_names, sym_vecs, notes = resolve_preheader(loop['preheader'], resolved_data, body, consts)
+    scal, vec, ptr_names, sym_vecs, notes = resolve_preheader(loop['preheader'], resolved_data, body, consts, prior)
+    # acumulador escalar (add xA, xA, xV): 1 lane com o valor inicial do pre-cabecalho
+    for line in body:
+        _, mn, ops = parse(line)
+        if mn == 'add' and len(ops) == 3 and ops[0][0] == 'x' and ops[1] == ops[0] and ops[2][0] in 'wx' \
+                and not ops[2].startswith('#'):
+            vec[ops[0]] = {'lanes': [scal.get(ops[0][1:], 0)], 'width': 64}
 
     svec = {}
     for n, v in vec.items():
@@ -399,7 +456,9 @@ def lift_single_loop(loop, resolved_data, idx, consts=None):
         total = trips * stride
     elif br[0] == 'cmp_bytes':
         _, lim_reg, idx_reg, byte_inc = br
-        total_bytes = scal[lim_reg]
+        if lim_reg not in scal:
+            raise LiftError(f"limite x{lim_reg} do loop sem valor conhecido")
+        total_bytes = scal[lim_reg] - scal.get(idx_reg, 0)
         trips = total_bytes // byte_inc
         sizes = {4 * n for n in layouts.values()}
         if len(sizes) > 1:
@@ -445,7 +504,12 @@ def lift_single_loop(loop, resolved_data, idx, consts=None):
     if acc_tmpl is not None:
         arrays |= acc_tmpl.arrays()
 
-    return dict(idx=idx, start=loop['start'], end=loop['end'], arrays=arrays, layouts=layouts,
+    if br[0] == 'counter':
+        exit_state = {br[1]: 0}
+    else:   # o indice sai igual ao limite
+        exit_state = {br[2]: scal[br[1]]}
+
+    return dict(idx=idx, start=loop['start'], end=loop['end'], arrays=arrays, layouts=layouts, exit=exit_state,
                 notes=notes, ind=ind, i0=i0, stride=stride, trips=trips, total=total,
                 stores=store_list, tmpl=acc_tmpl, tmpl_str=acc_str, uses=uses,
                 accs=sorted({u[0] for u in uses}), scal=scal, vec=vec, ptr_names=ptr_names,
@@ -583,7 +647,7 @@ def check_placement(skel, code, loops):
         ph_pos = squash(skel).find(squash(f"/* <LOOP_NEON_{L['idx']}> */"))
         want_calls, got_calls = calls_before(squash(skel), ph_pos), calls_before(flat, pos)
         if want_calls != got_calls:
-            moved = sorted(set(want_calls.elements()) ^ set(got_calls.elements()))
+            moved = sorted(((want_calls - got_calls) + (got_calls - want_calls)).keys())   # nome ou contagem
             problems.append(f"LOOP_NEON_{L['idx']} mudou de posicao em relacao as chamadas {moved}: "
                             f"no esqueleto elas ficam {'antes' if (want_calls - got_calls) else 'depois'} do loop")
     return problems
@@ -711,7 +775,9 @@ def ask_qwen(summ, skel, out, loops, ref_values=None, retries=1):
         "3. O esqueleto foi gerado do CFG: variaveis com nome de registrador (`w21`, `x23`, `p0`...) e objetos de "
         "pilha (`sp_0x10`) devem ganhar nomes e tipos semanticos coerentes com as funcoes chamadas, "
         "sem mudar o comportamento. Os buffers `buf_xNN`, os tipos `buf_xNN_t` e os campos `.fN` aparecem nas formulas: mantenha esses nomes.\n"
-        f"4. Responda apenas com o bloco {BT3}c contendo o codigo final compilavel."
+        "4. Fora dos placeholders, copie o esqueleto linha por linha: nao remova, nao mova e nao reescreva "
+        "nenhuma linha (inclusive `for (;;)`, `break` e atribuicoes iniciais como `w2 = 1;`).\n"
+        f"5. Responda apenas com o bloco {BT3}c contendo o codigo final compilavel."
     )
     messages = [{"role": "user", "content": prompt}]
     for attempt in range(retries + 1):
@@ -753,8 +819,11 @@ def main():
     # Filtra apenas loops folha NEON (ignora loops de controle que contem chamadas 'bl ')
     neon_loops = [lp for lp in fn['loops'] if not any(': bl ' in insn for insn in lp['body'])]
 
-    loops = [lift_single_loop(lp, fn['resolved_data'], i + 1, fn_consts(fn['assembly'], int(lp['start'], 16)))
-             for i, lp in enumerate(neon_loops)]
+    loops = []
+    for i, lp in enumerate(neon_loops):
+        prior = [(int(L['start'], 16), int(L['end'], 16), L['exit']) for L in loops]
+        loops.append(lift_single_loop(lp, fn['resolved_data'], i + 1,
+                                      fn_consts(fn['assembly'], int(lp['start'], 16)), prior))
     summ = summary_all(loops)
     print(summ)
 
@@ -766,7 +835,10 @@ def main():
         sys.exit("[lifter] validacao por loop falhou; abortando.")
 
     try:
-        skel = cfg_skeleton.build(fn, data, loops)
+        # funcoes do proprio programa chamadas pelo main e extraidas no JSON (ex.: auxiliares do homebrew)
+        targets = {int(a, 16) for a in fn.get('calls', {})}
+        helpers = [f for f in data['functions'] if f is not fn and int(f['entry_point'], 16) in targets]
+        skel = cfg_skeleton.build(fn, data, loops, extra_fns=helpers)
     except cfg_skeleton.SkeletonError as e:
         sys.exit(f"[esqueleto] {e}")
     print("\n## Esqueleto do CFG\n" + skel)

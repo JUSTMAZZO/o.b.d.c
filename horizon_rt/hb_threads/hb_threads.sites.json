@@ -1,0 +1,2014 @@
+{
+  "mod0_offset": 240,
+  "version": 0,
+  "size": 98304,
+  "flags": 0,
+  "segments": {
+    "text": {
+      "offset": 0,
+      "size": 69632
+    },
+    "ro": {
+      "offset": 69632,
+      "size": 12288
+    },
+    "data": {
+      "offset": 81920,
+      "size": 16384
+    }
+  },
+  "bss_size": 4096,
+  "build_id": "f5f739b4bd8fb300c903508db69006abb653636f000000000000000000000000",
+  "image_size": 102400,
+  "mod0": {
+    "dynamic": 82192,
+    "bss_start": 97904,
+    "bss_end": 101528,
+    "eh_frame_hdr_start": 72312,
+    "eh_frame_hdr_end": 72312,
+    "module_object": 240
+  },
+  "dynamic": {
+    "0xc": 66576,
+    "0xd": 66632,
+    "0x19": 81920,
+    "0x1b": 8,
+    "0x1a": 81928,
+    "0x1c": 8,
+    "HASH": 69768,
+    "STRTAB": 69864,
+    "SYMTAB": 69792,
+    "STRSZ": 1,
+    "SYMENT": 24,
+    "0x15": 0,
+    "RELA": 0,
+    "RELASZ": 0,
+    "RELAENT": 24,
+    "0x18": 0,
+    "FLAGS_1": 134217729,
+    "RELR": 69656,
+    "RELRSZ": 112,
+    "RELRENT": 8
+  },
+  "relocs": [
+    {
+      "kind": "relr",
+      "offset": 81920,
+      "addend": 1216
+    },
+    {
+      "kind": "relr",
+      "offset": 81928,
+      "addend": 1120
+    },
+    {
+      "kind": "relr",
+      "offset": 81936,
+      "addend": 70568
+    },
+    {
+      "kind": "relr",
+      "offset": 81968,
+      "addend": 64640
+    },
+    {
+      "kind": "relr",
+      "offset": 82536,
+      "addend": 102400
+    },
+    {
+      "kind": "relr",
+      "offset": 82544,
+      "addend": 17408
+    },
+    {
+      "kind": "relr",
+      "offset": 82552,
+      "addend": 9024
+    },
+    {
+      "kind": "relr",
+      "offset": 82560,
+      "addend": 8928
+    },
+    {
+      "kind": "relr",
+      "offset": 82568,
+      "addend": 101480
+    },
+    {
+      "kind": "relr",
+      "offset": 82576,
+      "addend": 98912
+    },
+    {
+      "kind": "relr",
+      "offset": 82584,
+      "addend": 97616
+    },
+    {
+      "kind": "relr",
+      "offset": 82592,
+      "addend": 81936
+    },
+    {
+      "kind": "relr",
+      "offset": 82600,
+      "addend": 72304
+    },
+    {
+      "kind": "relr",
+      "offset": 82608,
+      "addend": 71816
+    },
+    {
+      "kind": "relr",
+      "offset": 82616,
+      "addend": 100912
+    },
+    {
+      "kind": "relr",
+      "offset": 82624,
+      "addend": 8896
+    },
+    {
+      "kind": "relr",
+      "offset": 82632,
+      "addend": 8960
+    },
+    {
+      "kind": "relr",
+      "offset": 82640,
+      "addend": 71256
+    },
+    {
+      "kind": "relr",
+      "offset": 82648,
+      "addend": 17600
+    },
+    {
+      "kind": "relr",
+      "offset": 82664,
+      "addend": 100904
+    },
+    {
+      "kind": "relr",
+      "offset": 82672,
+      "addend": 98920
+    },
+    {
+      "kind": "relr",
+      "offset": 82680,
+      "addend": 71776
+    },
+    {
+      "kind": "relr",
+      "offset": 82688,
+      "addend": 9072
+    },
+    {
+      "kind": "relr",
+      "offset": 82696,
+      "addend": 9056
+    },
+    {
+      "kind": "relr",
+      "offset": 82704,
+      "addend": 100928
+    },
+    {
+      "kind": "relr",
+      "offset": 82712,
+      "addend": 97896
+    },
+    {
+      "kind": "relr",
+      "offset": 82720,
+      "addend": 101528
+    },
+    {
+      "kind": "relr",
+      "offset": 82736,
+      "addend": 6008
+    },
+    {
+      "kind": "relr",
+      "offset": 82744,
+      "addend": 86616
+    },
+    {
+      "kind": "relr",
+      "offset": 82752,
+      "addend": 100800
+    },
+    {
+      "kind": "relr",
+      "offset": 82760,
+      "addend": 100816
+    },
+    {
+      "kind": "relr",
+      "offset": 82768,
+      "addend": 100808
+    },
+    {
+      "kind": "relr",
+      "offset": 82776,
+      "addend": 86632
+    },
+    {
+      "kind": "relr",
+      "offset": 82784,
+      "addend": 17184
+    },
+    {
+      "kind": "relr",
+      "offset": 82792,
+      "addend": 81928
+    },
+    {
+      "kind": "relr",
+      "offset": 82800,
+      "addend": 100896
+    },
+    {
+      "kind": "relr",
+      "offset": 82808,
+      "addend": 71368
+    },
+    {
+      "kind": "relr",
+      "offset": 82816,
+      "addend": 97896
+    },
+    {
+      "kind": "relr",
+      "offset": 82824,
+      "addend": 17504
+    },
+    {
+      "kind": "relr",
+      "offset": 82832,
+      "addend": 86024
+    },
+    {
+      "kind": "relr",
+      "offset": 82840,
+      "addend": 81928
+    },
+    {
+      "kind": "relr",
+      "offset": 82848,
+      "addend": 71480
+    },
+    {
+      "kind": "relr",
+      "offset": 82856,
+      "addend": 101528
+    },
+    {
+      "kind": "relr",
+      "offset": 82864,
+      "addend": 101528
+    },
+    {
+      "kind": "relr",
+      "offset": 82872,
+      "addend": 101504
+    },
+    {
+      "kind": "relr",
+      "offset": 82880,
+      "addend": 86032
+    },
+    {
+      "kind": "relr",
+      "offset": 82888,
+      "addend": 101512
+    },
+    {
+      "kind": "relr",
+      "offset": 82896,
+      "addend": 81920
+    },
+    {
+      "kind": "relr",
+      "offset": 82904,
+      "addend": 88696
+    },
+    {
+      "kind": "relr",
+      "offset": 82912,
+      "addend": 17280
+    },
+    {
+      "kind": "relr",
+      "offset": 82920,
+      "addend": 86624
+    },
+    {
+      "kind": "relr",
+      "offset": 82928,
+      "addend": 320
+    },
+    {
+      "kind": "relr",
+      "offset": 82936,
+      "addend": 86040
+    },
+    {
+      "kind": "relr",
+      "offset": 82944,
+      "addend": 70992
+    },
+    {
+      "kind": "relr",
+      "offset": 82952,
+      "addend": 81920
+    },
+    {
+      "kind": "relr",
+      "offset": 82960,
+      "addend": 9040
+    },
+    {
+      "kind": "relr",
+      "offset": 82968,
+      "addend": 81920
+    },
+    {
+      "kind": "relr",
+      "offset": 82984,
+      "addend": 88720
+    },
+    {
+      "kind": "relr",
+      "offset": 86032,
+      "addend": 86040
+    },
+    {
+      "kind": "relr",
+      "offset": 86048,
+      "addend": 100928
+    },
+    {
+      "kind": "relr",
+      "offset": 86056,
+      "addend": 101112
+    },
+    {
+      "kind": "relr",
+      "offset": 86064,
+      "addend": 101296
+    },
+    {
+      "kind": "relr",
+      "offset": 86648,
+      "addend": 86632
+    },
+    {
+      "kind": "relr",
+      "offset": 86656,
+      "addend": 86632
+    },
+    {
+      "kind": "relr",
+      "offset": 86664,
+      "addend": 86648
+    },
+    {
+      "kind": "relr",
+      "offset": 86672,
+      "addend": 86648
+    },
+    {
+      "kind": "relr",
+      "offset": 86680,
+      "addend": 86664
+    },
+    {
+      "kind": "relr",
+      "offset": 86688,
+      "addend": 86664
+    },
+    {
+      "kind": "relr",
+      "offset": 86696,
+      "addend": 86680
+    },
+    {
+      "kind": "relr",
+      "offset": 86704,
+      "addend": 86680
+    },
+    {
+      "kind": "relr",
+      "offset": 86712,
+      "addend": 86696
+    },
+    {
+      "kind": "relr",
+      "offset": 86720,
+      "addend": 86696
+    },
+    {
+      "kind": "relr",
+      "offset": 86728,
+      "addend": 86712
+    },
+    {
+      "kind": "relr",
+      "offset": 86736,
+      "addend": 86712
+    },
+    {
+      "kind": "relr",
+      "offset": 86744,
+      "addend": 86728
+    },
+    {
+      "kind": "relr",
+      "offset": 86752,
+      "addend": 86728
+    },
+    {
+      "kind": "relr",
+      "offset": 86760,
+      "addend": 86744
+    },
+    {
+      "kind": "relr",
+      "offset": 86768,
+      "addend": 86744
+    },
+    {
+      "kind": "relr",
+      "offset": 86776,
+      "addend": 86760
+    },
+    {
+      "kind": "relr",
+      "offset": 86784,
+      "addend": 86760
+    },
+    {
+      "kind": "relr",
+      "offset": 86792,
+      "addend": 86776
+    },
+    {
+      "kind": "relr",
+      "offset": 86800,
+      "addend": 86776
+    },
+    {
+      "kind": "relr",
+      "offset": 86808,
+      "addend": 86792
+    },
+    {
+      "kind": "relr",
+      "offset": 86816,
+      "addend": 86792
+    },
+    {
+      "kind": "relr",
+      "offset": 86824,
+      "addend": 86808
+    },
+    {
+      "kind": "relr",
+      "offset": 86832,
+      "addend": 86808
+    },
+    {
+      "kind": "relr",
+      "offset": 86840,
+      "addend": 86824
+    },
+    {
+      "kind": "relr",
+      "offset": 86848,
+      "addend": 86824
+    },
+    {
+      "kind": "relr",
+      "offset": 86856,
+      "addend": 86840
+    },
+    {
+      "kind": "relr",
+      "offset": 86864,
+      "addend": 86840
+    },
+    {
+      "kind": "relr",
+      "offset": 86872,
+      "addend": 86856
+    },
+    {
+      "kind": "relr",
+      "offset": 86880,
+      "addend": 86856
+    },
+    {
+      "kind": "relr",
+      "offset": 86888,
+      "addend": 86872
+    },
+    {
+      "kind": "relr",
+      "offset": 86896,
+      "addend": 86872
+    },
+    {
+      "kind": "relr",
+      "offset": 86904,
+      "addend": 86888
+    },
+    {
+      "kind": "relr",
+      "offset": 86912,
+      "addend": 86888
+    },
+    {
+      "kind": "relr",
+      "offset": 86920,
+      "addend": 86904
+    },
+    {
+      "kind": "relr",
+      "offset": 86928,
+      "addend": 86904
+    },
+    {
+      "kind": "relr",
+      "offset": 86936,
+      "addend": 86920
+    },
+    {
+      "kind": "relr",
+      "offset": 86944,
+      "addend": 86920
+    },
+    {
+      "kind": "relr",
+      "offset": 86952,
+      "addend": 86936
+    },
+    {
+      "kind": "relr",
+      "offset": 86960,
+      "addend": 86936
+    },
+    {
+      "kind": "relr",
+      "offset": 86968,
+      "addend": 86952
+    },
+    {
+      "kind": "relr",
+      "offset": 86976,
+      "addend": 86952
+    },
+    {
+      "kind": "relr",
+      "offset": 86984,
+      "addend": 86968
+    },
+    {
+      "kind": "relr",
+      "offset": 86992,
+      "addend": 86968
+    },
+    {
+      "kind": "relr",
+      "offset": 87000,
+      "addend": 86984
+    },
+    {
+      "kind": "relr",
+      "offset": 87008,
+      "addend": 86984
+    },
+    {
+      "kind": "relr",
+      "offset": 87016,
+      "addend": 87000
+    },
+    {
+      "kind": "relr",
+      "offset": 87024,
+      "addend": 87000
+    },
+    {
+      "kind": "relr",
+      "offset": 87032,
+      "addend": 87016
+    },
+    {
+      "kind": "relr",
+      "offset": 87040,
+      "addend": 87016
+    },
+    {
+      "kind": "relr",
+      "offset": 87048,
+      "addend": 87032
+    },
+    {
+      "kind": "relr",
+      "offset": 87056,
+      "addend": 87032
+    },
+    {
+      "kind": "relr",
+      "offset": 87064,
+      "addend": 87048
+    },
+    {
+      "kind": "relr",
+      "offset": 87072,
+      "addend": 87048
+    },
+    {
+      "kind": "relr",
+      "offset": 87080,
+      "addend": 87064
+    },
+    {
+      "kind": "relr",
+      "offset": 87088,
+      "addend": 87064
+    },
+    {
+      "kind": "relr",
+      "offset": 87096,
+      "addend": 87080
+    },
+    {
+      "kind": "relr",
+      "offset": 87104,
+      "addend": 87080
+    },
+    {
+      "kind": "relr",
+      "offset": 87112,
+      "addend": 87096
+    },
+    {
+      "kind": "relr",
+      "offset": 87120,
+      "addend": 87096
+    },
+    {
+      "kind": "relr",
+      "offset": 87128,
+      "addend": 87112
+    },
+    {
+      "kind": "relr",
+      "offset": 87136,
+      "addend": 87112
+    },
+    {
+      "kind": "relr",
+      "offset": 87144,
+      "addend": 87128
+    },
+    {
+      "kind": "relr",
+      "offset": 87152,
+      "addend": 87128
+    },
+    {
+      "kind": "relr",
+      "offset": 87160,
+      "addend": 87144
+    },
+    {
+      "kind": "relr",
+      "offset": 87168,
+      "addend": 87144
+    },
+    {
+      "kind": "relr",
+      "offset": 87176,
+      "addend": 87160
+    },
+    {
+      "kind": "relr",
+      "offset": 87184,
+      "addend": 87160
+    },
+    {
+      "kind": "relr",
+      "offset": 87192,
+      "addend": 87176
+    },
+    {
+      "kind": "relr",
+      "offset": 87200,
+      "addend": 87176
+    },
+    {
+      "kind": "relr",
+      "offset": 87208,
+      "addend": 87192
+    },
+    {
+      "kind": "relr",
+      "offset": 87216,
+      "addend": 87192
+    },
+    {
+      "kind": "relr",
+      "offset": 87224,
+      "addend": 87208
+    },
+    {
+      "kind": "relr",
+      "offset": 87232,
+      "addend": 87208
+    },
+    {
+      "kind": "relr",
+      "offset": 87240,
+      "addend": 87224
+    },
+    {
+      "kind": "relr",
+      "offset": 87248,
+      "addend": 87224
+    },
+    {
+      "kind": "relr",
+      "offset": 87256,
+      "addend": 87240
+    },
+    {
+      "kind": "relr",
+      "offset": 87264,
+      "addend": 87240
+    },
+    {
+      "kind": "relr",
+      "offset": 87272,
+      "addend": 87256
+    },
+    {
+      "kind": "relr",
+      "offset": 87280,
+      "addend": 87256
+    },
+    {
+      "kind": "relr",
+      "offset": 87288,
+      "addend": 87272
+    },
+    {
+      "kind": "relr",
+      "offset": 87296,
+      "addend": 87272
+    },
+    {
+      "kind": "relr",
+      "offset": 87304,
+      "addend": 87288
+    },
+    {
+      "kind": "relr",
+      "offset": 87312,
+      "addend": 87288
+    },
+    {
+      "kind": "relr",
+      "offset": 87320,
+      "addend": 87304
+    },
+    {
+      "kind": "relr",
+      "offset": 87328,
+      "addend": 87304
+    },
+    {
+      "kind": "relr",
+      "offset": 87336,
+      "addend": 87320
+    },
+    {
+      "kind": "relr",
+      "offset": 87344,
+      "addend": 87320
+    },
+    {
+      "kind": "relr",
+      "offset": 87352,
+      "addend": 87336
+    },
+    {
+      "kind": "relr",
+      "offset": 87360,
+      "addend": 87336
+    },
+    {
+      "kind": "relr",
+      "offset": 87368,
+      "addend": 87352
+    },
+    {
+      "kind": "relr",
+      "offset": 87376,
+      "addend": 87352
+    },
+    {
+      "kind": "relr",
+      "offset": 87384,
+      "addend": 87368
+    },
+    {
+      "kind": "relr",
+      "offset": 87392,
+      "addend": 87368
+    },
+    {
+      "kind": "relr",
+      "offset": 87400,
+      "addend": 87384
+    },
+    {
+      "kind": "relr",
+      "offset": 87408,
+      "addend": 87384
+    },
+    {
+      "kind": "relr",
+      "offset": 87416,
+      "addend": 87400
+    },
+    {
+      "kind": "relr",
+      "offset": 87424,
+      "addend": 87400
+    },
+    {
+      "kind": "relr",
+      "offset": 87432,
+      "addend": 87416
+    },
+    {
+      "kind": "relr",
+      "offset": 87440,
+      "addend": 87416
+    },
+    {
+      "kind": "relr",
+      "offset": 87448,
+      "addend": 87432
+    },
+    {
+      "kind": "relr",
+      "offset": 87456,
+      "addend": 87432
+    },
+    {
+      "kind": "relr",
+      "offset": 87464,
+      "addend": 87448
+    },
+    {
+      "kind": "relr",
+      "offset": 87472,
+      "addend": 87448
+    },
+    {
+      "kind": "relr",
+      "offset": 87480,
+      "addend": 87464
+    },
+    {
+      "kind": "relr",
+      "offset": 87488,
+      "addend": 87464
+    },
+    {
+      "kind": "relr",
+      "offset": 87496,
+      "addend": 87480
+    },
+    {
+      "kind": "relr",
+      "offset": 87504,
+      "addend": 87480
+    },
+    {
+      "kind": "relr",
+      "offset": 87512,
+      "addend": 87496
+    },
+    {
+      "kind": "relr",
+      "offset": 87520,
+      "addend": 87496
+    },
+    {
+      "kind": "relr",
+      "offset": 87528,
+      "addend": 87512
+    },
+    {
+      "kind": "relr",
+      "offset": 87536,
+      "addend": 87512
+    },
+    {
+      "kind": "relr",
+      "offset": 87544,
+      "addend": 87528
+    },
+    {
+      "kind": "relr",
+      "offset": 87552,
+      "addend": 87528
+    },
+    {
+      "kind": "relr",
+      "offset": 87560,
+      "addend": 87544
+    },
+    {
+      "kind": "relr",
+      "offset": 87568,
+      "addend": 87544
+    },
+    {
+      "kind": "relr",
+      "offset": 87576,
+      "addend": 87560
+    },
+    {
+      "kind": "relr",
+      "offset": 87584,
+      "addend": 87560
+    },
+    {
+      "kind": "relr",
+      "offset": 87592,
+      "addend": 87576
+    },
+    {
+      "kind": "relr",
+      "offset": 87600,
+      "addend": 87576
+    },
+    {
+      "kind": "relr",
+      "offset": 87608,
+      "addend": 87592
+    },
+    {
+      "kind": "relr",
+      "offset": 87616,
+      "addend": 87592
+    },
+    {
+      "kind": "relr",
+      "offset": 87624,
+      "addend": 87608
+    },
+    {
+      "kind": "relr",
+      "offset": 87632,
+      "addend": 87608
+    },
+    {
+      "kind": "relr",
+      "offset": 87640,
+      "addend": 87624
+    },
+    {
+      "kind": "relr",
+      "offset": 87648,
+      "addend": 87624
+    },
+    {
+      "kind": "relr",
+      "offset": 87656,
+      "addend": 87640
+    },
+    {
+      "kind": "relr",
+      "offset": 87664,
+      "addend": 87640
+    },
+    {
+      "kind": "relr",
+      "offset": 87672,
+      "addend": 87656
+    },
+    {
+      "kind": "relr",
+      "offset": 87680,
+      "addend": 87656
+    },
+    {
+      "kind": "relr",
+      "offset": 87688,
+      "addend": 87672
+    },
+    {
+      "kind": "relr",
+      "offset": 87696,
+      "addend": 87672
+    },
+    {
+      "kind": "relr",
+      "offset": 87704,
+      "addend": 87688
+    },
+    {
+      "kind": "relr",
+      "offset": 87712,
+      "addend": 87688
+    },
+    {
+      "kind": "relr",
+      "offset": 87720,
+      "addend": 87704
+    },
+    {
+      "kind": "relr",
+      "offset": 87728,
+      "addend": 87704
+    },
+    {
+      "kind": "relr",
+      "offset": 87736,
+      "addend": 87720
+    },
+    {
+      "kind": "relr",
+      "offset": 87744,
+      "addend": 87720
+    },
+    {
+      "kind": "relr",
+      "offset": 87752,
+      "addend": 87736
+    },
+    {
+      "kind": "relr",
+      "offset": 87760,
+      "addend": 87736
+    },
+    {
+      "kind": "relr",
+      "offset": 87768,
+      "addend": 87752
+    },
+    {
+      "kind": "relr",
+      "offset": 87776,
+      "addend": 87752
+    },
+    {
+      "kind": "relr",
+      "offset": 87784,
+      "addend": 87768
+    },
+    {
+      "kind": "relr",
+      "offset": 87792,
+      "addend": 87768
+    },
+    {
+      "kind": "relr",
+      "offset": 87800,
+      "addend": 87784
+    },
+    {
+      "kind": "relr",
+      "offset": 87808,
+      "addend": 87784
+    },
+    {
+      "kind": "relr",
+      "offset": 87816,
+      "addend": 87800
+    },
+    {
+      "kind": "relr",
+      "offset": 87824,
+      "addend": 87800
+    },
+    {
+      "kind": "relr",
+      "offset": 87832,
+      "addend": 87816
+    },
+    {
+      "kind": "relr",
+      "offset": 87840,
+      "addend": 87816
+    },
+    {
+      "kind": "relr",
+      "offset": 87848,
+      "addend": 87832
+    },
+    {
+      "kind": "relr",
+      "offset": 87856,
+      "addend": 87832
+    },
+    {
+      "kind": "relr",
+      "offset": 87864,
+      "addend": 87848
+    },
+    {
+      "kind": "relr",
+      "offset": 87872,
+      "addend": 87848
+    },
+    {
+      "kind": "relr",
+      "offset": 87880,
+      "addend": 87864
+    },
+    {
+      "kind": "relr",
+      "offset": 87888,
+      "addend": 87864
+    },
+    {
+      "kind": "relr",
+      "offset": 87896,
+      "addend": 87880
+    },
+    {
+      "kind": "relr",
+      "offset": 87904,
+      "addend": 87880
+    },
+    {
+      "kind": "relr",
+      "offset": 87912,
+      "addend": 87896
+    },
+    {
+      "kind": "relr",
+      "offset": 87920,
+      "addend": 87896
+    },
+    {
+      "kind": "relr",
+      "offset": 87928,
+      "addend": 87912
+    },
+    {
+      "kind": "relr",
+      "offset": 87936,
+      "addend": 87912
+    },
+    {
+      "kind": "relr",
+      "offset": 87944,
+      "addend": 87928
+    },
+    {
+      "kind": "relr",
+      "offset": 87952,
+      "addend": 87928
+    },
+    {
+      "kind": "relr",
+      "offset": 87960,
+      "addend": 87944
+    },
+    {
+      "kind": "relr",
+      "offset": 87968,
+      "addend": 87944
+    },
+    {
+      "kind": "relr",
+      "offset": 87976,
+      "addend": 87960
+    },
+    {
+      "kind": "relr",
+      "offset": 87984,
+      "addend": 87960
+    },
+    {
+      "kind": "relr",
+      "offset": 87992,
+      "addend": 87976
+    },
+    {
+      "kind": "relr",
+      "offset": 88000,
+      "addend": 87976
+    },
+    {
+      "kind": "relr",
+      "offset": 88008,
+      "addend": 87992
+    },
+    {
+      "kind": "relr",
+      "offset": 88016,
+      "addend": 87992
+    },
+    {
+      "kind": "relr",
+      "offset": 88024,
+      "addend": 88008
+    },
+    {
+      "kind": "relr",
+      "offset": 88032,
+      "addend": 88008
+    },
+    {
+      "kind": "relr",
+      "offset": 88040,
+      "addend": 88024
+    },
+    {
+      "kind": "relr",
+      "offset": 88048,
+      "addend": 88024
+    },
+    {
+      "kind": "relr",
+      "offset": 88056,
+      "addend": 88040
+    },
+    {
+      "kind": "relr",
+      "offset": 88064,
+      "addend": 88040
+    },
+    {
+      "kind": "relr",
+      "offset": 88072,
+      "addend": 88056
+    },
+    {
+      "kind": "relr",
+      "offset": 88080,
+      "addend": 88056
+    },
+    {
+      "kind": "relr",
+      "offset": 88088,
+      "addend": 88072
+    },
+    {
+      "kind": "relr",
+      "offset": 88096,
+      "addend": 88072
+    },
+    {
+      "kind": "relr",
+      "offset": 88104,
+      "addend": 88088
+    },
+    {
+      "kind": "relr",
+      "offset": 88112,
+      "addend": 88088
+    },
+    {
+      "kind": "relr",
+      "offset": 88120,
+      "addend": 88104
+    },
+    {
+      "kind": "relr",
+      "offset": 88128,
+      "addend": 88104
+    },
+    {
+      "kind": "relr",
+      "offset": 88136,
+      "addend": 88120
+    },
+    {
+      "kind": "relr",
+      "offset": 88144,
+      "addend": 88120
+    },
+    {
+      "kind": "relr",
+      "offset": 88152,
+      "addend": 88136
+    },
+    {
+      "kind": "relr",
+      "offset": 88160,
+      "addend": 88136
+    },
+    {
+      "kind": "relr",
+      "offset": 88168,
+      "addend": 88152
+    },
+    {
+      "kind": "relr",
+      "offset": 88176,
+      "addend": 88152
+    },
+    {
+      "kind": "relr",
+      "offset": 88184,
+      "addend": 88168
+    },
+    {
+      "kind": "relr",
+      "offset": 88192,
+      "addend": 88168
+    },
+    {
+      "kind": "relr",
+      "offset": 88200,
+      "addend": 88184
+    },
+    {
+      "kind": "relr",
+      "offset": 88208,
+      "addend": 88184
+    },
+    {
+      "kind": "relr",
+      "offset": 88216,
+      "addend": 88200
+    },
+    {
+      "kind": "relr",
+      "offset": 88224,
+      "addend": 88200
+    },
+    {
+      "kind": "relr",
+      "offset": 88232,
+      "addend": 88216
+    },
+    {
+      "kind": "relr",
+      "offset": 88240,
+      "addend": 88216
+    },
+    {
+      "kind": "relr",
+      "offset": 88248,
+      "addend": 88232
+    },
+    {
+      "kind": "relr",
+      "offset": 88256,
+      "addend": 88232
+    },
+    {
+      "kind": "relr",
+      "offset": 88264,
+      "addend": 88248
+    },
+    {
+      "kind": "relr",
+      "offset": 88272,
+      "addend": 88248
+    },
+    {
+      "kind": "relr",
+      "offset": 88280,
+      "addend": 88264
+    },
+    {
+      "kind": "relr",
+      "offset": 88288,
+      "addend": 88264
+    },
+    {
+      "kind": "relr",
+      "offset": 88296,
+      "addend": 88280
+    },
+    {
+      "kind": "relr",
+      "offset": 88304,
+      "addend": 88280
+    },
+    {
+      "kind": "relr",
+      "offset": 88312,
+      "addend": 88296
+    },
+    {
+      "kind": "relr",
+      "offset": 88320,
+      "addend": 88296
+    },
+    {
+      "kind": "relr",
+      "offset": 88328,
+      "addend": 88312
+    },
+    {
+      "kind": "relr",
+      "offset": 88336,
+      "addend": 88312
+    },
+    {
+      "kind": "relr",
+      "offset": 88344,
+      "addend": 88328
+    },
+    {
+      "kind": "relr",
+      "offset": 88352,
+      "addend": 88328
+    },
+    {
+      "kind": "relr",
+      "offset": 88360,
+      "addend": 88344
+    },
+    {
+      "kind": "relr",
+      "offset": 88368,
+      "addend": 88344
+    },
+    {
+      "kind": "relr",
+      "offset": 88376,
+      "addend": 88360
+    },
+    {
+      "kind": "relr",
+      "offset": 88384,
+      "addend": 88360
+    },
+    {
+      "kind": "relr",
+      "offset": 88392,
+      "addend": 88376
+    },
+    {
+      "kind": "relr",
+      "offset": 88400,
+      "addend": 88376
+    },
+    {
+      "kind": "relr",
+      "offset": 88408,
+      "addend": 88392
+    },
+    {
+      "kind": "relr",
+      "offset": 88416,
+      "addend": 88392
+    },
+    {
+      "kind": "relr",
+      "offset": 88424,
+      "addend": 88408
+    },
+    {
+      "kind": "relr",
+      "offset": 88432,
+      "addend": 88408
+    },
+    {
+      "kind": "relr",
+      "offset": 88440,
+      "addend": 88424
+    },
+    {
+      "kind": "relr",
+      "offset": 88448,
+      "addend": 88424
+    },
+    {
+      "kind": "relr",
+      "offset": 88456,
+      "addend": 88440
+    },
+    {
+      "kind": "relr",
+      "offset": 88464,
+      "addend": 88440
+    },
+    {
+      "kind": "relr",
+      "offset": 88472,
+      "addend": 88456
+    },
+    {
+      "kind": "relr",
+      "offset": 88480,
+      "addend": 88456
+    },
+    {
+      "kind": "relr",
+      "offset": 88488,
+      "addend": 88472
+    },
+    {
+      "kind": "relr",
+      "offset": 88496,
+      "addend": 88472
+    },
+    {
+      "kind": "relr",
+      "offset": 88504,
+      "addend": 88488
+    },
+    {
+      "kind": "relr",
+      "offset": 88512,
+      "addend": 88488
+    },
+    {
+      "kind": "relr",
+      "offset": 88520,
+      "addend": 88504
+    },
+    {
+      "kind": "relr",
+      "offset": 88528,
+      "addend": 88504
+    },
+    {
+      "kind": "relr",
+      "offset": 88536,
+      "addend": 88520
+    },
+    {
+      "kind": "relr",
+      "offset": 88544,
+      "addend": 88520
+    },
+    {
+      "kind": "relr",
+      "offset": 88552,
+      "addend": 88536
+    },
+    {
+      "kind": "relr",
+      "offset": 88560,
+      "addend": 88536
+    },
+    {
+      "kind": "relr",
+      "offset": 88568,
+      "addend": 88552
+    },
+    {
+      "kind": "relr",
+      "offset": 88576,
+      "addend": 88552
+    },
+    {
+      "kind": "relr",
+      "offset": 88584,
+      "addend": 88568
+    },
+    {
+      "kind": "relr",
+      "offset": 88592,
+      "addend": 88568
+    },
+    {
+      "kind": "relr",
+      "offset": 88600,
+      "addend": 88584
+    },
+    {
+      "kind": "relr",
+      "offset": 88608,
+      "addend": 88584
+    },
+    {
+      "kind": "relr",
+      "offset": 88616,
+      "addend": 88600
+    },
+    {
+      "kind": "relr",
+      "offset": 88624,
+      "addend": 88600
+    },
+    {
+      "kind": "relr",
+      "offset": 88632,
+      "addend": 88616
+    },
+    {
+      "kind": "relr",
+      "offset": 88640,
+      "addend": 88616
+    },
+    {
+      "kind": "relr",
+      "offset": 88648,
+      "addend": 88632
+    },
+    {
+      "kind": "relr",
+      "offset": 88656,
+      "addend": 88632
+    },
+    {
+      "kind": "relr",
+      "offset": 88664,
+      "addend": 88648
+    },
+    {
+      "kind": "relr",
+      "offset": 88672,
+      "addend": 88648
+    },
+    {
+      "kind": "relr",
+      "offset": 88680,
+      "addend": 88664
+    },
+    {
+      "kind": "relr",
+      "offset": 88688,
+      "addend": 88664
+    },
+    {
+      "kind": "relr",
+      "offset": 88712,
+      "addend": 100928
+    },
+    {
+      "kind": "relr",
+      "offset": 89176,
+      "addend": 43936
+    },
+    {
+      "kind": "relr",
+      "offset": 89184,
+      "addend": 47968
+    },
+    {
+      "kind": "relr",
+      "offset": 89200,
+      "addend": 70992
+    },
+    {
+      "kind": "relr",
+      "offset": 89208,
+      "addend": 70112
+    },
+    {
+      "kind": "relr",
+      "offset": 89216,
+      "addend": 69896
+    },
+    {
+      "kind": "relr",
+      "offset": 89224,
+      "addend": 69896
+    },
+    {
+      "kind": "relr",
+      "offset": 89232,
+      "addend": 69896
+    },
+    {
+      "kind": "relr",
+      "offset": 89240,
+      "addend": 69896
+    },
+    {
+      "kind": "relr",
+      "offset": 89248,
+      "addend": 69896
+    },
+    {
+      "kind": "relr",
+      "offset": 89256,
+      "addend": 69896
+    },
+    {
+      "kind": "relr",
+      "offset": 89264,
+      "addend": 69896
+    },
+    {
+      "kind": "relr",
+      "offset": 89272,
+      "addend": 69896
+    },
+    {
+      "kind": "relr",
+      "offset": 89280,
+      "addend": 69896
+    },
+    {
+      "kind": "relr",
+      "offset": 89376,
+      "addend": 97600
+    },
+    {
+      "kind": "relr",
+      "offset": 89384,
+      "addend": 97584
+    },
+    {
+      "kind": "relr",
+      "offset": 89392,
+      "addend": 97568
+    },
+    {
+      "kind": "relr",
+      "offset": 97616,
+      "addend": 81936
+    },
+    {
+      "kind": "relr",
+      "offset": 97624,
+      "addend": 81936
+    },
+    {
+      "kind": "relr",
+      "offset": 97632,
+      "addend": 81936
+    }
+  ],
+  "sites": [
+    {
+      "offset": 700,
+      "kind": "mrs",
+      "sysreg": "cntpct_el0",
+      "rt": 21,
+      "word": 3577471029,
+      "function": "main"
+    },
+    {
+      "offset": 776,
+      "kind": "mrs",
+      "sysreg": "cntpct_el0",
+      "rt": 19,
+      "word": 3577471027,
+      "function": "main"
+    },
+    {
+      "offset": 1720,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "condvarWaitTimeout"
+    },
+    {
+      "offset": 1812,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "mutexLock"
+    },
+    {
+      "offset": 2016,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "mutexUnlock"
+    },
+    {
+      "offset": 2132,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "mutexIsLockedByCurrentThread"
+    },
+    {
+      "offset": 2372,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "__libnx_init_thread"
+    },
+    {
+      "offset": 2428,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "__libnx_init_thread"
+    },
+    {
+      "offset": 3152,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "threadCreate"
+    },
+    {
+      "offset": 3304,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "threadExit"
+    },
+    {
+      "offset": 3500,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 20,
+      "word": 3577466996,
+      "function": "_EntryWrap"
+    },
+    {
+      "offset": 4860,
+      "kind": "mrs",
+      "sysreg": "cntpct_el0",
+      "rt": 0,
+      "word": 3577471008,
+      "function": "waitHandles"
+    },
+    {
+      "offset": 4968,
+      "kind": "mrs",
+      "sysreg": "cntpct_el0",
+      "rt": 3,
+      "word": 3577471011,
+      "function": "waitHandles"
+    },
+    {
+      "offset": 5940,
+      "kind": "svc",
+      "imm": 1,
+      "word": 3556769825,
+      "function": "svcSetHeapSize"
+    },
+    {
+      "offset": 5956,
+      "kind": "svc",
+      "imm": 2,
+      "word": 3556769857,
+      "function": "svcSetMemoryPermission"
+    },
+    {
+      "offset": 5964,
+      "kind": "svc",
+      "imm": 3,
+      "word": 3556769889,
+      "function": "svcSetMemoryAttribute"
+    },
+    {
+      "offset": 5972,
+      "kind": "svc",
+      "imm": 4,
+      "word": 3556769921,
+      "function": "svcMapMemory"
+    },
+    {
+      "offset": 5980,
+      "kind": "svc",
+      "imm": 5,
+      "word": 3556769953,
+      "function": "svcUnmapMemory"
+    },
+    {
+      "offset": 5992,
+      "kind": "svc",
+      "imm": 6,
+      "word": 3556769985,
+      "function": "svcQueryMemory"
+    },
+    {
+      "offset": 6008,
+      "kind": "svc",
+      "imm": 7,
+      "word": 3556770017,
+      "function": "svcExitProcess"
+    },
+    {
+      "offset": 6020,
+      "kind": "svc",
+      "imm": 8,
+      "word": 3556770049,
+      "function": "svcCreateThread"
+    },
+    {
+      "offset": 6036,
+      "kind": "svc",
+      "imm": 9,
+      "word": 3556770081,
+      "function": "svcStartThread"
+    },
+    {
+      "offset": 6044,
+      "kind": "svc",
+      "imm": 10,
+      "word": 3556770113,
+      "function": "svcExitThread"
+    },
+    {
+      "offset": 6052,
+      "kind": "svc",
+      "imm": 11,
+      "word": 3556770145,
+      "function": "svcSleepThread"
+    },
+    {
+      "offset": 6060,
+      "kind": "svc",
+      "imm": 22,
+      "word": 3556770497,
+      "function": "svcCloseHandle"
+    },
+    {
+      "offset": 6072,
+      "kind": "svc",
+      "imm": 24,
+      "word": 3556770561,
+      "function": "svcWaitSynchronization"
+    },
+    {
+      "offset": 6088,
+      "kind": "svc",
+      "imm": 26,
+      "word": 3556770625,
+      "function": "svcArbitrateLock"
+    },
+    {
+      "offset": 6096,
+      "kind": "svc",
+      "imm": 27,
+      "word": 3556770657,
+      "function": "svcArbitrateUnlock"
+    },
+    {
+      "offset": 6104,
+      "kind": "svc",
+      "imm": 28,
+      "word": 3556770689,
+      "function": "svcWaitProcessWideKeyAtomic"
+    },
+    {
+      "offset": 6112,
+      "kind": "svc",
+      "imm": 29,
+      "word": 3556770721,
+      "function": "svcSignalProcessWideKey"
+    },
+    {
+      "offset": 6120,
+      "kind": "svc",
+      "imm": 38,
+      "word": 3556771009,
+      "function": "svcBreak"
+    },
+    {
+      "offset": 6128,
+      "kind": "svc",
+      "imm": 39,
+      "word": 3556771041,
+      "function": "svcOutputDebugString"
+    },
+    {
+      "offset": 6136,
+      "kind": "svc",
+      "imm": 40,
+      "word": 3556771073,
+      "function": "svcReturnFromException"
+    },
+    {
+      "offset": 6148,
+      "kind": "svc",
+      "imm": 41,
+      "word": 3556771105,
+      "function": "svcGetInfo"
+    },
+    {
+      "offset": 8960,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "__syscall_getreent"
+    },
+    {
+      "offset": 9104,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "newlibSetup"
+    }
+  ]
+}

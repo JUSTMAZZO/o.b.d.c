@@ -1,7 +1,10 @@
 {
-  "description": "Traducao dos SVCs do Horizon usados pelo hb_compute (hb_compute.sites.json) para Bionic/POSIX. Implementacao: switch_hle_shim.h (secao kernel). Teste: horizon_rt/svc_shim_test.c no Galaxy A56.",
+  "description": "Traducao dos SVCs do Horizon usados pelos homebrews de teste (hb_compute.sites.json e hb_threads.sites.json) para Bionic/POSIX. Implementacao: switch_hle_shim.h (secao kernel). Teste: horizon_rt/svc_shim_test.c no Galaxy A56.",
   "libnx": "2.10.0",
-  "source_sites": "horizon_rt/hb_compute/hb_compute.sites.json",
+  "source_sites": [
+    "horizon_rt/hb_compute/hb_compute.sites.json",
+    "horizon_rt/hb_threads/hb_threads.sites.json"
+  ],
   "implementation": "switch_hle_shim.h",
   "test": "horizon_rt/svc_shim_test.c",
   "results": {
@@ -15,118 +18,339 @@
     "InvalidCombination": "0xe801",
     "OutOfRange": "0xee01",
     "InvalidEnumValue": "0xf001",
-    "InvalidState": "0xfa01"
+    "InvalidState": "0xfa01",
+    "OutOfHandles": "0xd201",
+    "InvalidPriority": "0xe001",
+    "InvalidCoreId": "0xe201",
+    "TimedOut": "0xea01"
   },
   "svcs": [
     {
-      "id": "0x01", "name": "svcSetHeapSize",
+      "id": "0x01",
+      "name": "svcSetHeapSize",
       "prototype": "Result svcSetHeapSize(void** out_addr, u64 size)",
       "horizon": "Cresce ou encolhe a heap do processo no lugar (tamanho multiplo de 2 MiB) e devolve a base da HeapRegion.",
-      "posix": ["memfd_create + ftruncate (reserva de 4 GiB)", "mmap(PROT_NONE, MAP_SHARED|MAP_NORESERVE)", "mprotect(PROT_READ|PROT_WRITE) para crescer", "madvise(MADV_REMOVE) + mprotect(PROT_NONE) para encolher"],
-      "errors": ["InvalidSize (nao multiplo de 2 MiB)", "OutOfMemory (acima da regiao)"],
+      "posix": [
+        "memfd_create + ftruncate (reserva de 4 GiB)",
+        "mmap(PROT_NONE, MAP_SHARED|MAP_NORESERVE)",
+        "mprotect(PROT_READ|PROT_WRITE) para crescer",
+        "madvise(MADV_REMOVE) + mprotect(PROT_NONE) para encolher"
+      ],
+      "errors": [
+        "InvalidSize (nao multiplo de 2 MiB)",
+        "OutOfMemory (acima da regiao)"
+      ],
       "tested": "4 MiB, escrita/leitura, encolher para 2 MiB, tamanho invalido"
     },
     {
-      "id": "0x02", "name": "svcSetMemoryPermission",
+      "id": "0x02",
+      "name": "svcSetMemoryPermission",
       "prototype": "Result svcSetMemoryPermission(void* addr, u64 size, u32 perm)",
       "horizon": "Muda a permissao de paginas da heap; so Perm_None, Perm_R e Perm_Rw sao aceitas.",
-      "posix": ["mprotect"],
-      "errors": ["InvalidAddress / InvalidSize (desalinhado a 4 KiB)", "InvalidMemoryPermissions (X ou W sozinho)", "InvalidMemoryState (fora da heap)"],
+      "posix": [
+        "mprotect"
+      ],
+      "errors": [
+        "InvalidAddress / InvalidSize (desalinhado a 4 KiB)",
+        "InvalidMemoryPermissions (X ou W sozinho)",
+        "InvalidMemoryState (fora da heap)"
+      ],
       "tested": "Perm_R, Perm_Rw, Perm_Rx invalido, endereco desalinhado"
     },
     {
-      "id": "0x03", "name": "svcSetMemoryAttribute",
+      "id": "0x03",
+      "name": "svcSetMemoryAttribute",
       "prototype": "Result svcSetMemoryAttribute(void* addr, u64 size, u32 val0, u32 val1)",
       "horizon": "Liga/desliga MemAttr_IsUncached (mascara val0, valor val1) em paginas da heap.",
       "posix": [],
       "note": "Sem equivalente POSIX (cache de pagina nao e controlavel em user space): o atributo e validado e registrado, e aparece no svcQueryMemory; nao altera o hardware.",
-      "errors": ["InvalidCombination (bits fora de IsUncached ou valor fora da mascara)", "InvalidAddress / InvalidSize", "InvalidMemoryState"],
+      "errors": [
+        "InvalidCombination (bits fora de IsUncached ou valor fora da mascara)",
+        "InvalidAddress / InvalidSize",
+        "InvalidMemoryState"
+      ],
       "tested": "liga e limpa IsUncached, IsBorrowed recusado"
     },
     {
-      "id": "0x04", "name": "svcMapMemory",
+      "id": "0x04",
+      "name": "svcMapMemory",
       "prototype": "Result svcMapMemory(void* dst_addr, void* src_addr, u64 size)",
       "horizon": "Cria um alias da heap na AliasRegion; a origem fica Perm_None com MemAttr_IsBorrowed.",
-      "posix": ["mmap(dst, MAP_SHARED|MAP_FIXED, memfd da heap, offset da origem)", "mprotect(origem, PROT_NONE)"],
-      "note": "Nao aparece no hb_compute; implementado como contraparte necessaria do svcUnmapMemory (0x05).",
-      "errors": ["InvalidAddress / InvalidSize", "InvalidMemoryRange (origem fora da heap ou destino fora da AliasRegion)", "OutOfRange (tabela de aliases cheia)"],
+      "posix": [
+        "mmap(dst, MAP_SHARED|MAP_FIXED, memfd da heap, offset da origem)",
+        "mprotect(origem, PROT_NONE)"
+      ],
+      "note": "Usado pela libnx no hb_threads (espelho da pilha das threads); no hb_compute so como contraparte do 0x05.",
+      "errors": [
+        "InvalidAddress / InvalidSize",
+        "InvalidMemoryRange (origem fora da heap ou destino fora da AliasRegion)",
+        "OutOfRange (tabela de aliases cheia)"
+      ],
       "tested": "alias le e escreve a mesma memoria da origem; origem None + IsBorrowed"
     },
     {
-      "id": "0x05", "name": "svcUnmapMemory",
+      "id": "0x05",
+      "name": "svcUnmapMemory",
       "prototype": "Result svcUnmapMemory(void* dst_addr, void* src_addr, u64 size)",
       "horizon": "Desfaz um svcMapMemory: remove o alias e devolve a origem a Perm_Rw.",
-      "posix": ["mmap(dst, PROT_NONE, MAP_ANONYMOUS|MAP_FIXED|MAP_NORESERVE) (volta a reserva)", "mprotect(origem, PROT_READ|PROT_WRITE)"],
-      "errors": ["InvalidMemoryRange (nao corresponde a um svcMapMemory)"],
+      "posix": [
+        "mmap(dst, PROT_NONE, MAP_ANONYMOUS|MAP_FIXED|MAP_NORESERVE) (volta a reserva)",
+        "mprotect(origem, PROT_READ|PROT_WRITE)"
+      ],
+      "errors": [
+        "InvalidMemoryRange (nao corresponde a um svcMapMemory)"
+      ],
       "tested": "dado escrito pelo alias permanece na origem; argumentos errados recusados"
     },
     {
-      "id": "0x06", "name": "svcQueryMemory",
+      "id": "0x06",
+      "name": "svcQueryMemory",
       "prototype": "Result svcQueryMemory(MemoryInfo* meminfo_ptr, u32 *pageinfo, u64 addr)",
       "horizon": "Descreve o bloco de memoria que contem addr (endereco, tamanho, tipo, atributos, permissao).",
-      "posix": ["leitura de /proc/self/maps"],
+      "posix": [
+        "leitura de /proc/self/maps"
+      ],
       "note": "Reservas PROT_NONE contam como Unmapped; tipo Heap na HeapRegion, MappedMemory na AliasRegion, Normal no resto; atributos vem das tabelas de alias e de svcSetMemoryAttribute.",
-      "errors": ["InvalidMemoryState (/proc/self/maps ilegivel)"],
+      "errors": [
+        "InvalidMemoryState (/proc/self/maps ilegivel)"
+      ],
       "tested": "heap, heap encolhida, origem emprestada, alias mapeado e desmapeado"
     },
     {
-      "id": "0x07", "name": "svcExitProcess",
+      "id": "0x07",
+      "name": "svcExitProcess",
       "prototype": "void NX_NORETURN svcExitProcess(void)",
       "horizon": "Encerra o processo.",
-      "posix": ["fflush(NULL)", "_exit(0) (exit_group)"],
+      "posix": [
+        "fflush(NULL)",
+        "_exit(0) (exit_group)"
+      ],
       "errors": [],
       "tested": "fim do svc_shim_test com codigo 0"
     },
     {
-      "id": "0x1A", "name": "svcArbitrateLock",
+      "id": "0x08",
+      "name": "svcCreateThread",
+      "prototype": "Result svcCreateThread(Handle* out, void* entry, void* arg, void* stack_top, int prio, int cpuid)",
+      "horizon": "Cria uma thread parada e devolve o handle.",
+      "posix": [
+        "tabela de handles do shim (sem chamada ao kernel ate o svcStartThread)"
+      ],
+      "note": "A pilha do guest (stack_top) nao e usada: a pthread recebe a pilha do Bionic. cpuid -2 = padrao; 0..3 sao aceitos e ignorados (o escalonador do Android escolhe o nucleo).",
+      "errors": [
+        "InvalidPriority (fora de 0..63)",
+        "InvalidCoreId (fora de -2, 0..3)",
+        "OutOfHandles (tabela cheia)"
+      ],
+      "tested": "4 threads via threadCreate; prioridade 64 e cpuid 7 recusados"
+    },
+    {
+      "id": "0x09",
+      "name": "svcStartThread",
+      "prototype": "Result svcStartThread(Handle handle)",
+      "horizon": "Comeca a executar a thread.",
+      "posix": [
+        "pthread_create"
+      ],
+      "errors": [
+        "InvalidHandle",
+        "InvalidState (ja iniciada)"
+      ],
+      "tested": "4 threads via threadStart; handle invalido recusado"
+    },
+    {
+      "id": "0x0A",
+      "name": "svcExitThread",
+      "prototype": "void NX_NORETURN svcExitThread(void)",
+      "horizon": "Termina a thread atual.",
+      "posix": [
+        "sinaliza o handle (pthread_cond_broadcast)",
+        "pthread_exit"
+      ],
+      "errors": [],
+      "tested": "thread que chama svcExitThread no meio da funcao: codigo depois dele nao roda e quem espera acorda"
+    },
+    {
+      "id": "0x0B",
+      "name": "svcSleepThread",
+      "prototype": "void svcSleepThread(s64 nano)",
+      "horizon": "Dorme nano ns; 0, -1 e -2 sao os modos de yield.",
+      "posix": [
+        "nanosleep (repetido em EINTR)",
+        "sched_yield (nano <= 0)"
+      ],
+      "errors": [],
+      "tested": "15 ms dormiu 15,13 ms; 0 e -1 fazem yield"
+    },
+    {
+      "id": "0x16",
+      "name": "svcCloseHandle",
+      "prototype": "Result svcCloseHandle(Handle handle)",
+      "horizon": "Fecha um handle; uma thread em execucao continua rodando.",
+      "posix": [
+        "pthread_join (thread ja terminada)",
+        "pthread_detach (ainda rodando: o objeto e liberado quando ela termina)"
+      ],
+      "errors": [
+        "InvalidHandle"
+      ],
+      "tested": "threadClose depois de threadWaitForExit; thread criada e nunca iniciada"
+    },
+    {
+      "id": "0x18",
+      "name": "svcWaitSynchronization",
+      "prototype": "Result svcWaitSynchronization(s32* index, const Handle* handles, s32 handleCount, u64 timeout)",
+      "horizon": "Espera ate um dos handles ficar sinalizado (aqui: thread terminada); timeout em ns, UINT64_MAX = sem fim.",
+      "posix": [
+        "pthread_cond_wait / pthread_cond_timedwait (CLOCK_REALTIME)"
+      ],
+      "errors": [
+        "OutOfRange (mais de 64 handles)",
+        "InvalidHandle",
+        "TimedOut"
+      ],
+      "tested": "threadWaitForExit x5; 20 ms numa thread parada -> TimedOut em 20,1 ms"
+    },
+    {
+      "id": "0x1A",
+      "name": "svcArbitrateLock",
       "prototype": "Result svcArbitrateLock(u32 wait_tag, u32* tag_location, u32 self_tag)",
       "horizon": "Bloqueia enquanto *tag_location == (wait_tag | HANDLE_WAIT_MASK); a libnx rele a tag e tenta de novo se ela mudou.",
-      "posix": ["futex(FUTEX_WAIT | FUTEX_PRIVATE_FLAG)", "__atomic_compare_exchange para tomar a posse quando a tag vira 0"],
+      "posix": [
+        "futex(FUTEX_WAIT | FUTEX_PRIVATE_FLAG)",
+        "__atomic_compare_exchange para tomar a posse quando a tag vira 0"
+      ],
       "note": "O kernel do Horizon entrega a posse no unlock; aqui o esperador acordado a toma com CAS (self_tag | WAIT_MASK), mantendo a mascara para que o proximo unlock tambem passe pelo svc.",
-      "errors": ["InvalidAddress (tag desalinhada)"],
+      "errors": [
+        "InvalidAddress (tag desalinhada)"
+      ],
       "tested": "mutex no algoritmo da libnx, 4 threads x 200.000 secoes criticas, contagem exata"
     },
     {
-      "id": "0x1B", "name": "svcArbitrateUnlock",
+      "id": "0x1B",
+      "name": "svcArbitrateUnlock",
       "prototype": "Result svcArbitrateUnlock(u32* tag_location)",
       "horizon": "Solta um mutex com esperadores e acorda o proximo.",
-      "posix": ["store atomico de 0", "futex(FUTEX_WAKE, 1)"],
-      "errors": ["InvalidAddress (tag desalinhada)"],
+      "posix": [
+        "store atomico de 0",
+        "futex(FUTEX_WAKE, 1)"
+      ],
+      "errors": [
+        "InvalidAddress (tag desalinhada)"
+      ],
       "tested": "mesmo teste de 4 threads; mutex termina em 0"
     },
     {
-      "id": "0x26", "name": "svcBreak",
+      "id": "0x1C",
+      "name": "svcWaitProcessWideKeyAtomic",
+      "prototype": "Result svcWaitProcessWideKeyAtomic(u32* key, u32* tag_location, u32 self_tag, u64 timeout)",
+      "horizon": "Solta o mutex em tag_location e espera um sinal em key; acordado por sinal, retoma o mutex. Com timeout devolve TimedOut sem retomar (a libnx faz o mutexLock).",
+      "posix": [
+        "futex(FUTEX_WAIT | FUTEX_PRIVATE_FLAG, timeout relativo) na chave",
+        "mutexUnlock / mutexLock da libnx sobre svcArbitrateLock/Unlock"
+      ],
+      "note": "A chave e um contador de sequencia: o sinal incrementa e acorda; acordar sem sinal e permitido para variaveis de condicao.",
+      "errors": [
+        "InvalidAddress (desalinhado)",
+        "InvalidState (o chamador nao tem o mutex)",
+        "TimedOut"
+      ],
+      "tested": "produtor/consumidor com 1.000 itens; condvarWaitTimeout(10 ms) -> TimedOut e volta com o mutex"
+    },
+    {
+      "id": "0x1D",
+      "name": "svcSignalProcessWideKey",
+      "prototype": "void svcSignalProcessWideKey(u32* key, s32 num)",
+      "horizon": "Acorda ate num esperadores da chave (num <= 0: todos).",
+      "posix": [
+        "incremento atomico da chave",
+        "futex(FUTEX_WAKE)"
+      ],
+      "errors": [],
+      "tested": "condvarWakeAll no produtor/consumidor e no portao de largada do hb_threads"
+    },
+    {
+      "id": "0x26",
+      "name": "svcBreak",
       "prototype": "Result svcBreak(u32 breakReason, uintptr_t address, uintptr_t size)",
       "horizon": "Sinaliza um erro fatal ao kernel/debugger; com BreakReason_NotificationOnlyFlag so notifica e volta.",
-      "posix": ["fprintf(stderr)", "abort() (SIGABRT) quando nao e so notificacao"],
+      "posix": [
+        "fprintf(stderr)",
+        "abort() (SIGABRT) quando nao e so notificacao"
+      ],
       "errors": [],
       "tested": "notificacao volta 0; Panic encerra o filho com SIGABRT"
     },
     {
-      "id": "0x27", "name": "svcOutputDebugString",
+      "id": "0x27",
+      "name": "svcOutputDebugString",
       "prototype": "Result svcOutputDebugString(const char *str, u64 size)",
       "horizon": "Escreve no log de debug do kernel.",
-      "posix": ["fflush(stdout)", "write(STDOUT_FILENO)"],
+      "posix": [
+        "fflush(stdout)",
+        "write(STDOUT_FILENO)"
+      ],
       "errors": [],
       "tested": "saida do svc_shim_test e do oraculo hb_compute"
     },
     {
-      "id": "0x28", "name": "svcReturnFromException",
+      "id": "0x28",
+      "name": "svcReturnFromException",
       "prototype": "void NX_NORETURN svcReturnFromException(Result res)",
       "horizon": "Retorna de um handler de excecao do usuario.",
-      "posix": ["abort() (SIGABRT)"],
+      "posix": [
+        "abort() (SIGABRT)"
+      ],
       "note": "O shim nao entrega excecoes do Horizon; o analogo POSIX seria retornar de um handler de sinal (sigreturn). Fora de um handler e erro fatal.",
       "errors": [],
       "tested": "encerra o filho com SIGABRT"
     },
     {
-      "id": "0x29", "name": "svcGetInfo",
+      "id": "0x29",
+      "name": "svcGetInfo",
       "prototype": "Result svcGetInfo(u64* out, u32 id0, Handle handle, u64 id1)",
       "horizon": "Informacoes do processo/sistema por InfoType.",
-      "posix": ["sched_getaffinity (CoreMask)", "sysinfo (TotalMemorySize)", "/proc/self/statm (UsedMemorySize)", "/proc/self/status TracerPid (DebuggerAttached)", "getrandom (RandomEntropy)", "regioes reservadas pelo shim (Heap/Alias)"],
+      "posix": [
+        "sched_getaffinity (CoreMask)",
+        "sysinfo (TotalMemorySize)",
+        "/proc/self/statm (UsedMemorySize)",
+        "/proc/self/status TracerPid (DebuggerAttached)",
+        "getrandom (RandomEntropy)",
+        "regioes reservadas pelo shim (Heap/Alias)"
+      ],
       "note": "StackRegion* devolve InvalidEnumValue (a pilha vem do Bionic); ProgramId e um id ficticio de homebrew; tipos nao mapeados devolvem InvalidEnumValue, como em kernels sem Mesosphere para o InfoType 65000.",
-      "errors": ["InvalidHandle (handle diferente do esperado pelo tipo)", "InvalidCombination (id1 != 0)", "InvalidEnumValue (tipo nao mapeado)"],
+      "errors": [
+        "InvalidHandle (handle diferente do esperado pelo tipo)",
+        "InvalidCombination (id1 != 0)",
+        "InvalidEnumValue (tipo nao mapeado)"
+      ],
       "tested": "Alias/Heap, CoreMask, memoria total e usada, depurador, entropia, tipo 65000, handle invalido"
     }
-  ]
+  ],
+  "api": {
+    "threads": [
+      "threadCreate",
+      "threadStart",
+      "threadWaitForExit",
+      "threadClose",
+      "threadGetCurHandle"
+    ],
+    "sync": [
+      "mutexInit",
+      "mutexLock",
+      "mutexTryLock",
+      "mutexUnlock",
+      "rmutexInit",
+      "rmutexLock",
+      "rmutexTryLock",
+      "rmutexUnlock",
+      "condvarInit",
+      "condvarWait",
+      "condvarWaitTimeout",
+      "condvarWake",
+      "condvarWakeOne",
+      "condvarWakeAll"
+    ],
+    "note": "Mesmos tipos e layouts da libnx 2.10.0 (Thread, Mutex = _LOCK_T, RMutex = __lock_t, CondVar = u32); Mutex no algoritmo da libnx com a tag = handle da thread."
+  }
 }

@@ -2,12 +2,12 @@
  * svc_shim_test.c - testa no Android (A56) os handlers HLE dos SVCs do Horizon em switch_hle_shim.h.
  *
  * Cada SVC e exercitado no caminho de sucesso e nos erros que a libnx espera (KERNELRESULT).
- * O mutex do teste segue o algoritmo do mutexLock/mutexUnlock da libnx sobre
- * svcArbitrateLock/svcArbitrateUnlock. svcBreak fatal e svcReturnFromException rodam num filho (fork).
+ * Threads, Mutex, RMutex e CondVar sao exercitados pela API da libnx implementada no shim
+ * (threadCreate/..., mutexLock/..., condvarWait/...). svcBreak fatal e svcReturnFromException rodam
+ * num filho (fork).
  *
  * Build: aarch64-linux-android35-clang -O2 -Wall -Wextra -I .. svc_shim_test.c -o svc_shim_test  (pthread vem na libc do Bionic)
  */
-#include <pthread.h>
 #include <signal.h>
 #include <sys/wait.h>
 #include "switch_hle_shim.h"
@@ -29,58 +29,64 @@ static MemoryInfo query(void *p)
     return mi;
 }
 
-/* ---------------------------------------------- mutex no algoritmo da libnx */
-typedef u32 Mutex;
-static __thread u32 t_tag;   /* na libnx: getThreadVars()->handle (handle da thread) */
-
-static void mutexLock(Mutex *m)
-{
-    u32 value = __atomic_load_n(m, __ATOMIC_SEQ_CST);
-    for (;;) {
-        if (value == INVALID_HANDLE) {
-            if (__atomic_compare_exchange_n(m, &value, t_tag, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
-                return;
-            continue;
-        }
-        if ((value & HANDLE_WAIT_MASK) == 0) {
-            if (!__atomic_compare_exchange_n(m, &value, value | HANDLE_WAIT_MASK, false,
-                                             __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
-                continue;
-        }
-        svcArbitrateLock(value & ~HANDLE_WAIT_MASK, m, t_tag);
-        value = __atomic_load_n(m, __ATOMIC_SEQ_CST);
-        if ((value & ~HANDLE_WAIT_MASK) == t_tag)
-            return;
-    }
-}
-
-static void mutexUnlock(Mutex *m)
-{
-    u32 value = __atomic_load_n(m, __ATOMIC_SEQ_CST);
-    for (;;) {
-        if (value != t_tag) {              /* tem WAIT_MASK: o kernel acorda o proximo */
-            svcArbitrateUnlock(m);
-            return;
-        }
-        if (__atomic_compare_exchange_n(m, &value, INVALID_HANDLE, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
-            return;
-    }
-}
-
+/* ---------------------------------------------- threads, mutex, condvar e rmutex pela API da libnx no shim */
 #define THREADS 4
 #define ITERS   200000
 static Mutex s_mutex;
 static volatile u64 s_counter;
+static Handle s_handles[THREADS];
 
-static void *worker(void *arg)
+static void worker(void *arg)
 {
-    t_tag = 0x100 + (u32)(uintptr_t)arg;   /* tags distintas e != 0, como handles de thread */
+    s_handles[(uintptr_t)arg] = threadGetCurHandle();
     for (int k = 0; k < ITERS; k++) {
         mutexLock(&s_mutex);
         s_counter = s_counter + 1;          /* leitura+escrita nao atomica: so fica certo com exclusao */
         mutexUnlock(&s_mutex);
     }
-    return NULL;
+}
+
+static void exits_early(void *arg)
+{
+    *(volatile int *)arg = 1;
+    svcExitThread();                        /* 0x0A: termina antes de retornar da funcao */
+    *(volatile int *)arg = 2;
+}
+
+/* produtor/consumidor com CondVar: fila de 1 posicao */
+#define ITEMS 1000
+static Mutex s_qm;
+static CondVar s_qcv;
+static int s_slot = -1, s_consumed_sum;
+
+static void consumer(void *arg)
+{
+    (void)arg;
+    for (int n = 0; n < ITEMS; n++) {
+        mutexLock(&s_qm);
+        while (s_slot < 0)
+            condvarWait(&s_qcv, &s_qm);
+        s_consumed_sum += s_slot;
+        s_slot = -1;
+        condvarWakeAll(&s_qcv);
+        mutexUnlock(&s_qm);
+    }
+}
+
+static RMutex s_rm;
+static int recurse(int depth)
+{
+    rmutexLock(&s_rm);
+    int r = depth == 0 ? (int)s_rm.counter : recurse(depth - 1);
+    rmutexUnlock(&s_rm);
+    return r;
+}
+
+static u64 now_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (u64)ts.tv_sec * 1000000000ULL + (u64)ts.tv_nsec;
 }
 
 static int child_signal(void (*fn)(void))
@@ -155,14 +161,81 @@ int main(void)
     CHECK(svcGetInfo(&v, 65000, CUR_PROCESS_HANDLE, 0) == KERNELRESULT(InvalidEnumValue), "svcGetInfo(65000, como o detect.h da libnx) -> InvalidEnumValue (0x%x)", KERNELRESULT(InvalidEnumValue));
     CHECK(svcGetInfo(&v, InfoType_HeapRegionSize, 0x1234, 0) == KERNELRESULT(InvalidHandle), "svcGetInfo(handle invalido) -> InvalidHandle");
 
-    /* ---- 0x1A/0x1B mutex */
-    pthread_t th[THREADS];
+    /* ---- 0x08/0x09/0x18/0x16 + mutex libnx (0x1A/0x1B) com 4 threads */
+    Thread th[THREADS];
+    int created = 1;
     for (uintptr_t k = 0; k < THREADS; k++)
-        pthread_create(&th[k], NULL, worker, (void *)k);
+        created &= threadCreate(&th[k], worker, (void *)k, NULL, 0x10000, 0x2C, -2) == 0 && threadStart(&th[k]) == 0;
+    CHECK(created, "threadCreate + threadStart (svcCreateThread/svcStartThread) x%d", THREADS);
+    int waited = 1;
     for (int k = 0; k < THREADS; k++)
-        pthread_join(th[k], NULL);
-    CHECK(s_counter == (u64)THREADS * ITERS && s_mutex == 0, "mutex libnx sobre svcArbitrateLock/Unlock: %d threads x %d -> %llu (mutex final=0x%x)",
+        waited &= threadWaitForExit(&th[k]) == 0 && threadClose(&th[k]) == 0;
+    CHECK(waited, "threadWaitForExit + threadClose (svcWaitSynchronization/svcCloseHandle)");
+    CHECK(s_counter == (u64)THREADS * ITERS && s_mutex == 0, "mutexLock/Unlock da libnx: %d threads x %d -> %llu (mutex final=0x%x)",
           THREADS, ITERS, (unsigned long long)s_counter, s_mutex);
+    int distinct = threadGetCurHandle() != INVALID_HANDLE;
+    for (int k = 0; k < THREADS; k++)
+        for (int j = 0; j < k; j++)
+            distinct &= s_handles[k] != s_handles[j] && s_handles[k] != threadGetCurHandle();
+    CHECK(distinct, "threadGetCurHandle distinto por thread (tag do mutex)");
+
+    Handle hx;
+    CHECK(svcCreateThread(&hx, (void *)worker, NULL, NULL, 64, -2) == KERNELRESULT(InvalidPriority), "svcCreateThread(prio 64) -> InvalidPriority");
+    CHECK(svcCreateThread(&hx, (void *)worker, NULL, NULL, 0x2C, 7) == KERNELRESULT(InvalidCoreId), "svcCreateThread(cpuid 7) -> InvalidCoreId");
+    CHECK(svcStartThread(0x1234) == KERNELRESULT(InvalidHandle), "svcStartThread(handle invalido) -> InvalidHandle");
+
+    /* ---- 0x0A */
+    volatile int flag = 0;
+    Thread te;
+    CHECK(threadCreate(&te, exits_early, (void *)&flag, NULL, 0x10000, 0x2C, -2) == 0 && threadStart(&te) == 0 &&
+          threadWaitForExit(&te) == 0 && flag == 1 && threadClose(&te) == 0, "svcExitThread termina a thread e sinaliza quem espera");
+
+    /* ---- 0x18 timeout + 0x0B */
+    Thread ts_;
+    threadCreate(&ts_, exits_early, (void *)&flag, NULL, 0x10000, 0x2C, -2);   /* criada e nao iniciada */
+    s32 idx = -1;
+    u64 t0 = now_ns();
+    CHECK(svcWaitSynchronization(&idx, &ts_.handle, 1, 20000000ULL) == KERNELRESULT(TimedOut) && now_ns() - t0 >= 20000000ULL,
+          "svcWaitSynchronization(20 ms, thread parada) -> TimedOut depois de %.1f ms", (now_ns() - t0) / 1e6);
+    threadClose(&ts_);
+    t0 = now_ns();
+    svcSleepThread(15000000LL);
+    u64 slept = now_ns() - t0;
+    CHECK(slept >= 15000000ULL, "svcSleepThread(15 ms) dormiu %.2f ms", slept / 1e6);
+    svcSleepThread(0);
+    svcSleepThread(-1);
+    CHECK(1, "svcSleepThread(0/-1) -> yield");
+
+    /* ---- 0x1C/0x1D CondVar */
+    Thread tc;
+    mutexInit(&s_qm);
+    condvarInit(&s_qcv);
+    threadCreate(&tc, consumer, NULL, NULL, 0x10000, 0x2C, -2);
+    threadStart(&tc);
+    int produced_sum = 0;
+    for (int n = 1; n <= ITEMS; n++) {
+        mutexLock(&s_qm);
+        while (s_slot >= 0)
+            condvarWait(&s_qcv, &s_qm);
+        s_slot = n;
+        produced_sum += n;
+        condvarWakeAll(&s_qcv);
+        mutexUnlock(&s_qm);
+    }
+    threadWaitForExit(&tc);
+    threadClose(&tc);
+    CHECK(s_consumed_sum == produced_sum, "CondVar (svcWaitProcessWideKeyAtomic/svcSignalProcessWideKey): %d itens, soma %d = %d",
+          ITEMS, s_consumed_sum, produced_sum);
+    mutexLock(&s_qm);
+    t0 = now_ns();
+    Result rcw = condvarWaitTimeout(&s_qcv, &s_qm, 10000000ULL);
+    CHECK(rcw == KERNELRESULT(TimedOut) && (s_qm & ~HANDLE_WAIT_MASK) == threadGetCurHandle(),
+          "condvarWaitTimeout(10 ms) -> TimedOut e volta com o mutex (%.1f ms)", (now_ns() - t0) / 1e6);
+    mutexUnlock(&s_qm);
+
+    /* ---- RMutex */
+    rmutexInit(&s_rm);
+    CHECK(recurse(5) == 6 && s_rm.counter == 0 && s_rm.lock == 0, "rmutexLock recursivo: profundidade 6, solta tudo no fim");
 
     /* ---- 0x26 / 0x28 */
     CHECK(svcBreak(BreakReason_User | BreakReason_NotificationOnlyFlag, 0, 0) == 0, "svcBreak(so notificacao) -> 0");

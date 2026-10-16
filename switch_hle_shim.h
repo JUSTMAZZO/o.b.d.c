@@ -545,6 +545,381 @@ SHIM_API Result svcGetInfo(u64 *out, u32 id0, Handle handle, u64 id1)
     default:                            return KERNELRESULT(InvalidEnumValue);
     }
 }
+/* ------------------------------------------------------------------ threads e sincronizacao (Linux/Bionic) */
+/*
+ * Objetos do kernel (threads) ficam numa tabela de handles. Cada thread do Horizon e uma pthread; a
+ * pilha passada pelo guest (stack_top / stack_mem) nao e usada: a pthread tem a pilha do Bionic.
+ * A tag de mutex da libnx (handle da thread) vem de threadGetCurHandle().
+ */
+#include <pthread.h>
+#include <sched.h>
+
+typedef void (*ThreadFunc)(void *);
+typedef u32 Mutex;                                   /* libnx: _LOCK_T do newlib */
+typedef struct { Mutex lock; u32 counter; } RMutex;  /* libnx: struct __lock_t do newlib */
+typedef u32 CondVar;
+
+typedef struct Thread {
+    Handle handle;
+    bool   owns_stack_mem;
+    void  *stack_mem;
+    void  *stack_mirror;
+    size_t stack_sz;
+    void **tls_array;
+    struct Thread *next;
+    struct Thread **prev_next;
+} Thread;
+
+enum {
+    KernelError_OutOfHandles = 105,
+    KernelError_InvalidPriority = 112,
+    KernelError_InvalidCoreId = 113,
+    KernelError_TimedOut = 117,
+};
+
+#define SHIM_MAX_HANDLES 64
+#define SHIM_HANDLE_BASE 0x200U   /* handles nao nulos e abaixo de HANDLE_WAIT_MASK */
+
+typedef struct {
+    int used, is_thread, started, signaled, closed, joined;
+    pthread_t th;
+    ThreadFunc entry;
+    void *arg;
+} ShimObj;
+
+static ShimObj g_shim_objs[SHIM_MAX_HANDLES];
+static pthread_mutex_t g_shim_obj_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_shim_obj_cond = PTHREAD_COND_INITIALIZER;
+static __thread Handle t_shim_handle;
+
+static ShimObj *shim_obj(Handle h)
+{
+    u32 k = h - SHIM_HANDLE_BASE;
+    return (h >= SHIM_HANDLE_BASE && k < SHIM_MAX_HANDLES && g_shim_objs[k].used) ? &g_shim_objs[k] : NULL;
+}
+
+static Handle shim_alloc_obj(int is_thread)   /* chamar com g_shim_obj_lock */
+{
+    for (u32 k = 0; k < SHIM_MAX_HANDLES; k++)
+        if (!g_shim_objs[k].used) {
+            memset(&g_shim_objs[k], 0, sizeof g_shim_objs[k]);
+            g_shim_objs[k].used = 1;
+            g_shim_objs[k].is_thread = is_thread;
+            return SHIM_HANDLE_BASE + k;
+        }
+    return INVALID_HANDLE;
+}
+
+SHIM_API Handle threadGetCurHandle(void)
+{
+    if (t_shim_handle == INVALID_HANDLE) {         /* thread principal: handle criado na primeira consulta */
+        pthread_mutex_lock(&g_shim_obj_lock);
+        t_shim_handle = shim_alloc_obj(1);
+        ShimObj *o = shim_obj(t_shim_handle);
+        if (o) {
+            o->started = 1;
+            o->th = pthread_self();
+        }
+        pthread_mutex_unlock(&g_shim_obj_lock);
+    }
+    return t_shim_handle;
+}
+
+static void shim_thread_finished(Handle h)
+{
+    pthread_mutex_lock(&g_shim_obj_lock);
+    ShimObj *o = shim_obj(h);
+    if (o) {
+        o->signaled = 1;
+        if (o->closed)
+            o->used = 0;           /* handle ja fechado: o objeto morre com a thread */
+    }
+    pthread_cond_broadcast(&g_shim_obj_cond);
+    pthread_mutex_unlock(&g_shim_obj_lock);
+}
+
+static void *shim_thread_trampoline(void *p)
+{
+    Handle h = (Handle)(uintptr_t)p;
+    pthread_mutex_lock(&g_shim_obj_lock);
+    ShimObj *o = shim_obj(h);
+    ThreadFunc entry = o->entry;
+    void *arg = o->arg;
+    pthread_mutex_unlock(&g_shim_obj_lock);
+    t_shim_handle = h;
+    entry(arg);
+    shim_thread_finished(h);       /* retornar da entrada equivale a svcExitThread na libnx */
+    return NULL;
+}
+
+/* svc 0x08: cria a thread parada (prio 0..63; cpuid -2 = padrao, 0..3 = nucleo do Switch). */
+SHIM_API Result svcCreateThread(Handle *out, void *entry, void *arg, void *stack_top, int prio, int cpuid)
+{
+    (void)stack_top;
+    if (prio < 0 || prio > 63)
+        return KERNELRESULT(InvalidPriority);
+    if (cpuid != -2 && (cpuid < 0 || cpuid > 3))
+        return KERNELRESULT(InvalidCoreId);
+    pthread_mutex_lock(&g_shim_obj_lock);
+    Handle h = shim_alloc_obj(1);
+    ShimObj *o = shim_obj(h);
+    if (o) {
+        o->entry = (ThreadFunc)entry;
+        o->arg = arg;
+    }
+    pthread_mutex_unlock(&g_shim_obj_lock);
+    if (h == INVALID_HANDLE)
+        return KERNELRESULT(OutOfHandles);
+    *out = h;
+    return 0;
+}
+
+/* svc 0x09: pthread_create. */
+SHIM_API Result svcStartThread(Handle handle)
+{
+    pthread_mutex_lock(&g_shim_obj_lock);
+    ShimObj *o = shim_obj(handle);
+    Result rc = 0;
+    if (!o || !o->is_thread)
+        rc = KERNELRESULT(InvalidHandle);
+    else if (o->started)
+        rc = KERNELRESULT(InvalidState);
+    else if (pthread_create(&o->th, NULL, shim_thread_trampoline, (void *)(uintptr_t)handle) != 0)
+        rc = KERNELRESULT(OutOfMemory);
+    else
+        o->started = 1;
+    pthread_mutex_unlock(&g_shim_obj_lock);
+    return rc;
+}
+
+/* svc 0x0A: termina a thread atual (sinaliza o handle para quem espera). */
+__attribute__((noreturn)) SHIM_API void svcExitThread(void)
+{
+    shim_thread_finished(threadGetCurHandle());
+    pthread_exit(NULL);
+}
+
+/* svc 0x0B: ns > 0 dorme; 0, -1 e -2 sao os modos de yield do Horizon -> sched_yield. */
+SHIM_API void svcSleepThread(s64 nano)
+{
+    if (nano <= 0) {
+        sched_yield();
+        return;
+    }
+    struct timespec ts = { (time_t)(nano / 1000000000LL), (long)(nano % 1000000000LL) };
+    while (nanosleep(&ts, &ts) != 0 && errno == EINTR)
+        ;
+}
+
+/* svc 0x16: fecha o handle; thread ainda rodando continua e o objeto e liberado quando ela termina. */
+SHIM_API Result svcCloseHandle(Handle handle)
+{
+    pthread_mutex_lock(&g_shim_obj_lock);
+    ShimObj *o = shim_obj(handle);
+    Result rc = 0;
+    if (!o) {
+        rc = KERNELRESULT(InvalidHandle);
+    } else if (o->is_thread && o->started && !pthread_equal(o->th, pthread_self())) {
+        if (o->signaled) {
+            pthread_t th = o->th;
+            o->used = 0;
+            pthread_mutex_unlock(&g_shim_obj_lock);
+            pthread_join(th, NULL);
+            return 0;
+        }
+        pthread_detach(o->th);
+        o->closed = 1;
+    } else {
+        o->used = 0;
+    }
+    pthread_mutex_unlock(&g_shim_obj_lock);
+    return rc;
+}
+
+/* svc 0x18: espera ate algum handle ficar sinalizado (thread terminada). timeout em ns, UINT64_MAX = sem fim. */
+SHIM_API Result svcWaitSynchronization(s32 *index, const Handle *handles, s32 handleCount, u64 timeout)
+{
+    if (handleCount < 0 || handleCount > 64)
+        return KERNELRESULT(OutOfRange);
+    struct timespec deadline;
+    clock_gettime(CLOCK_REALTIME, &deadline);
+    if (timeout != UINT64_MAX) {
+        u64 ns = (u64)deadline.tv_nsec + timeout % 1000000000ULL;
+        deadline.tv_sec += (time_t)(timeout / 1000000000ULL + ns / 1000000000ULL);
+        deadline.tv_nsec = (long)(ns % 1000000000ULL);
+    }
+    pthread_mutex_lock(&g_shim_obj_lock);
+    for (s32 k = 0; k < handleCount; k++)
+        if (!shim_obj(handles[k])) {
+            pthread_mutex_unlock(&g_shim_obj_lock);
+            return KERNELRESULT(InvalidHandle);
+        }
+    for (;;) {
+        for (s32 k = 0; k < handleCount; k++)
+            if (shim_obj(handles[k])->signaled) {
+                *index = k;
+                pthread_mutex_unlock(&g_shim_obj_lock);
+                return 0;
+            }
+        int err = timeout == UINT64_MAX ? pthread_cond_wait(&g_shim_obj_cond, &g_shim_obj_lock)
+                                        : pthread_cond_timedwait(&g_shim_obj_cond, &g_shim_obj_lock, &deadline);
+        if (err == ETIMEDOUT) {
+            pthread_mutex_unlock(&g_shim_obj_lock);
+            return KERNELRESULT(TimedOut);
+        }
+    }
+}
+
+/* ---- mutex da libnx (mesmo algoritmo: tag = handle da thread, bit HANDLE_WAIT_MASK = ha esperadores) */
+SHIM_API void mutexInit(Mutex *m) { *m = INVALID_HANDLE; }
+
+SHIM_API void mutexLock(Mutex *m)
+{
+    u32 self = threadGetCurHandle();
+    u32 value = __atomic_load_n(m, __ATOMIC_SEQ_CST);
+    for (;;) {
+        if (value == INVALID_HANDLE) {
+            if (__atomic_compare_exchange_n(m, &value, self, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
+                return;
+            continue;
+        }
+        if ((value & HANDLE_WAIT_MASK) == 0 &&
+            !__atomic_compare_exchange_n(m, &value, value | HANDLE_WAIT_MASK, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
+            continue;
+        svcArbitrateLock(value & ~HANDLE_WAIT_MASK, m, self);
+        value = __atomic_load_n(m, __ATOMIC_SEQ_CST);
+        if ((value & ~HANDLE_WAIT_MASK) == self)
+            return;
+    }
+}
+
+SHIM_API bool mutexTryLock(Mutex *m)
+{
+    u32 expected = INVALID_HANDLE;
+    return __atomic_compare_exchange_n(m, &expected, threadGetCurHandle(), false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+}
+
+SHIM_API void mutexUnlock(Mutex *m)
+{
+    u32 self = threadGetCurHandle();
+    u32 value = __atomic_load_n(m, __ATOMIC_SEQ_CST);
+    for (;;) {
+        if (value != self) {               /* com WAIT_MASK: o "kernel" acorda o proximo */
+            svcArbitrateUnlock(m);
+            return;
+        }
+        if (__atomic_compare_exchange_n(m, &value, INVALID_HANDLE, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
+            return;
+    }
+}
+
+/* ---- mutex recursivo (newlib __lock_t: lock + contador) */
+SHIM_API void rmutexInit(RMutex *m) { m->lock = INVALID_HANDLE; m->counter = 0; }
+
+SHIM_API void rmutexLock(RMutex *m)
+{
+    if ((__atomic_load_n(&m->lock, __ATOMIC_SEQ_CST) & ~HANDLE_WAIT_MASK) != threadGetCurHandle()) {
+        mutexLock(&m->lock);
+        m->counter = 0;
+    }
+    m->counter++;
+}
+
+SHIM_API bool rmutexTryLock(RMutex *m)
+{
+    if ((__atomic_load_n(&m->lock, __ATOMIC_SEQ_CST) & ~HANDLE_WAIT_MASK) != threadGetCurHandle()) {
+        if (!mutexTryLock(&m->lock))
+            return false;
+        m->counter = 0;
+    }
+    m->counter++;
+    return true;
+}
+
+SHIM_API void rmutexUnlock(RMutex *m)
+{
+    if (--m->counter == 0)
+        mutexUnlock(&m->lock);
+}
+
+/* svc 0x1C: solta o mutex em tag_location, espera um sinal em key e, se acordar por sinal, retoma o mutex.
+ * Com timeout devolve TimedOut sem retomar (a libnx faz o mutexLock depois, como no kernel). */
+SHIM_API Result svcWaitProcessWideKeyAtomic(u32 *key, u32 *tag_location, u32 self_tag, u64 timeout)
+{
+    if ((uintptr_t)key % 4 || (uintptr_t)tag_location % 4)
+        return KERNELRESULT(InvalidAddress);
+    u32 seq = __atomic_load_n(key, __ATOMIC_SEQ_CST);
+    u32 value = __atomic_load_n(tag_location, __ATOMIC_SEQ_CST);
+    if ((value & ~HANDLE_WAIT_MASK) != self_tag)
+        return KERNELRESULT(InvalidState);
+    mutexUnlock(tag_location);
+    struct timespec rel, *prel = NULL;
+    if (timeout != UINT64_MAX) {
+        rel.tv_sec = (time_t)(timeout / 1000000000ULL);
+        rel.tv_nsec = (long)(timeout % 1000000000ULL);
+        prel = &rel;
+    }
+    long r = syscall(SYS_futex, key, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, seq, prel, NULL, 0);
+    if (r != 0 && errno == ETIMEDOUT)
+        return KERNELRESULT(TimedOut);
+    mutexLock(tag_location);
+    return 0;
+}
+
+/* svc 0x1D: acorda ate num esperadores de key (num <= 0: todos). */
+SHIM_API void svcSignalProcessWideKey(u32 *key, s32 num)
+{
+    __atomic_add_fetch(key, 1, __ATOMIC_SEQ_CST);
+    syscall(SYS_futex, key, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, num <= 0 ? INT_MAX : num, NULL, NULL, 0);
+}
+
+/* ---- variavel de condicao da libnx */
+SHIM_API void condvarInit(CondVar *c) { *c = 0; }
+
+SHIM_API Result condvarWaitTimeout(CondVar *c, Mutex *m, u64 timeout)
+{
+    Result rc = svcWaitProcessWideKeyAtomic(c, m, threadGetCurHandle(), timeout);
+    if (rc == KERNELRESULT(TimedOut))
+        mutexLock(m);
+    return rc;
+}
+
+SHIM_API Result condvarWait(CondVar *c, Mutex *m) { return condvarWaitTimeout(c, m, UINT64_MAX); }
+SHIM_API Result condvarWake(CondVar *c, int num) { svcSignalProcessWideKey(c, num); return 0; }
+SHIM_API Result condvarWakeOne(CondVar *c) { return condvarWake(c, 1); }
+SHIM_API Result condvarWakeAll(CondVar *c) { return condvarWake(c, -1); }
+
+/* ---- API de threads da libnx */
+SHIM_API Result threadCreate(Thread *t, ThreadFunc entry, void *arg, void *stack_mem, size_t stack_sz,
+                             int prio, int cpuid)
+{
+    Handle h;
+    Result rc = svcCreateThread(&h, (void *)entry, arg, NULL, prio, cpuid);
+    if (R_FAILED(rc))
+        return rc;
+    memset(t, 0, sizeof *t);
+    t->handle = h;
+    t->owns_stack_mem = stack_mem == NULL;
+    t->stack_mem = stack_mem;
+    t->stack_sz = stack_sz;
+    return 0;
+}
+
+SHIM_API Result threadStart(Thread *t) { return svcStartThread(t->handle); }
+
+SHIM_API Result threadWaitForExit(Thread *t)
+{
+    s32 idx;
+    return svcWaitSynchronization(&idx, &t->handle, 1, UINT64_MAX);
+}
+
+SHIM_API Result threadClose(Thread *t)
+{
+    Result rc = svcCloseHandle(t->handle);
+    t->handle = INVALID_HANDLE;
+    return rc;
+}
+
 #endif /* __linux__ */
 
 /* ------------------------------------------------------------------ timer (arm) */

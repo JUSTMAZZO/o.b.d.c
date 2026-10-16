@@ -22,6 +22,10 @@ CALLER_SAVED = ({f'x{n}' for n in range(19)} | {f'v{n}' for n in list(range(8)) 
                 | {'nzcv'})
 PTR_RETURNING = {'malloc', 'calloc', 'realloc', 'aligned_alloc'}
 PRINTF_LIKE = {'printf': 0, 'sprintf': 1, 'snprintf': 2, 'fprintf': 1}
+# aridade de funcoes da libc cujos argumentos podem vir de fora do bloco (ex.: parametro repassado)
+KNOWN_ARITY = {'strlen': 1, 'malloc': 1, 'free': 1, 'puts': 1, 'calloc': 2, 'realloc': 2, 'memcpy': 3,
+               'memset': 3, 'memmove': 3, 'strcmp': 2, 'strcpy': 2, 'strncpy': 3, 'clock': 0, 'abort': 0,
+               'exit': 1}
 CTYPE = {'u32': 'uint32_t', 'u64': 'uint64_t', 'f64': 'double', 'ptr': 'uint32_t *', 'void*': 'void *',
          'bptr': 'uint8_t *'}
 CMP_NEG = {'==': '!=', '!=': '==', '<': '>=', '>=': '<', '>': '<=', '<=': '>'}
@@ -108,7 +112,17 @@ def c_string(s):
 def neg(c):
     if c.k == 'cmp':
         return X('cmp', CMP_NEG[c.a[0]], c.a[1], c.a[2], t='bool')
+    if c.k in ('land', 'lor'):   # De Morgan
+        return X('lor' if c.k == 'land' else 'land', neg(c.a[0]), neg(c.a[1]), t='bool')
     return X('not', c, t='bool')
+
+
+def cc_holds(nzcv, cc):
+    """Avalia um codigo de condicao sobre flags constantes (N=bit3, Z=bit2, C=bit1, V=bit0)."""
+    n, z, c, v = (nzcv >> 3) & 1, (nzcv >> 2) & 1, (nzcv >> 1) & 1, nzcv & 1
+    return {'eq': z, 'ne': not z, 'hs': c, 'cs': c, 'lo': not c, 'cc': not c, 'mi': n, 'pl': not n,
+            'vs': v, 'vc': not v, 'hi': c and not z, 'ls': not c or z, 'ge': n == v, 'lt': n != v,
+            'gt': not z and n == v, 'le': z or n != v}[cc]
 
 
 class Render:
@@ -141,7 +155,11 @@ class Render:
             return f"{a[0]}({', '.join(self(x) for x in a[1])})"
         if k == 'bin':
             op, l, r = a
+            if op == 'umulh':   # metade alta do produto de 64x64 bits
+                return f"(uint64_t)(((unsigned __int128)({self(l)}) * ({self(r)})) >> 64)"
             return f"({self(l)} {op} {self(r, hexa=op in ('&', '|', '^'))})"
+        if k in ('land', 'lor'):
+            return f"({self(a[0])} {'&&' if k == 'land' else '||'} {self(a[1])})"
         if k == 'cmp':
             op, l, r = a
             # teste de bit 0 do retorno booleano de uma chamada: !f() / f()
@@ -232,14 +250,30 @@ def classify(I, calls):
         I.kind, I.defs, I.uses = 'vec', [R(ops[0])], [R(o) for o in ops[1:] if R(o)]
     elif mn in ('add', 'sub') and ops[1] in ('sp', 'wsp'):
         I.kind, I.defs, I.val = 'stack', [R(ops[0])], imm(ops[2]) * (1 if mn == 'add' else -1)
-    elif mn in ('add', 'sub', 'mul', 'and', 'orr', 'eor', 'lsl', 'lsr', 'asr', 'udiv', 'sdiv', 'subs', 'adds', 'ands'):
+    elif mn in ('ushr', 'shl') and re.fullmatch(r'd\d+', ops[0].lower()):
+        # deslocamento escalar de 64 bits num registrador d (o GCC usa para inteiros vindos de fmov d, x)
+        I.kind, I.width, I.op, I.shift = 'bin', 64, '>>' if mn == 'ushr' else '<<', None
+        I.defs, I.srcs, I.uses = [R(ops[0])], ops[1:3], [R(ops[1])]
+    elif mn in ('add', 'sub', 'mul', 'and', 'orr', 'eor', 'lsl', 'lsr', 'asr', 'udiv', 'sdiv', 'subs', 'adds', 'ands',
+                'umulh'):
         I.kind, I.width = 'bin', W(ops[0])
         I.op = {'add': '+', 'adds': '+', 'sub': '-', 'subs': '-', 'mul': '*', 'and': '&', 'ands': '&',
-                'orr': '|', 'eor': '^', 'lsl': '<<', 'lsr': '>>', 'asr': '>>', 'udiv': '/', 'sdiv': '/'}[mn]
+                'orr': '|', 'eor': '^', 'lsl': '<<', 'lsr': '>>', 'asr': '>>', 'udiv': '/', 'sdiv': '/',
+                'umulh': 'umulh'}[mn]
         I.defs = [R(ops[0])] + (['nzcv'] if mn in ('subs', 'adds', 'ands') else [])
         I.srcs = ops[1:3]
         I.shift = re.search(r'LSL #(\w+)', ops[3]).group(1) if len(ops) > 3 else None
         I.uses = [R(o) for o in I.srcs if R(o) and R(o) != 'zr']
+    elif mn in ('ccmp', 'ccmn'):
+        # flags = cond(flags anteriores) ? cmp(a, b) : nzcv imediato
+        I.kind, I.defs, I.srcs = 'ccmp', ['nzcv'], ops[:2]
+        I.nzcv, I.cc = imm(ops[2]), ops[3].lower()
+        I.uses = [R(o) for o in ops[:2] if R(o) and R(o) != 'zr'] + ['nzcv']
+    elif mn == 'mrs' and ops[1].lower() in ('cntpct_el0', 'cntvct_el0', 'cntfrq_el0'):
+        # contador do sistema lido direto (libnx: armGetSystemTick/armGetSystemTickFreq inlined)
+        I.kind, I.ret, I.fixed_args = 'call', R(ops[0]), True
+        I.name = 'armGetSystemTickFreq' if ops[1].lower() == 'cntfrq_el0' else 'armGetSystemTick'
+        I.defs, I.args, I.convs = [R(ops[0])], [], []
     elif mn in ('tst', 'cmp', 'cmn'):
         I.kind, I.defs, I.srcs = 'flags', ['nzcv'], ops[:2]
         I.flag = 'tst' if mn == 'tst' else 'cmp'
@@ -275,7 +309,7 @@ def classify(I, calls):
         I.kind, I.defs, I.uses = 'dup', [R(ops[0])], [R(ops[1])]
     elif mn in ('addp', 'addv', 'uaddlv'):
         I.kind, I.defs, I.uses = 'vec', [R(ops[0])], [R(ops[1])]
-    elif mn in ('scvtf', 'ucvtf') and R(ops[1]).startswith('x'):
+    elif mn in ('scvtf', 'ucvtf'):
         I.kind, I.defs, I.uses, I.signed = 'cvt', [R(ops[0])], [R(ops[1])], mn == 'scvtf'
     elif mn in ('fcvtzs', 'fcvtzu'):
         I.kind, I.width, I.defs, I.uses = 'f2i', W(ops[0]), [R(ops[0])], [R(ops[1])]
@@ -295,7 +329,7 @@ def classify(I, calls):
         I.op = {'fdiv': '/', 'fmul': '*', 'fadd': '+', 'fsub': '-'}[mn]
     elif mn == 'bl':
         tgt = hex(int(ops[0], 16))
-        I.kind, I.name = 'call', calls.get(tgt, f"sub_{tgt[2:]}")
+        I.kind, I.name, I.ret = 'call', calls.get(tgt, f"sub_{tgt[2:]}"), 'x0'
         I.defs = ['x0'] + sorted(CALLER_SAVED - {'x0'})
     elif mn == 'ret':
         I.kind, I.uses = 'ret', ['x0']
@@ -349,14 +383,14 @@ class Block:
     @property
     def term(self):
         t = self.insns[-1]
-        return t if t.kind in ('br', 'bcc', 'cbz', 'tbz', 'ret') else None
+        return t if t.kind in ('br', 'bcc', 'cbz', 'tbz', 'ret', 'tailcall') else None
 
 
 def build_blocks(insns):
     addrs = {I.addr: n for n, I in enumerate(insns)}
     leaders = {0}
     for n, I in enumerate(insns):
-        if I.kind in ('br', 'bcc', 'cbz', 'tbz', 'ret'):
+        if I.kind in ('br', 'bcc', 'cbz', 'tbz', 'ret', 'tailcall'):
             if n + 1 < len(insns):
                 leaders.add(n + 1)
             if I.target is not None:
@@ -373,7 +407,7 @@ def build_blocks(insns):
         nxt = blocks[b.idx + 1] if b.idx + 1 < len(blocks) else None
         if t is None:
             b.succ = [nxt] if nxt else []
-        elif t.kind == 'ret':
+        elif t.kind in ('ret', 'tailcall'):
             b.succ = []
         elif t.kind == 'br':
             b.succ = [by_addr[t.target]]
@@ -477,11 +511,16 @@ def printf_args(fmt):
     return [(ln, c) for ln, c in conv if c != '%']
 
 
-def infer_args(blocks, strings):
+def infer_args(blocks, strings, known=None):
+    known = {**KNOWN_ARITY, **(known or {})}
     for b in blocks:
         written, consts = {}, {}
         for I in b.insns:
-            if I.kind == 'call':
+            if I.kind == 'call' and getattr(I, 'fixed_args', False):
+                for d in I.defs:
+                    written[d] = 'int'
+                continue
+            if I.kind in ('call', 'tailcall'):
                 fixed = PRINTF_LIKE.get(I.name)
                 if fixed is not None and f'x{fixed}' in consts and hex(consts[f'x{fixed}']) in strings:
                     conv = printf_args(strings[hex(consts[f'x{fixed}'])])
@@ -496,6 +535,9 @@ def infer_args(blocks, strings):
                             I.args.append(f'x{xi}')
                             xi += 1
                         I.convs.append((ln, c))
+                elif I.name in known:
+                    I.args = [f'x{n}' for n in range(known[I.name])]
+                    I.convs = [None] * len(I.args)
                 else:
                     I.args, I.convs = [], []
                     for n in range(8):
@@ -522,6 +564,35 @@ def infer_args(blocks, strings):
                     consts.pop(d, None)
 
 
+def shim_arity(shim_header):
+    """Numero de parametros de cada funcao SHIM_API do header (void/vazio = 0)."""
+    import os as _os
+    if not (shim_header and _os.path.exists(shim_header)):
+        return {}
+    src = open(shim_header, encoding='utf-8').read()
+    out = {}
+    for name, params in re.findall(r'SHIM_API\s+[\w\s\*]+?\b(\w+)\s*\(([^)]*)\)', src):
+        ps = [q.strip() for q in params.split(',') if q.strip() and q.strip() != 'void']
+        out[name] = len(ps)
+    return out
+
+
+def frame_bytes(insns):
+    """Tamanho do quadro: `sub sp, sp, #N` ou pre-indice `[sp, #-N]!` do prologo."""
+    size = 0
+    for I in insns:
+        if I.kind != 'frame':
+            continue
+        if I.mn == 'sub' and I.ops[:2] == ['sp', 'sp']:
+            size += imm(I.ops[2])
+        for o in I.ops:
+            if o.startswith('[sp') and o.endswith('!'):
+                off = mem(o)[1]
+                if off.startswith('#-'):
+                    size += imm(off[2:])
+    return size
+
+
 # ---------------------------------------------------------------- gerador
 class Web:
     def __init__(self, reg_):
@@ -541,6 +612,9 @@ class Skeleton:
         self.warnings = []
 
         self.insns = [Insn(n, line) for n, line in enumerate(fn['assembly'])]
+        self.name = fn['name']
+        self.tail_emitted = set()
+        lo_addr, hi_addr = self.insns[0].addr, self.insns[-1].addr
         neon_spans = [(int(L['start'], 16), int(L['end'], 16)) for L in loops]
         for I in self.insns:
             inside = any(a <= I.addr <= b for a, b in neon_spans)
@@ -551,25 +625,65 @@ class Skeleton:
                     I.cc = I.mn[2:]
             else:
                 classify(I, self.calls)
+                # `b` para fora da funcao com alvo conhecido = chamada de cauda (return f(...))
+                if I.kind == 'br' and not lo_addr <= I.target <= hi_addr and hex(I.target) in self.calls:
+                    I.kind, I.name, I.ret = 'tailcall', self.calls[hex(I.target)], 'x0'
+                    I.target = None
         self.blocks, by_addr = build_blocks(self.insns)
         collapse_neon(self.blocks, by_addr, loops, self.calls)
         self.insns = [I for b in self.blocks for I in b.insns]
         self.by_idx = {I.idx: I for I in self.insns}
         self.dom = dominators(self.blocks)
         self.nat = {h: body for h, body in natural_loops(self.blocks, self.dom).items()}
-        infer_args(self.blocks, self.strings)
+        infer_args(self.blocks, self.strings, shim_arity(shim_header))
         reaching(self.blocks, self.insns)
         self.sym_names = {}
         for L in loops:
             self.sym_names.update(L.get('sym_vecs', {}))
         self.slice()
         self.make_webs()
+        self.find_params()
         self.decide()
         self.memo = {}
+        rets = [I for I in self.insns if I.kind in ('ret', 'tailcall') and I.idx in self.live]
+        if self.name == 'main':
+            self.ret_type = 'int'
+        elif any(I.kind == 'tailcall' for I in rets) or any(
+                d[0] >= 0 for I in rets if I.kind == 'ret' for d in I.reach.get('x0', ())):
+            self.ret_type = 'uint64_t'
+        else:
+            self.ret_type = 'void'
+
+    def find_params(self):
+        """Parametros = registradores de argumento (x0-x7) lidos antes de qualquer escrita. Ponteiro se o
+        valor chega (direto ou por copia) como argumento de uma chamada."""
+        self.params = {}
+        if self.name == 'main':
+            return
+        for w in self.webs.values():
+            entry = [d for d in w.defs if d[0] < 0]
+            if entry and w.reg in [f'x{n}' for n in range(8)]:
+                self.params[int(w.reg[1:])] = w
+        self.ptr_params = set()
+        for n, w in self.params.items():
+            todo, seen = [w], set()
+            while todo:
+                v = todo.pop()
+                if id(v) in seen:
+                    continue
+                seen.add(id(v))
+                for U, r in v.uses:
+                    if U.kind in ('call', 'tailcall'):
+                        self.ptr_params.add(id(w))
+                    elif U.kind == 'copy':
+                        nxt = self.def_web.get((U.idx, U.defs[0]))
+                        if nxt is not None:
+                            todo.append(nxt)
 
     # -- fatia
     def slice(self):
-        roots = [I for I in self.insns if I.kind in ('call', 'ret', 'bcc', 'cbz', 'tbz', 'dup', 'store', 'pseudo')]
+        roots = [I for I in self.insns if I.kind in ('call', 'ret', 'tailcall', 'bcc', 'cbz', 'tbz', 'dup', 'store',
+                                                     'pseudo')]
         self.live = set()
         work = list(roots)
         while work:
@@ -729,6 +843,8 @@ class Skeleton:
             return False
         for d in w.defs:
             if d[0] < 0:
+                if id(w) in getattr(self, 'ptr_params', ()):
+                    continue
                 return False
             I = self.by_idx[d[0]]
             if I.kind == 'call' and I.name in PTR_RETURNING or I.kind == 'stack':
@@ -747,6 +863,8 @@ class Skeleton:
         if any(I.kind == 'pseudo' for I in defs):
             return 'u64'
         if any(I.kind == 'call' and I.name in PTR_RETURNING for I in defs):
+            return 'void*'
+        if (any(d[0] < 0 for d in w.defs) or any(I.kind == 'copy' for I in defs)) and self.is_ptr_web(w):
             return 'void*'
         if w.reg.startswith('v'):
             return 'f64'
@@ -776,6 +894,10 @@ class Skeleton:
                     w.ctype = f"{w.name}_t *"
                 else:
                     w.ctype = CTYPE['ptr']
+            elif any(w is pw for pw in self.params.values()):
+                w.t = 'void*' if id(w) in self.ptr_params else 'u64'
+                w.ctype = CTYPE[w.t]
+                w.name = f"a{w.reg[1:]}"
             else:
                 w.t = self.web_type(w)
                 w.ctype = CTYPE[w.t]
@@ -829,7 +951,8 @@ class Skeleton:
             if I.shift:
                 b = X('const', (b.const() << int(I.shift, 0)) & mask(I.width), t=t) if b.const() is not None                     else X('bin', '<<', b, X('const', int(I.shift, 0)), t=t)
             if a.const() is not None and b.const() is not None:
-                v = eval(f"{a.const()} {I.op} {b.const()}") & mask(I.width)
+                v = ((a.const() * b.const()) >> 64 if I.op == 'umulh'
+                     else eval(f"{a.const()} {I.op} {b.const()}")) & mask(I.width)
                 e = X('const', v, t=t)
             elif I.op in '+-' and a.t in ('ptr', 'void*', 'bptr') and b.const() is not None:
                 # aritmetica de ponteiro em bytes (o binario soma bytes, nao elementos)
@@ -843,6 +966,9 @@ class Skeleton:
                 e = X('flags', 'cmp', a, b)
         elif k == 'flags':
             e = X('flags', I.flag, self.operand(I, I.srcs[0]), self.operand(I, I.srcs[1]))
+        elif k == 'ccmp':
+            e = X('flags', 'ccmp', self.cond_flags(I, I.cc), self.operand(I, I.srcs[0]),
+                  self.operand(I, I.srcs[1]), I.nzcv)
         elif k in ('csel', 'cset'):
             c = self.cond_flags(I, I.cc)
             if k == 'cset':
@@ -866,15 +992,20 @@ class Skeleton:
         elif k == 'f2i':
             e = X('f2i', self.use(I, I.uses[0]), t=t)
         elif k == 'bits2f':
-            v = self.use(I, I.uses[0])
-            e = X('fconst', struct.unpack('<d', struct.pack('<Q', v.const()))[0], t='f64') \
-                if v.const() is not None else X('bits2f', v, t='f64')
+            # fmov d, x copia os bits: continua inteiro ate alguem operar como double (ver fbin)
+            e = self.use(I, I.uses[0])
         elif k == 'fconst':
             e = X('fconst', I.val, t='f64')
         elif k == 'fcopy':
             e = self.use(I, I.uses[0])
         elif k == 'fbin':
-            e = X('bin', I.op, self.use(I, I.uses[0]), self.use(I, I.uses[1]), t='f64')
+            def as_double(v):
+                if v.t == 'f64':
+                    return v
+                if v.const() is not None:
+                    return X('fconst', struct.unpack('<d', struct.pack('<Q', v.const() & M64))[0], t='f64')
+                return X('bits2f', v, t='f64')
+            e = X('bin', I.op, as_double(self.use(I, I.uses[0])), as_double(self.use(I, I.uses[1])), t='f64')
         elif k in ('vec', 'f2bits'):
             parts = [self.use(I, u) for u in I.uses]
             e = X('chk', t='u64') if parts and all(p.k == 'chk' for p in parts) else X('opaque', I.line)
@@ -901,6 +1032,13 @@ class Skeleton:
         f = self.use(I, 'nzcv')
         if f.k != 'flags':
             raise SkeletonError(f"flags sem comparacao conhecida em {I.line}")
+        if f.a[0] == 'ccmp':
+            # ccmp: se a condicao anterior vale, compara a com b; senao os flags sao o imediato nzcv
+            _, prev, a, b, nzcv = f.a
+            took = X('cmp', CC_OP[cc], a, b, t='bool')
+            if cc_holds(nzcv, cc):
+                return X('lor', neg(prev), took, t='bool')
+            return X('land', prev, took, t='bool')
         kind, a, b = f.a
         if kind == 'tst':
             return X('cmp', '==' if cc == 'eq' else '!=', X('bin', '&', a, b), X('const', 0), t='bool')
@@ -941,7 +1079,7 @@ class Skeleton:
     def stmts(self, b):
         out = []
         for I in b.insns:
-            if I.idx not in self.live or I.kind in ('br', 'bcc', 'cbz', 'tbz', 'ret'):
+            if I.idx not in self.live or I.kind in ('br', 'bcc', 'cbz', 'tbz', 'ret', 'tailcall'):
                 continue
             if I.kind == 'pseudo':
                 L = I.loop
@@ -949,11 +1087,11 @@ class Skeleton:
                     out.append("checksum = 0;")
                 out.append(f"/* <LOOP_NEON_{L['idx']}> */")
             elif I.kind == 'call':
-                w = self.def_web.get((I.idx, 'x0'))
+                w = self.def_web.get((I.idx, I.ret))
                 if w is None:
-                    out.append(self.render(self.build((I.idx, 'x0'))) + ';')
+                    out.append(self.render(self.build((I.idx, I.ret))) + ';')
                 elif w.var:
-                    out.append(self.assign(w, self.build((I.idx, 'x0'))))
+                    out.append(self.assign(w, self.build((I.idx, I.ret))))
             elif I.kind == 'dup':
                 name = self.sym_names.get(I.defs[0], f"dup_{I.defs[0]}")
                 self.syms.add(name)
@@ -970,23 +1108,38 @@ class Skeleton:
         return out
 
     def return_tail(self, b):
-        """Blocos de b em diante ate um `ret`, sem desvios no meio; None se nao for so cauda."""
+        """Blocos de b em diante ate um `ret` (ou chamada de cauda), seguindo `b` incondicional e
+        sem outros desvios; None se nao for so cauda."""
         tail = []
-        while b is not None:
-            if b.neon or any(b in body for h, body in self.nat.items()):
+        while b is not None and b not in tail:
+            if b.neon or self.in_loop(b):
                 return None
             tail.append(b)
             t = b.term
-            if t is not None:
-                return tail if t.kind == 'ret' else None
-            b = self.blocks[b.idx + 1] if b.idx + 1 < len(self.blocks) else None
+            if t is None:
+                b = self.blocks[b.idx + 1] if b.idx + 1 < len(self.blocks) else None
+            elif t.kind in ('ret', 'tailcall'):
+                return tail
+            elif t.kind == 'br':
+                b = next(iter(b.succ))
+            else:
+                return None
         return None
+
+    def term_return(self, t):
+        if t.kind == 'tailcall':
+            call = X('call', t.name, [self.arg(t, n) for n in range(len(t.args))])
+            return f"return {self.render(call)};" if self.ret_type != 'void' else f"{self.render(call)};\nreturn;"
+        if self.ret_type == 'void':
+            return "return;"
+        return f"return {self.render(self.use(t, 'x0'))};"
 
     def emit_tail(self, tail):
         lines = []
         for b in tail:
             lines += self.stmts(b)
-        lines.append(f"return {self.render(self.use(tail[-1].term, 'x0'))};")
+            self.tail_emitted.add(b)
+        lines += self.term_return(tail[-1].term).split('\n')
         return lines
 
     def emit_range(self, lo, hi, loop):
@@ -994,6 +1147,11 @@ class Skeleton:
         i = lo
         while i < hi:
             b = self.blocks[i]
+            prev = self.blocks[i - 1] if i > 0 else None
+            if b in self.tail_emitted and prev is not None and prev.term is not None and \
+                    prev.term.kind in ('ret', 'tailcall', 'br'):
+                i += 1                  # alcancado so por desvio, ja emitido como cauda
+                continue
             if b in self.nat and (loop is None or b is not loop[0]):
                 body = self.nat[b]
                 j = max(x.idx for x in body) + 1
@@ -1029,9 +1187,12 @@ class Skeleton:
             elif t is not None and t.kind == 'br':
                 T = next(iter(b.succ))
                 if not (loop and T is loop[0]) and T.idx != i + 1:
-                    raise SkeletonError(f"desvio incondicional nao estruturado: {t.line}")
-            elif t is not None and t.kind == 'ret':
-                lines.append(f"return {self.render(self.use(t, 'x0'))};")
+                    tail = self.return_tail(T)
+                    if tail is None:
+                        raise SkeletonError(f"desvio incondicional nao estruturado: {t.line}")
+                    lines += self.emit_tail(tail)
+            elif t is not None and t.kind in ('ret', 'tailcall'):
+                lines += self.term_return(t).split('\n')
             i += 1
         return lines
 
@@ -1072,7 +1233,8 @@ class Skeleton:
                             raise SkeletonError(f"sp+{J.val:#x} usado como {found[J.val]} e {m.group(1)}")
         return found
 
-    def code(self):
+    def function_text(self):
+        """Linhas da funcao (assinatura, declaracoes, corpo)."""
         self.stack_objs, self.syms = set(), set()
         typed_stack = self.stack_types()
         self.R.addr_of = {f"sp_{off:#x}" for off in typed_stack}
@@ -1091,43 +1253,66 @@ class Skeleton:
         frame_offs = sorted({imm(mem(next(o for o in I.ops if o.startswith('[')))[1])
                              for I in self.insns if I.kind == 'frame' and any(o.startswith('[sp') for o in I.ops)
                              and mem(next(o for o in I.ops if o.startswith('[')))[1].startswith('#')})
+        frame_size = frame_bytes(self.insns)
+        params = {id(w) for w in self.params.values()}
         decls = []
         seen = set()
         for w in sorted(self.webs.values(), key=lambda w: (w.name or '')):
-            if w.var and w.name not in seen:
+            if w.var and w.name not in seen and id(w) not in params:
                 seen.add(w.name)
                 decls.append(f"{w.ctype}{'' if w.ctype.endswith('*') else ' '}{w.name};")
         for off in sorted(self.stack_objs):
             if off in typed_stack:
                 decls.append(f"{typed_stack[off]} sp_{off:#x};  /* objeto local na pilha (sp+{off:#x}) */")
                 continue
-            size = next((o for o in frame_offs if o > off), off + 64) - off
-            decls.append(f"uint8_t sp_{off:#x}[{size}];  /* objeto local na pilha (sp+{off:#x}), passado por endereco */")
+            size = next((o for o in frame_offs if o > off), frame_size if frame_size > off else off + 64) - off
+            decls.append(f"char sp_{off:#x}[{size}];  /* objeto local na pilha (sp+{off:#x}), passado por endereco */")
         for s in sorted(self.syms):
             decls.append(f"uint32_t {s};")
         if any(L.get('tmpl') is not None for L in self.loops):
             decls.append("uint64_t checksum;")
-        callees = {I.name for I in self.insns if I.kind == 'call'}
-        inc = ['#include <stdio.h>', '#include <stdlib.h>', '#include <stdint.h>']
-        if 'clock' in callees:
-            inc.append('#include <time.h>')
-        if self.shim_header and os.path.exists(self.shim_header):
-            shim_src = open(self.shim_header, encoding='utf-8').read()
-            shim_fns = set(re.findall(r'SHIM_API\s+[\w\s\*]+?\b(\w+)\s*\(', shim_src))
-            if callees & shim_fns:
-                inc.append(f'#include "{os.path.basename(self.shim_header)}"')
-        typedefs = []
-        for name, nf in sorted(self.structs.items()):
-            fields = ' '.join(f"uint32_t f{4 * j};" for j in range(nf))
-            typedefs.append(f"typedef struct {{ {fields} }} {name};  /* layout recuperado de ld{nf}/st{nf} */")
-        lines = inc + [''] + (typedefs + [''] if typedefs else []) + ['int main(void) {'] + \
-            ['  ' + d for d in decls] + [''] + ['  ' + s for s in body] + ['}']
-        return '\n'.join(lines)
+        if self.name == 'main':
+            sig = "int main(void)"
+        else:
+            ps = ', '.join(f"{w.ctype}{'' if w.ctype.endswith('*') else ' '}{w.name}"
+                           for _, w in sorted(self.params.items())) or 'void'
+            sig = f"static {self.ret_type} {self.name}({ps})"
+        self.signature = sig
+        return [sig + ' {'] + ['  ' + d for d in decls] + ([''] if decls else []) + ['  ' + s for s in body] + ['}']
+
+    def callees(self):
+        return {I.name for I in self.insns if I.kind in ('call', 'tailcall')}
 
 
-def build(fn, data, loops, shim_header='switch_hle_shim.h'):
+def build(fn, data, loops, shim_header='switch_hle_shim.h', extra_fns=()):
+    """Unidade de traducao C: includes, structs recuperadas, funcoes auxiliares do programa e o main."""
     sk = Skeleton(fn, data, loops, shim_header)
-    code = sk.code()
-    for w in dict.fromkeys(sk.warnings):
+    shim_fns = set()
+    if shim_header and os.path.exists(shim_header):
+        shim_fns = set(re.findall(r'SHIM_API\s+[\w\s\*]+?\b(\w+)\s*\(', open(shim_header, encoding='utf-8').read()))
+    # funcoes que o shim ja fornece (ex.: appletMainLoop) nao sao reemitidas
+    helpers = [Skeleton(f, data, [], shim_header) for f in extra_fns if f['name'] not in shim_fns]
+    texts = [h.function_text() for h in helpers]
+    main_text = sk.function_text()
+    callees = sk.callees().union(*(h.callees() for h in helpers)) - {h.name for h in helpers}
+    inc = ['#include <stdio.h>', '#include <stdlib.h>', '#include <stdint.h>']
+    if callees & {'strlen', 'memcpy', 'memset', 'memmove', 'strcmp', 'strcpy', 'strncpy'}:
+        inc.append('#include <string.h>')
+    if 'clock' in callees:
+        inc.append('#include <time.h>')
+    if shim_header and os.path.exists(shim_header):
+        shim_src = open(shim_header, encoding='utf-8').read()
+        shim_fns = set(re.findall(r'SHIM_API\s+[\w\s\*]+?\b(\w+)\s*\(', shim_src))
+        if callees & shim_fns:
+            inc.append(f'#include "{os.path.basename(shim_header)}"')
+    typedefs = []
+    for name, nf in sorted(sk.structs.items()):
+        fields = ' '.join(f"uint32_t f{4 * j};" for j in range(nf))
+        typedefs.append(f"typedef struct {{ {fields} }} {name};  /* layout recuperado de ld{nf}/st{nf} */")
+    lines = inc + [''] + (typedefs + [''] if typedefs else [])
+    for h, t in zip(helpers, texts):
+        lines += t + ['']
+    lines += main_text
+    for w in dict.fromkeys(sk.warnings + [x for h in helpers for x in h.warnings]):
         print(f"[esqueleto] aviso: {w}")
-    return code
+    return '\n'.join(lines)

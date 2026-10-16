@@ -38,12 +38,22 @@ public class ExtractMain extends GhidraScript {
         json.append("  \"architecture\": \"").append(currentProgram.getLanguage().getProcessor().toString()).append("\",\n");
         json.append("  \"functions\": [\n");
 
+        // -postScript ExtractMain.java <saida.json> [funcao1,funcao2,...]: alem das funcoes com "main"
+        // no nome, extrai as funcoes listadas (ex.: auxiliares do proprio programa chamadas pelo main)
+        String[] scriptArgs = getScriptArgs();
+        Set<String> extra = new HashSet<>();
+        if (scriptArgs.length > 1) {
+            for (String n : scriptArgs[1].split(",")) {
+                if (!n.trim().isEmpty()) extra.add(n.trim());
+            }
+        }
+
         FunctionIterator functions = currentProgram.getFunctionManager().getFunctions(true);
         boolean firstFunc = true;
 
         while (functions.hasNext() && !monitor.isCancelled()) {
             Function func = functions.next();
-            if (!func.getName().toLowerCase().contains("main")) {
+            if (!func.getName().toLowerCase().contains("main") && !extra.contains(func.getName())) {
                 continue;
             }
 
