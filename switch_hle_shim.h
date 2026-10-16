@@ -235,6 +235,18 @@ __attribute__((noreturn)) SHIM_API void svcReturnFromException(Result res)
     abort();
 }
 
+/* ---- servicos da libnx (IPC): dummies do mapeamento da Fase 3. No Switch cada um abre uma sessao com o
+ * servico (sm: por svcConnectToNamedPort; hid, fsp-srv, appletOE... pelo sm) e conversa por
+ * svcSendSyncRequest; aqui so devolvem sucesso, para o homebrew seguir em frente. */
+SHIM_API Result smInitialize(void) { return 0; }
+SHIM_API void smExit(void) {}
+SHIM_API Result appletInitialize(void) { return 0; }
+SHIM_API void appletExit(void) {}
+SHIM_API Result hidInitialize(void) { return 0; }
+SHIM_API void hidExit(void) {}
+SHIM_API Result fsInitialize(void) { return 0; }
+SHIM_API void fsExit(void) {}
+
 #if defined(__linux__)
 #include <errno.h>
 #include <fcntl.h>
@@ -918,6 +930,62 @@ SHIM_API Result threadClose(Thread *t)
     Result rc = svcCloseHandle(t->handle);
     t->handle = INVALID_HANDLE;
     return rc;
+}
+
+/* ------------------------------------------------------------------ IPC (dummies do mapeamento) */
+/* svc 0x1F: sessao ficticia na tabela de handles (o nome da porta tem ate 11 caracteres no Horizon). */
+SHIM_API Result svcConnectToNamedPort(Handle *session, const char *name)
+{
+    if (!name || strnlen(name, 12) > 11)
+        return KERNELRESULT(OutOfRange);
+    pthread_mutex_lock(&g_shim_obj_lock);
+    Handle h = shim_alloc_obj(0);
+    pthread_mutex_unlock(&g_shim_obj_lock);
+    if (h == INVALID_HANDLE)
+        return KERNELRESULT(OutOfHandles);
+    *session = h;
+    return 0;
+}
+
+/* svc 0x21: valida a sessao e devolve sucesso; a mensagem no buffer de IPC da TLS nao e processada. */
+SHIM_API Result svcSendSyncRequest(Handle session)
+{
+    pthread_mutex_lock(&g_shim_obj_lock);
+    ShimObj *o = shim_obj(session);
+    int ok = o && !o->is_thread;
+    pthread_mutex_unlock(&g_shim_obj_lock);
+    return ok ? 0 : KERNELRESULT(InvalidHandle);
+}
+
+/* svc 0x13 / 0x14: memoria compartilhada de um servico (ex.: hid). Dummy: valida alinhamento e nao mapeia. */
+SHIM_API Result svcMapSharedMemory(Handle handle, void *addr, size_t size, u32 perm)
+{
+    (void)handle; (void)perm;
+    if ((uintptr_t)addr % SHIM_PAGE)
+        return KERNELRESULT(InvalidAddress);
+    if (size == 0 || size % SHIM_PAGE)
+        return KERNELRESULT(InvalidSize);
+    return 0;
+}
+
+SHIM_API Result svcUnmapSharedMemory(Handle handle, void *addr, size_t size)
+{
+    (void)handle; (void)addr; (void)size;
+    return 0;
+}
+
+/* svc 0x17: limpa o sinal de um evento legivel (eventos de applet). Dummy. */
+SHIM_API Result svcResetSignal(Handle handle)
+{
+    (void)handle;
+    return 0;
+}
+
+/* svc 0x52: desfaz o mapeamento de memoria de transferencia (applet). Dummy. */
+SHIM_API Result svcUnmapTransferMemory(Handle tmem_handle, void *addr, size_t size)
+{
+    (void)tmem_handle; (void)addr; (void)size;
+    return 0;
 }
 
 #endif /* __linux__ */

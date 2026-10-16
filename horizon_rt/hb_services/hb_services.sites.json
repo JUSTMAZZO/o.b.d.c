@@ -1,0 +1,2631 @@
+{
+  "mod0_offset": 240,
+  "version": 0,
+  "size": 118784,
+  "flags": 0,
+  "segments": {
+    "text": {
+      "offset": 0,
+      "size": 86016
+    },
+    "ro": {
+      "offset": 86016,
+      "size": 16384
+    },
+    "data": {
+      "offset": 102400,
+      "size": 16384
+    }
+  },
+  "bss_size": 4096,
+  "build_id": "1b5f5b1fd5bb0597e1727909cd4f73eb253af987000000000000000000000000",
+  "image_size": 122880,
+  "mod0": {
+    "dynamic": 102672,
+    "bss_start": 118416,
+    "bss_end": 122864,
+    "eh_frame_hdr_start": 88680,
+    "eh_frame_hdr_end": 88680,
+    "module_object": 240
+  },
+  "dynamic": {
+    "0xc": 85456,
+    "0xd": 85512,
+    "0x19": 102400,
+    "0x1b": 8,
+    "0x1a": 102408,
+    "0x1c": 8,
+    "HASH": 86152,
+    "STRTAB": 86248,
+    "SYMTAB": 86176,
+    "STRSZ": 1,
+    "SYMENT": 24,
+    "0x15": 0,
+    "RELA": 0,
+    "RELASZ": 0,
+    "RELAENT": 24,
+    "0x18": 0,
+    "FLAGS_1": 134217729,
+    "RELR": 86040,
+    "RELRSZ": 112,
+    "RELRENT": 8
+  },
+  "relocs": [
+    {
+      "kind": "relr",
+      "offset": 102400,
+      "addend": 832
+    },
+    {
+      "kind": "relr",
+      "offset": 102408,
+      "addend": 736
+    },
+    {
+      "kind": "relr",
+      "offset": 102416,
+      "addend": 86936
+    },
+    {
+      "kind": "relr",
+      "offset": 102448,
+      "addend": 83520
+    },
+    {
+      "kind": "relr",
+      "offset": 103016,
+      "addend": 122880
+    },
+    {
+      "kind": "relr",
+      "offset": 103024,
+      "addend": 36288
+    },
+    {
+      "kind": "relr",
+      "offset": 103032,
+      "addend": 26768
+    },
+    {
+      "kind": "relr",
+      "offset": 103040,
+      "addend": 26672
+    },
+    {
+      "kind": "relr",
+      "offset": 103048,
+      "addend": 106512
+    },
+    {
+      "kind": "relr",
+      "offset": 103056,
+      "addend": 122816
+    },
+    {
+      "kind": "relr",
+      "offset": 103064,
+      "addend": 120088
+    },
+    {
+      "kind": "relr",
+      "offset": 103072,
+      "addend": 118128
+    },
+    {
+      "kind": "relr",
+      "offset": 103080,
+      "addend": 106496
+    },
+    {
+      "kind": "relr",
+      "offset": 103088,
+      "addend": 102416
+    },
+    {
+      "kind": "relr",
+      "offset": 103096,
+      "addend": 119032
+    },
+    {
+      "kind": "relr",
+      "offset": 103104,
+      "addend": 88672
+    },
+    {
+      "kind": "relr",
+      "offset": 103112,
+      "addend": 88184
+    },
+    {
+      "kind": "relr",
+      "offset": 103120,
+      "addend": 122248
+    },
+    {
+      "kind": "relr",
+      "offset": 103128,
+      "addend": 26640
+    },
+    {
+      "kind": "relr",
+      "offset": 103136,
+      "addend": 26704
+    },
+    {
+      "kind": "relr",
+      "offset": 103144,
+      "addend": 87624
+    },
+    {
+      "kind": "relr",
+      "offset": 103152,
+      "addend": 119024
+    },
+    {
+      "kind": "relr",
+      "offset": 103160,
+      "addend": 36480
+    },
+    {
+      "kind": "relr",
+      "offset": 103176,
+      "addend": 122240
+    },
+    {
+      "kind": "relr",
+      "offset": 103184,
+      "addend": 120096
+    },
+    {
+      "kind": "relr",
+      "offset": 103192,
+      "addend": 88144
+    },
+    {
+      "kind": "relr",
+      "offset": 103200,
+      "addend": 26816
+    },
+    {
+      "kind": "relr",
+      "offset": 103208,
+      "addend": 119040
+    },
+    {
+      "kind": "relr",
+      "offset": 103216,
+      "addend": 26800
+    },
+    {
+      "kind": "relr",
+      "offset": 103224,
+      "addend": 122264
+    },
+    {
+      "kind": "relr",
+      "offset": 103232,
+      "addend": 106504
+    },
+    {
+      "kind": "relr",
+      "offset": 103240,
+      "addend": 118408
+    },
+    {
+      "kind": "relr",
+      "offset": 103248,
+      "addend": 122864
+    },
+    {
+      "kind": "relr",
+      "offset": 103264,
+      "addend": 19980
+    },
+    {
+      "kind": "relr",
+      "offset": 103272,
+      "addend": 107112
+    },
+    {
+      "kind": "relr",
+      "offset": 103280,
+      "addend": 121984
+    },
+    {
+      "kind": "relr",
+      "offset": 103288,
+      "addend": 122152
+    },
+    {
+      "kind": "relr",
+      "offset": 103296,
+      "addend": 121992
+    },
+    {
+      "kind": "relr",
+      "offset": 103304,
+      "addend": 107128
+    },
+    {
+      "kind": "relr",
+      "offset": 103312,
+      "addend": 36064
+    },
+    {
+      "kind": "relr",
+      "offset": 103320,
+      "addend": 102408
+    },
+    {
+      "kind": "relr",
+      "offset": 103328,
+      "addend": 122232
+    },
+    {
+      "kind": "relr",
+      "offset": 103336,
+      "addend": 87736
+    },
+    {
+      "kind": "relr",
+      "offset": 103344,
+      "addend": 118408
+    },
+    {
+      "kind": "relr",
+      "offset": 103352,
+      "addend": 36384
+    },
+    {
+      "kind": "relr",
+      "offset": 103360,
+      "addend": 106508
+    },
+    {
+      "kind": "relr",
+      "offset": 103368,
+      "addend": 102408
+    },
+    {
+      "kind": "relr",
+      "offset": 103376,
+      "addend": 87848
+    },
+    {
+      "kind": "relr",
+      "offset": 103384,
+      "addend": 122864
+    },
+    {
+      "kind": "relr",
+      "offset": 103392,
+      "addend": 122840
+    },
+    {
+      "kind": "relr",
+      "offset": 103400,
+      "addend": 106528
+    },
+    {
+      "kind": "relr",
+      "offset": 103408,
+      "addend": 122848
+    },
+    {
+      "kind": "relr",
+      "offset": 103416,
+      "addend": 102400
+    },
+    {
+      "kind": "relr",
+      "offset": 103424,
+      "addend": 109192
+    },
+    {
+      "kind": "relr",
+      "offset": 103432,
+      "addend": 36160
+    },
+    {
+      "kind": "relr",
+      "offset": 103440,
+      "addend": 107120
+    },
+    {
+      "kind": "relr",
+      "offset": 103448,
+      "addend": 320
+    },
+    {
+      "kind": "relr",
+      "offset": 103456,
+      "addend": 106536
+    },
+    {
+      "kind": "relr",
+      "offset": 103464,
+      "addend": 87360
+    },
+    {
+      "kind": "relr",
+      "offset": 103472,
+      "addend": 102400
+    },
+    {
+      "kind": "relr",
+      "offset": 103480,
+      "addend": 26784
+    },
+    {
+      "kind": "relr",
+      "offset": 103488,
+      "addend": 102400
+    },
+    {
+      "kind": "relr",
+      "offset": 103504,
+      "addend": 109216
+    },
+    {
+      "kind": "relr",
+      "offset": 106528,
+      "addend": 106536
+    },
+    {
+      "kind": "relr",
+      "offset": 106544,
+      "addend": 122264
+    },
+    {
+      "kind": "relr",
+      "offset": 106552,
+      "addend": 122448
+    },
+    {
+      "kind": "relr",
+      "offset": 106560,
+      "addend": 122632
+    },
+    {
+      "kind": "relr",
+      "offset": 107144,
+      "addend": 107128
+    },
+    {
+      "kind": "relr",
+      "offset": 107152,
+      "addend": 107128
+    },
+    {
+      "kind": "relr",
+      "offset": 107160,
+      "addend": 107144
+    },
+    {
+      "kind": "relr",
+      "offset": 107168,
+      "addend": 107144
+    },
+    {
+      "kind": "relr",
+      "offset": 107176,
+      "addend": 107160
+    },
+    {
+      "kind": "relr",
+      "offset": 107184,
+      "addend": 107160
+    },
+    {
+      "kind": "relr",
+      "offset": 107192,
+      "addend": 107176
+    },
+    {
+      "kind": "relr",
+      "offset": 107200,
+      "addend": 107176
+    },
+    {
+      "kind": "relr",
+      "offset": 107208,
+      "addend": 107192
+    },
+    {
+      "kind": "relr",
+      "offset": 107216,
+      "addend": 107192
+    },
+    {
+      "kind": "relr",
+      "offset": 107224,
+      "addend": 107208
+    },
+    {
+      "kind": "relr",
+      "offset": 107232,
+      "addend": 107208
+    },
+    {
+      "kind": "relr",
+      "offset": 107240,
+      "addend": 107224
+    },
+    {
+      "kind": "relr",
+      "offset": 107248,
+      "addend": 107224
+    },
+    {
+      "kind": "relr",
+      "offset": 107256,
+      "addend": 107240
+    },
+    {
+      "kind": "relr",
+      "offset": 107264,
+      "addend": 107240
+    },
+    {
+      "kind": "relr",
+      "offset": 107272,
+      "addend": 107256
+    },
+    {
+      "kind": "relr",
+      "offset": 107280,
+      "addend": 107256
+    },
+    {
+      "kind": "relr",
+      "offset": 107288,
+      "addend": 107272
+    },
+    {
+      "kind": "relr",
+      "offset": 107296,
+      "addend": 107272
+    },
+    {
+      "kind": "relr",
+      "offset": 107304,
+      "addend": 107288
+    },
+    {
+      "kind": "relr",
+      "offset": 107312,
+      "addend": 107288
+    },
+    {
+      "kind": "relr",
+      "offset": 107320,
+      "addend": 107304
+    },
+    {
+      "kind": "relr",
+      "offset": 107328,
+      "addend": 107304
+    },
+    {
+      "kind": "relr",
+      "offset": 107336,
+      "addend": 107320
+    },
+    {
+      "kind": "relr",
+      "offset": 107344,
+      "addend": 107320
+    },
+    {
+      "kind": "relr",
+      "offset": 107352,
+      "addend": 107336
+    },
+    {
+      "kind": "relr",
+      "offset": 107360,
+      "addend": 107336
+    },
+    {
+      "kind": "relr",
+      "offset": 107368,
+      "addend": 107352
+    },
+    {
+      "kind": "relr",
+      "offset": 107376,
+      "addend": 107352
+    },
+    {
+      "kind": "relr",
+      "offset": 107384,
+      "addend": 107368
+    },
+    {
+      "kind": "relr",
+      "offset": 107392,
+      "addend": 107368
+    },
+    {
+      "kind": "relr",
+      "offset": 107400,
+      "addend": 107384
+    },
+    {
+      "kind": "relr",
+      "offset": 107408,
+      "addend": 107384
+    },
+    {
+      "kind": "relr",
+      "offset": 107416,
+      "addend": 107400
+    },
+    {
+      "kind": "relr",
+      "offset": 107424,
+      "addend": 107400
+    },
+    {
+      "kind": "relr",
+      "offset": 107432,
+      "addend": 107416
+    },
+    {
+      "kind": "relr",
+      "offset": 107440,
+      "addend": 107416
+    },
+    {
+      "kind": "relr",
+      "offset": 107448,
+      "addend": 107432
+    },
+    {
+      "kind": "relr",
+      "offset": 107456,
+      "addend": 107432
+    },
+    {
+      "kind": "relr",
+      "offset": 107464,
+      "addend": 107448
+    },
+    {
+      "kind": "relr",
+      "offset": 107472,
+      "addend": 107448
+    },
+    {
+      "kind": "relr",
+      "offset": 107480,
+      "addend": 107464
+    },
+    {
+      "kind": "relr",
+      "offset": 107488,
+      "addend": 107464
+    },
+    {
+      "kind": "relr",
+      "offset": 107496,
+      "addend": 107480
+    },
+    {
+      "kind": "relr",
+      "offset": 107504,
+      "addend": 107480
+    },
+    {
+      "kind": "relr",
+      "offset": 107512,
+      "addend": 107496
+    },
+    {
+      "kind": "relr",
+      "offset": 107520,
+      "addend": 107496
+    },
+    {
+      "kind": "relr",
+      "offset": 107528,
+      "addend": 107512
+    },
+    {
+      "kind": "relr",
+      "offset": 107536,
+      "addend": 107512
+    },
+    {
+      "kind": "relr",
+      "offset": 107544,
+      "addend": 107528
+    },
+    {
+      "kind": "relr",
+      "offset": 107552,
+      "addend": 107528
+    },
+    {
+      "kind": "relr",
+      "offset": 107560,
+      "addend": 107544
+    },
+    {
+      "kind": "relr",
+      "offset": 107568,
+      "addend": 107544
+    },
+    {
+      "kind": "relr",
+      "offset": 107576,
+      "addend": 107560
+    },
+    {
+      "kind": "relr",
+      "offset": 107584,
+      "addend": 107560
+    },
+    {
+      "kind": "relr",
+      "offset": 107592,
+      "addend": 107576
+    },
+    {
+      "kind": "relr",
+      "offset": 107600,
+      "addend": 107576
+    },
+    {
+      "kind": "relr",
+      "offset": 107608,
+      "addend": 107592
+    },
+    {
+      "kind": "relr",
+      "offset": 107616,
+      "addend": 107592
+    },
+    {
+      "kind": "relr",
+      "offset": 107624,
+      "addend": 107608
+    },
+    {
+      "kind": "relr",
+      "offset": 107632,
+      "addend": 107608
+    },
+    {
+      "kind": "relr",
+      "offset": 107640,
+      "addend": 107624
+    },
+    {
+      "kind": "relr",
+      "offset": 107648,
+      "addend": 107624
+    },
+    {
+      "kind": "relr",
+      "offset": 107656,
+      "addend": 107640
+    },
+    {
+      "kind": "relr",
+      "offset": 107664,
+      "addend": 107640
+    },
+    {
+      "kind": "relr",
+      "offset": 107672,
+      "addend": 107656
+    },
+    {
+      "kind": "relr",
+      "offset": 107680,
+      "addend": 107656
+    },
+    {
+      "kind": "relr",
+      "offset": 107688,
+      "addend": 107672
+    },
+    {
+      "kind": "relr",
+      "offset": 107696,
+      "addend": 107672
+    },
+    {
+      "kind": "relr",
+      "offset": 107704,
+      "addend": 107688
+    },
+    {
+      "kind": "relr",
+      "offset": 107712,
+      "addend": 107688
+    },
+    {
+      "kind": "relr",
+      "offset": 107720,
+      "addend": 107704
+    },
+    {
+      "kind": "relr",
+      "offset": 107728,
+      "addend": 107704
+    },
+    {
+      "kind": "relr",
+      "offset": 107736,
+      "addend": 107720
+    },
+    {
+      "kind": "relr",
+      "offset": 107744,
+      "addend": 107720
+    },
+    {
+      "kind": "relr",
+      "offset": 107752,
+      "addend": 107736
+    },
+    {
+      "kind": "relr",
+      "offset": 107760,
+      "addend": 107736
+    },
+    {
+      "kind": "relr",
+      "offset": 107768,
+      "addend": 107752
+    },
+    {
+      "kind": "relr",
+      "offset": 107776,
+      "addend": 107752
+    },
+    {
+      "kind": "relr",
+      "offset": 107784,
+      "addend": 107768
+    },
+    {
+      "kind": "relr",
+      "offset": 107792,
+      "addend": 107768
+    },
+    {
+      "kind": "relr",
+      "offset": 107800,
+      "addend": 107784
+    },
+    {
+      "kind": "relr",
+      "offset": 107808,
+      "addend": 107784
+    },
+    {
+      "kind": "relr",
+      "offset": 107816,
+      "addend": 107800
+    },
+    {
+      "kind": "relr",
+      "offset": 107824,
+      "addend": 107800
+    },
+    {
+      "kind": "relr",
+      "offset": 107832,
+      "addend": 107816
+    },
+    {
+      "kind": "relr",
+      "offset": 107840,
+      "addend": 107816
+    },
+    {
+      "kind": "relr",
+      "offset": 107848,
+      "addend": 107832
+    },
+    {
+      "kind": "relr",
+      "offset": 107856,
+      "addend": 107832
+    },
+    {
+      "kind": "relr",
+      "offset": 107864,
+      "addend": 107848
+    },
+    {
+      "kind": "relr",
+      "offset": 107872,
+      "addend": 107848
+    },
+    {
+      "kind": "relr",
+      "offset": 107880,
+      "addend": 107864
+    },
+    {
+      "kind": "relr",
+      "offset": 107888,
+      "addend": 107864
+    },
+    {
+      "kind": "relr",
+      "offset": 107896,
+      "addend": 107880
+    },
+    {
+      "kind": "relr",
+      "offset": 107904,
+      "addend": 107880
+    },
+    {
+      "kind": "relr",
+      "offset": 107912,
+      "addend": 107896
+    },
+    {
+      "kind": "relr",
+      "offset": 107920,
+      "addend": 107896
+    },
+    {
+      "kind": "relr",
+      "offset": 107928,
+      "addend": 107912
+    },
+    {
+      "kind": "relr",
+      "offset": 107936,
+      "addend": 107912
+    },
+    {
+      "kind": "relr",
+      "offset": 107944,
+      "addend": 107928
+    },
+    {
+      "kind": "relr",
+      "offset": 107952,
+      "addend": 107928
+    },
+    {
+      "kind": "relr",
+      "offset": 107960,
+      "addend": 107944
+    },
+    {
+      "kind": "relr",
+      "offset": 107968,
+      "addend": 107944
+    },
+    {
+      "kind": "relr",
+      "offset": 107976,
+      "addend": 107960
+    },
+    {
+      "kind": "relr",
+      "offset": 107984,
+      "addend": 107960
+    },
+    {
+      "kind": "relr",
+      "offset": 107992,
+      "addend": 107976
+    },
+    {
+      "kind": "relr",
+      "offset": 108000,
+      "addend": 107976
+    },
+    {
+      "kind": "relr",
+      "offset": 108008,
+      "addend": 107992
+    },
+    {
+      "kind": "relr",
+      "offset": 108016,
+      "addend": 107992
+    },
+    {
+      "kind": "relr",
+      "offset": 108024,
+      "addend": 108008
+    },
+    {
+      "kind": "relr",
+      "offset": 108032,
+      "addend": 108008
+    },
+    {
+      "kind": "relr",
+      "offset": 108040,
+      "addend": 108024
+    },
+    {
+      "kind": "relr",
+      "offset": 108048,
+      "addend": 108024
+    },
+    {
+      "kind": "relr",
+      "offset": 108056,
+      "addend": 108040
+    },
+    {
+      "kind": "relr",
+      "offset": 108064,
+      "addend": 108040
+    },
+    {
+      "kind": "relr",
+      "offset": 108072,
+      "addend": 108056
+    },
+    {
+      "kind": "relr",
+      "offset": 108080,
+      "addend": 108056
+    },
+    {
+      "kind": "relr",
+      "offset": 108088,
+      "addend": 108072
+    },
+    {
+      "kind": "relr",
+      "offset": 108096,
+      "addend": 108072
+    },
+    {
+      "kind": "relr",
+      "offset": 108104,
+      "addend": 108088
+    },
+    {
+      "kind": "relr",
+      "offset": 108112,
+      "addend": 108088
+    },
+    {
+      "kind": "relr",
+      "offset": 108120,
+      "addend": 108104
+    },
+    {
+      "kind": "relr",
+      "offset": 108128,
+      "addend": 108104
+    },
+    {
+      "kind": "relr",
+      "offset": 108136,
+      "addend": 108120
+    },
+    {
+      "kind": "relr",
+      "offset": 108144,
+      "addend": 108120
+    },
+    {
+      "kind": "relr",
+      "offset": 108152,
+      "addend": 108136
+    },
+    {
+      "kind": "relr",
+      "offset": 108160,
+      "addend": 108136
+    },
+    {
+      "kind": "relr",
+      "offset": 108168,
+      "addend": 108152
+    },
+    {
+      "kind": "relr",
+      "offset": 108176,
+      "addend": 108152
+    },
+    {
+      "kind": "relr",
+      "offset": 108184,
+      "addend": 108168
+    },
+    {
+      "kind": "relr",
+      "offset": 108192,
+      "addend": 108168
+    },
+    {
+      "kind": "relr",
+      "offset": 108200,
+      "addend": 108184
+    },
+    {
+      "kind": "relr",
+      "offset": 108208,
+      "addend": 108184
+    },
+    {
+      "kind": "relr",
+      "offset": 108216,
+      "addend": 108200
+    },
+    {
+      "kind": "relr",
+      "offset": 108224,
+      "addend": 108200
+    },
+    {
+      "kind": "relr",
+      "offset": 108232,
+      "addend": 108216
+    },
+    {
+      "kind": "relr",
+      "offset": 108240,
+      "addend": 108216
+    },
+    {
+      "kind": "relr",
+      "offset": 108248,
+      "addend": 108232
+    },
+    {
+      "kind": "relr",
+      "offset": 108256,
+      "addend": 108232
+    },
+    {
+      "kind": "relr",
+      "offset": 108264,
+      "addend": 108248
+    },
+    {
+      "kind": "relr",
+      "offset": 108272,
+      "addend": 108248
+    },
+    {
+      "kind": "relr",
+      "offset": 108280,
+      "addend": 108264
+    },
+    {
+      "kind": "relr",
+      "offset": 108288,
+      "addend": 108264
+    },
+    {
+      "kind": "relr",
+      "offset": 108296,
+      "addend": 108280
+    },
+    {
+      "kind": "relr",
+      "offset": 108304,
+      "addend": 108280
+    },
+    {
+      "kind": "relr",
+      "offset": 108312,
+      "addend": 108296
+    },
+    {
+      "kind": "relr",
+      "offset": 108320,
+      "addend": 108296
+    },
+    {
+      "kind": "relr",
+      "offset": 108328,
+      "addend": 108312
+    },
+    {
+      "kind": "relr",
+      "offset": 108336,
+      "addend": 108312
+    },
+    {
+      "kind": "relr",
+      "offset": 108344,
+      "addend": 108328
+    },
+    {
+      "kind": "relr",
+      "offset": 108352,
+      "addend": 108328
+    },
+    {
+      "kind": "relr",
+      "offset": 108360,
+      "addend": 108344
+    },
+    {
+      "kind": "relr",
+      "offset": 108368,
+      "addend": 108344
+    },
+    {
+      "kind": "relr",
+      "offset": 108376,
+      "addend": 108360
+    },
+    {
+      "kind": "relr",
+      "offset": 108384,
+      "addend": 108360
+    },
+    {
+      "kind": "relr",
+      "offset": 108392,
+      "addend": 108376
+    },
+    {
+      "kind": "relr",
+      "offset": 108400,
+      "addend": 108376
+    },
+    {
+      "kind": "relr",
+      "offset": 108408,
+      "addend": 108392
+    },
+    {
+      "kind": "relr",
+      "offset": 108416,
+      "addend": 108392
+    },
+    {
+      "kind": "relr",
+      "offset": 108424,
+      "addend": 108408
+    },
+    {
+      "kind": "relr",
+      "offset": 108432,
+      "addend": 108408
+    },
+    {
+      "kind": "relr",
+      "offset": 108440,
+      "addend": 108424
+    },
+    {
+      "kind": "relr",
+      "offset": 108448,
+      "addend": 108424
+    },
+    {
+      "kind": "relr",
+      "offset": 108456,
+      "addend": 108440
+    },
+    {
+      "kind": "relr",
+      "offset": 108464,
+      "addend": 108440
+    },
+    {
+      "kind": "relr",
+      "offset": 108472,
+      "addend": 108456
+    },
+    {
+      "kind": "relr",
+      "offset": 108480,
+      "addend": 108456
+    },
+    {
+      "kind": "relr",
+      "offset": 108488,
+      "addend": 108472
+    },
+    {
+      "kind": "relr",
+      "offset": 108496,
+      "addend": 108472
+    },
+    {
+      "kind": "relr",
+      "offset": 108504,
+      "addend": 108488
+    },
+    {
+      "kind": "relr",
+      "offset": 108512,
+      "addend": 108488
+    },
+    {
+      "kind": "relr",
+      "offset": 108520,
+      "addend": 108504
+    },
+    {
+      "kind": "relr",
+      "offset": 108528,
+      "addend": 108504
+    },
+    {
+      "kind": "relr",
+      "offset": 108536,
+      "addend": 108520
+    },
+    {
+      "kind": "relr",
+      "offset": 108544,
+      "addend": 108520
+    },
+    {
+      "kind": "relr",
+      "offset": 108552,
+      "addend": 108536
+    },
+    {
+      "kind": "relr",
+      "offset": 108560,
+      "addend": 108536
+    },
+    {
+      "kind": "relr",
+      "offset": 108568,
+      "addend": 108552
+    },
+    {
+      "kind": "relr",
+      "offset": 108576,
+      "addend": 108552
+    },
+    {
+      "kind": "relr",
+      "offset": 108584,
+      "addend": 108568
+    },
+    {
+      "kind": "relr",
+      "offset": 108592,
+      "addend": 108568
+    },
+    {
+      "kind": "relr",
+      "offset": 108600,
+      "addend": 108584
+    },
+    {
+      "kind": "relr",
+      "offset": 108608,
+      "addend": 108584
+    },
+    {
+      "kind": "relr",
+      "offset": 108616,
+      "addend": 108600
+    },
+    {
+      "kind": "relr",
+      "offset": 108624,
+      "addend": 108600
+    },
+    {
+      "kind": "relr",
+      "offset": 108632,
+      "addend": 108616
+    },
+    {
+      "kind": "relr",
+      "offset": 108640,
+      "addend": 108616
+    },
+    {
+      "kind": "relr",
+      "offset": 108648,
+      "addend": 108632
+    },
+    {
+      "kind": "relr",
+      "offset": 108656,
+      "addend": 108632
+    },
+    {
+      "kind": "relr",
+      "offset": 108664,
+      "addend": 108648
+    },
+    {
+      "kind": "relr",
+      "offset": 108672,
+      "addend": 108648
+    },
+    {
+      "kind": "relr",
+      "offset": 108680,
+      "addend": 108664
+    },
+    {
+      "kind": "relr",
+      "offset": 108688,
+      "addend": 108664
+    },
+    {
+      "kind": "relr",
+      "offset": 108696,
+      "addend": 108680
+    },
+    {
+      "kind": "relr",
+      "offset": 108704,
+      "addend": 108680
+    },
+    {
+      "kind": "relr",
+      "offset": 108712,
+      "addend": 108696
+    },
+    {
+      "kind": "relr",
+      "offset": 108720,
+      "addend": 108696
+    },
+    {
+      "kind": "relr",
+      "offset": 108728,
+      "addend": 108712
+    },
+    {
+      "kind": "relr",
+      "offset": 108736,
+      "addend": 108712
+    },
+    {
+      "kind": "relr",
+      "offset": 108744,
+      "addend": 108728
+    },
+    {
+      "kind": "relr",
+      "offset": 108752,
+      "addend": 108728
+    },
+    {
+      "kind": "relr",
+      "offset": 108760,
+      "addend": 108744
+    },
+    {
+      "kind": "relr",
+      "offset": 108768,
+      "addend": 108744
+    },
+    {
+      "kind": "relr",
+      "offset": 108776,
+      "addend": 108760
+    },
+    {
+      "kind": "relr",
+      "offset": 108784,
+      "addend": 108760
+    },
+    {
+      "kind": "relr",
+      "offset": 108792,
+      "addend": 108776
+    },
+    {
+      "kind": "relr",
+      "offset": 108800,
+      "addend": 108776
+    },
+    {
+      "kind": "relr",
+      "offset": 108808,
+      "addend": 108792
+    },
+    {
+      "kind": "relr",
+      "offset": 108816,
+      "addend": 108792
+    },
+    {
+      "kind": "relr",
+      "offset": 108824,
+      "addend": 108808
+    },
+    {
+      "kind": "relr",
+      "offset": 108832,
+      "addend": 108808
+    },
+    {
+      "kind": "relr",
+      "offset": 108840,
+      "addend": 108824
+    },
+    {
+      "kind": "relr",
+      "offset": 108848,
+      "addend": 108824
+    },
+    {
+      "kind": "relr",
+      "offset": 108856,
+      "addend": 108840
+    },
+    {
+      "kind": "relr",
+      "offset": 108864,
+      "addend": 108840
+    },
+    {
+      "kind": "relr",
+      "offset": 108872,
+      "addend": 108856
+    },
+    {
+      "kind": "relr",
+      "offset": 108880,
+      "addend": 108856
+    },
+    {
+      "kind": "relr",
+      "offset": 108888,
+      "addend": 108872
+    },
+    {
+      "kind": "relr",
+      "offset": 108896,
+      "addend": 108872
+    },
+    {
+      "kind": "relr",
+      "offset": 108904,
+      "addend": 108888
+    },
+    {
+      "kind": "relr",
+      "offset": 108912,
+      "addend": 108888
+    },
+    {
+      "kind": "relr",
+      "offset": 108920,
+      "addend": 108904
+    },
+    {
+      "kind": "relr",
+      "offset": 108928,
+      "addend": 108904
+    },
+    {
+      "kind": "relr",
+      "offset": 108936,
+      "addend": 108920
+    },
+    {
+      "kind": "relr",
+      "offset": 108944,
+      "addend": 108920
+    },
+    {
+      "kind": "relr",
+      "offset": 108952,
+      "addend": 108936
+    },
+    {
+      "kind": "relr",
+      "offset": 108960,
+      "addend": 108936
+    },
+    {
+      "kind": "relr",
+      "offset": 108968,
+      "addend": 108952
+    },
+    {
+      "kind": "relr",
+      "offset": 108976,
+      "addend": 108952
+    },
+    {
+      "kind": "relr",
+      "offset": 108984,
+      "addend": 108968
+    },
+    {
+      "kind": "relr",
+      "offset": 108992,
+      "addend": 108968
+    },
+    {
+      "kind": "relr",
+      "offset": 109000,
+      "addend": 108984
+    },
+    {
+      "kind": "relr",
+      "offset": 109008,
+      "addend": 108984
+    },
+    {
+      "kind": "relr",
+      "offset": 109016,
+      "addend": 109000
+    },
+    {
+      "kind": "relr",
+      "offset": 109024,
+      "addend": 109000
+    },
+    {
+      "kind": "relr",
+      "offset": 109032,
+      "addend": 109016
+    },
+    {
+      "kind": "relr",
+      "offset": 109040,
+      "addend": 109016
+    },
+    {
+      "kind": "relr",
+      "offset": 109048,
+      "addend": 109032
+    },
+    {
+      "kind": "relr",
+      "offset": 109056,
+      "addend": 109032
+    },
+    {
+      "kind": "relr",
+      "offset": 109064,
+      "addend": 109048
+    },
+    {
+      "kind": "relr",
+      "offset": 109072,
+      "addend": 109048
+    },
+    {
+      "kind": "relr",
+      "offset": 109080,
+      "addend": 109064
+    },
+    {
+      "kind": "relr",
+      "offset": 109088,
+      "addend": 109064
+    },
+    {
+      "kind": "relr",
+      "offset": 109096,
+      "addend": 109080
+    },
+    {
+      "kind": "relr",
+      "offset": 109104,
+      "addend": 109080
+    },
+    {
+      "kind": "relr",
+      "offset": 109112,
+      "addend": 109096
+    },
+    {
+      "kind": "relr",
+      "offset": 109120,
+      "addend": 109096
+    },
+    {
+      "kind": "relr",
+      "offset": 109128,
+      "addend": 109112
+    },
+    {
+      "kind": "relr",
+      "offset": 109136,
+      "addend": 109112
+    },
+    {
+      "kind": "relr",
+      "offset": 109144,
+      "addend": 109128
+    },
+    {
+      "kind": "relr",
+      "offset": 109152,
+      "addend": 109128
+    },
+    {
+      "kind": "relr",
+      "offset": 109160,
+      "addend": 109144
+    },
+    {
+      "kind": "relr",
+      "offset": 109168,
+      "addend": 109144
+    },
+    {
+      "kind": "relr",
+      "offset": 109176,
+      "addend": 109160
+    },
+    {
+      "kind": "relr",
+      "offset": 109184,
+      "addend": 109160
+    },
+    {
+      "kind": "relr",
+      "offset": 109208,
+      "addend": 122264
+    },
+    {
+      "kind": "relr",
+      "offset": 109672,
+      "addend": 62816
+    },
+    {
+      "kind": "relr",
+      "offset": 109680,
+      "addend": 66848
+    },
+    {
+      "kind": "relr",
+      "offset": 109696,
+      "addend": 87360
+    },
+    {
+      "kind": "relr",
+      "offset": 109704,
+      "addend": 86480
+    },
+    {
+      "kind": "relr",
+      "offset": 109712,
+      "addend": 86512
+    },
+    {
+      "kind": "relr",
+      "offset": 109720,
+      "addend": 86512
+    },
+    {
+      "kind": "relr",
+      "offset": 109728,
+      "addend": 86512
+    },
+    {
+      "kind": "relr",
+      "offset": 109736,
+      "addend": 86512
+    },
+    {
+      "kind": "relr",
+      "offset": 109744,
+      "addend": 86512
+    },
+    {
+      "kind": "relr",
+      "offset": 109752,
+      "addend": 86512
+    },
+    {
+      "kind": "relr",
+      "offset": 109760,
+      "addend": 86512
+    },
+    {
+      "kind": "relr",
+      "offset": 109768,
+      "addend": 86512
+    },
+    {
+      "kind": "relr",
+      "offset": 109776,
+      "addend": 86512
+    },
+    {
+      "kind": "relr",
+      "offset": 109888,
+      "addend": 118112
+    },
+    {
+      "kind": "relr",
+      "offset": 109896,
+      "addend": 118096
+    },
+    {
+      "kind": "relr",
+      "offset": 109904,
+      "addend": 118080
+    },
+    {
+      "kind": "relr",
+      "offset": 118128,
+      "addend": 102416
+    },
+    {
+      "kind": "relr",
+      "offset": 118136,
+      "addend": 102416
+    },
+    {
+      "kind": "relr",
+      "offset": 118144,
+      "addend": 102416
+    }
+  ],
+  "sites": [
+    {
+      "offset": 1088,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 19,
+      "word": 3577466995,
+      "function": "_appletCmdGetSession"
+    },
+    {
+      "offset": 1368,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 19,
+      "word": 3577466995,
+      "function": "_appletCmdInU8NoOut"
+    },
+    {
+      "offset": 1576,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 19,
+      "word": 3577466995,
+      "function": "_appletCmdInU32NoOut"
+    },
+    {
+      "offset": 1780,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 19,
+      "word": 3577466995,
+      "function": "_appletGetSessionProxy.constprop.0"
+    },
+    {
+      "offset": 2084,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 19,
+      "word": 3577466995,
+      "function": "_appletOpenLibraryAppletProxy.constprop.0"
+    },
+    {
+      "offset": 2412,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 19,
+      "word": 3577466995,
+      "function": "_appletCmdGetEvent"
+    },
+    {
+      "offset": 2680,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 19,
+      "word": 3577466995,
+      "function": "_appletCmdNoInOutU8.isra.0"
+    },
+    {
+      "offset": 2904,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 19,
+      "word": 3577466995,
+      "function": "_appletCmdNoInOutU32.isra.0"
+    },
+    {
+      "offset": 3128,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 19,
+      "word": 3577466995,
+      "function": "_appletCmdNoInOutU64.isra.0"
+    },
+    {
+      "offset": 3348,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 19,
+      "word": 3577466995,
+      "function": "_appletCmdNoIO.isra.0"
+    },
+    {
+      "offset": 3608,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "appletSetFocusHandlingMode"
+    },
+    {
+      "offset": 4192,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "_appletHolderCreateState"
+    },
+    {
+      "offset": 4444,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "appletHolderClose"
+    },
+    {
+      "offset": 4504,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "appletHolderClose"
+    },
+    {
+      "offset": 5184,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 5256,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 5312,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 5368,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 5420,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 5476,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 5532,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 5620,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 5676,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 5732,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 5788,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 5940,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 6016,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 6108,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 6200,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 6288,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 6380,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 6472,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 6560,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 6628,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 6684,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 6760,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 6828,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 6920,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 7012,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 7104,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 7288,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 7396,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 7496,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 7548,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_appletCleanup"
+    },
+    {
+      "offset": 8096,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "appletInitialize"
+    },
+    {
+      "offset": 8240,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "appletInitialize"
+    },
+    {
+      "offset": 8704,
+      "kind": "mrs",
+      "sysreg": "cntpct_el0",
+      "rt": 1,
+      "word": 3577471009,
+      "function": "appletInitialize"
+    },
+    {
+      "offset": 9336,
+      "kind": "mrs",
+      "sysreg": "cntpct_el0",
+      "rt": 0,
+      "word": 3577471008,
+      "function": "appletInitialize"
+    },
+    {
+      "offset": 9708,
+      "kind": "mrs",
+      "sysreg": "cntpct_el0",
+      "rt": 1,
+      "word": 3577471009,
+      "function": "appletInitialize"
+    },
+    {
+      "offset": 10544,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 19,
+      "word": 3577466995,
+      "function": "appletInitialize"
+    },
+    {
+      "offset": 11840,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_fsCleanup"
+    },
+    {
+      "offset": 11904,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_fsCleanup"
+    },
+    {
+      "offset": 12124,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 20,
+      "word": 3577466996,
+      "function": "fsInitialize"
+    },
+    {
+      "offset": 12264,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 20,
+      "word": 3577466996,
+      "function": "fsInitialize"
+    },
+    {
+      "offset": 12392,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 20,
+      "word": 3577466996,
+      "function": "fsInitialize"
+    },
+    {
+      "offset": 12952,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_hidCleanup"
+    },
+    {
+      "offset": 13008,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_hidCleanup"
+    },
+    {
+      "offset": 13076,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_hidCleanup"
+    },
+    {
+      "offset": 13152,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 19,
+      "word": 3577466995,
+      "function": "_hidCmdInAruidNoOut"
+    },
+    {
+      "offset": 13376,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 19,
+      "word": 3577466995,
+      "function": "_hidCmdInU32AruidNoOut"
+    },
+    {
+      "offset": 14176,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "hidInitialize"
+    },
+    {
+      "offset": 14352,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "hidInitialize"
+    },
+    {
+      "offset": 16432,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 19,
+      "word": 3577466995,
+      "function": "hidSetSupportedNpadIdType"
+    },
+    {
+      "offset": 16696,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 19,
+      "word": 3577466995,
+      "function": "_smCmifCmdInPid"
+    },
+    {
+      "offset": 16920,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_smCleanup"
+    },
+    {
+      "offset": 17436,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 19,
+      "word": 3577466995,
+      "function": "smInitialize"
+    },
+    {
+      "offset": 17724,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 19,
+      "word": 3577466995,
+      "function": "smGetServiceOriginal"
+    },
+    {
+      "offset": 18004,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 20,
+      "word": 3577466996,
+      "function": "smGetServiceWrapper"
+    },
+    {
+      "offset": 19920,
+      "kind": "svc",
+      "imm": 1,
+      "word": 3556769825,
+      "function": "svcSetHeapSize"
+    },
+    {
+      "offset": 19936,
+      "kind": "svc",
+      "imm": 2,
+      "word": 3556769857,
+      "function": "svcSetMemoryPermission"
+    },
+    {
+      "offset": 19944,
+      "kind": "svc",
+      "imm": 3,
+      "word": 3556769889,
+      "function": "svcSetMemoryAttribute"
+    },
+    {
+      "offset": 19952,
+      "kind": "svc",
+      "imm": 5,
+      "word": 3556769953,
+      "function": "svcUnmapMemory"
+    },
+    {
+      "offset": 19964,
+      "kind": "svc",
+      "imm": 6,
+      "word": 3556769985,
+      "function": "svcQueryMemory"
+    },
+    {
+      "offset": 19980,
+      "kind": "svc",
+      "imm": 7,
+      "word": 3556770017,
+      "function": "svcExitProcess"
+    },
+    {
+      "offset": 19988,
+      "kind": "svc",
+      "imm": 11,
+      "word": 3556770145,
+      "function": "svcSleepThread"
+    },
+    {
+      "offset": 19996,
+      "kind": "svc",
+      "imm": 19,
+      "word": 3556770401,
+      "function": "svcMapSharedMemory"
+    },
+    {
+      "offset": 20004,
+      "kind": "svc",
+      "imm": 20,
+      "word": 3556770433,
+      "function": "svcUnmapSharedMemory"
+    },
+    {
+      "offset": 20012,
+      "kind": "svc",
+      "imm": 22,
+      "word": 3556770497,
+      "function": "svcCloseHandle"
+    },
+    {
+      "offset": 20020,
+      "kind": "svc",
+      "imm": 23,
+      "word": 3556770529,
+      "function": "svcResetSignal"
+    },
+    {
+      "offset": 20032,
+      "kind": "svc",
+      "imm": 24,
+      "word": 3556770561,
+      "function": "svcWaitSynchronization"
+    },
+    {
+      "offset": 20048,
+      "kind": "svc",
+      "imm": 26,
+      "word": 3556770625,
+      "function": "svcArbitrateLock"
+    },
+    {
+      "offset": 20056,
+      "kind": "svc",
+      "imm": 27,
+      "word": 3556770657,
+      "function": "svcArbitrateUnlock"
+    },
+    {
+      "offset": 20068,
+      "kind": "svc",
+      "imm": 31,
+      "word": 3556770785,
+      "function": "svcConnectToNamedPort"
+    },
+    {
+      "offset": 20084,
+      "kind": "svc",
+      "imm": 33,
+      "word": 3556770849,
+      "function": "svcSendSyncRequest"
+    },
+    {
+      "offset": 20092,
+      "kind": "svc",
+      "imm": 38,
+      "word": 3556771009,
+      "function": "svcBreak"
+    },
+    {
+      "offset": 20100,
+      "kind": "svc",
+      "imm": 39,
+      "word": 3556771041,
+      "function": "svcOutputDebugString"
+    },
+    {
+      "offset": 20108,
+      "kind": "svc",
+      "imm": 40,
+      "word": 3556771073,
+      "function": "svcReturnFromException"
+    },
+    {
+      "offset": 20120,
+      "kind": "svc",
+      "imm": 41,
+      "word": 3556771105,
+      "function": "svcGetInfo"
+    },
+    {
+      "offset": 20136,
+      "kind": "svc",
+      "imm": 82,
+      "word": 3556772417,
+      "function": "svcUnmapTransferMemory"
+    },
+    {
+      "offset": 20324,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "mutexLock"
+    },
+    {
+      "offset": 20528,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "mutexUnlock"
+    },
+    {
+      "offset": 20644,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "mutexIsLockedByCurrentThread"
+    },
+    {
+      "offset": 22244,
+      "kind": "mrs",
+      "sysreg": "cntpct_el0",
+      "rt": 1,
+      "word": 3577471009,
+      "function": "waitObjects"
+    },
+    {
+      "offset": 22324,
+      "kind": "mrs",
+      "sysreg": "cntpct_el0",
+      "rt": 1,
+      "word": 3577471009,
+      "function": "waitObjects"
+    },
+    {
+      "offset": 22416,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "waitObjects"
+    },
+    {
+      "offset": 22440,
+      "kind": "mrs",
+      "sysreg": "cntpct_el0",
+      "rt": 1,
+      "word": 3577471009,
+      "function": "waitObjects"
+    },
+    {
+      "offset": 22968,
+      "kind": "mrs",
+      "sysreg": "cntpct_el0",
+      "rt": 0,
+      "word": 3577471008,
+      "function": "waitObjects"
+    },
+    {
+      "offset": 23084,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "waitObjects"
+    },
+    {
+      "offset": 23108,
+      "kind": "mrs",
+      "sysreg": "cntpct_el0",
+      "rt": 0,
+      "word": 3577471008,
+      "function": "waitObjects"
+    },
+    {
+      "offset": 23512,
+      "kind": "mrs",
+      "sysreg": "cntpct_el0",
+      "rt": 1,
+      "word": 3577471009,
+      "function": "waitObjects"
+    },
+    {
+      "offset": 23760,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 26,
+      "word": 3577467002,
+      "function": "sessionmgrCreate"
+    },
+    {
+      "offset": 24076,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "sessionmgrClose"
+    },
+    {
+      "offset": 24216,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_apmCleanup"
+    },
+    {
+      "offset": 24296,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "_apmCleanup"
+    },
+    {
+      "offset": 24524,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "apmInitialize"
+    },
+    {
+      "offset": 24896,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 19,
+      "word": 3577466995,
+      "function": "apmSetPerformanceConfiguration"
+    },
+    {
+      "offset": 26704,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "__syscall_getreent"
+    },
+    {
+      "offset": 26848,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "newlibSetup"
+    },
+    {
+      "offset": 28868,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 1,
+      "word": 3577466977,
+      "function": "__libnx_init_thread"
+    },
+    {
+      "offset": 28924,
+      "kind": "mrs",
+      "sysreg": "tpidrro_el0",
+      "rt": 0,
+      "word": 3577466976,
+      "function": "__libnx_init_thread"
+    }
+  ]
+}

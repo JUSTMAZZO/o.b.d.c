@@ -1,0 +1,25 @@
+{
+  "output": "horizon_rt/hb_compute/reconstructed_hb_compute.c",
+  "attempts": 2,
+  "problems": [
+    [
+      "LOOP_NEON_1 mudou de posicao em relacao as chamadas ['armGetSystemTick']: no esqueleto elas ficam depois do loop",
+      "LOOP_NEON_2 esta em profundidade 1, mas o placeholder esta em 2 (o loop foi movido para fora de um bloco)"
+    ],
+    [
+      "LOOP_NEON_1 mudou de posicao em relacao as chamadas ['armGetSystemTick']: no esqueleto elas ficam depois do loop",
+      "LOOP_NEON_2 esta em profundidade 1, mas o placeholder esta em 2 (o loop foi movido para fora de um bloco)"
+    ]
+  ],
+  "rejected": "horizon_rt/hb_compute/reconstructed_hb_compute.qwen_rejected.c",
+  "source": "fallback",
+  "fallback_reason": [
+    "LOOP_NEON_1 mudou de posicao em relacao as chamadas ['armGetSystemTick']: no esqueleto elas ficam depois do loop",
+    "LOOP_NEON_2 esta em profundidade 1, mas o placeholder esta em 2 (o loop foi movido para fora de um bloco)"
+  ],
+  "gate": {
+    "Frames": "60",
+    "Checksum": "88196450180",
+    "Ultima particula": "1734747"
+  }
+}

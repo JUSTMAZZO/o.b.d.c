@@ -237,6 +237,20 @@ int main(void)
     rmutexInit(&s_rm);
     CHECK(recurse(5) == 6 && s_rm.counter == 0 && s_rm.lock == 0, "rmutexLock recursivo: profundidade 6, solta tudo no fim");
 
+    /* ---- IPC (dummies do mapeamento): 0x1F, 0x21, 0x13/0x14, 0x17, 0x52 e API de servicos */
+    Handle sess = INVALID_HANDLE, sess2 = INVALID_HANDLE;
+    CHECK(svcConnectToNamedPort(&sess, "sm:") == 0 && sess != INVALID_HANDLE, "svcConnectToNamedPort(\"sm:\") -> sessao 0x%x", sess);
+    CHECK(svcConnectToNamedPort(&sess2, "nome-longo-demais") == KERNELRESULT(OutOfRange), "svcConnectToNamedPort(nome > 11) -> OutOfRange");
+    CHECK(svcSendSyncRequest(sess) == 0, "svcSendSyncRequest(sessao) -> 0 (mensagem nao processada)");
+    CHECK(svcSendSyncRequest(0x1234) == KERNELRESULT(InvalidHandle), "svcSendSyncRequest(handle invalido) -> InvalidHandle");
+    CHECK(svcCloseHandle(sess) == 0 && svcSendSyncRequest(sess) == KERNELRESULT(InvalidHandle), "svcCloseHandle(sessao) invalida o handle");
+    CHECK(svcMapSharedMemory(sess, h, 0x1000, Perm_R) == 0 && svcMapSharedMemory(sess, h + 1, 0x1000, Perm_R) == KERNELRESULT(InvalidAddress) &&
+          svcUnmapSharedMemory(sess, h, 0x1000) == 0, "svcMap/UnmapSharedMemory (dummy, valida alinhamento)");
+    CHECK(svcResetSignal(sess) == 0 && svcUnmapTransferMemory(sess, h, 0x1000) == 0, "svcResetSignal e svcUnmapTransferMemory (dummy)");
+    CHECK(smInitialize() == 0 && appletInitialize() == 0 && hidInitialize() == 0 && fsInitialize() == 0,
+          "smInitialize / appletInitialize / hidInitialize / fsInitialize (dummy) -> 0");
+    fsExit(); hidExit(); appletExit(); smExit();
+
     /* ---- 0x26 / 0x28 */
     CHECK(svcBreak(BreakReason_User | BreakReason_NotificationOnlyFlag, 0, 0) == 0, "svcBreak(so notificacao) -> 0");
     CHECK(child_signal(do_break_panic) == SIGABRT, "svcBreak(Panic) encerra o processo com SIGABRT");

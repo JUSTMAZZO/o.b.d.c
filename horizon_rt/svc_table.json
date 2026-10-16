@@ -1,9 +1,10 @@
 {
-  "description": "Traducao dos SVCs do Horizon usados pelos homebrews de teste (hb_compute.sites.json e hb_threads.sites.json) para Bionic/POSIX. Implementacao: switch_hle_shim.h (secao kernel). Teste: horizon_rt/svc_shim_test.c no Galaxy A56.",
+  "description": "Traducao dos SVCs do Horizon usados pelos homebrews de teste (hb_compute, hb_threads e hb_services) para Bionic/POSIX. Implementacao: switch_hle_shim.h (secao kernel). Teste: horizon_rt/svc_shim_test.c no Galaxy A56. Entradas com status \"dummy\" so devolvem sucesso: mapeiam a comunicacao IPC sem emular os servicos.",
   "libnx": "2.10.0",
   "source_sites": [
     "horizon_rt/hb_compute/hb_compute.sites.json",
-    "horizon_rt/hb_threads/hb_threads.sites.json"
+    "horizon_rt/hb_threads/hb_threads.sites.json",
+    "horizon_rt/hb_services/hb_services.sites.json"
   ],
   "implementation": "switch_hle_shim.h",
   "test": "horizon_rt/svc_shim_test.c",
@@ -40,7 +41,8 @@
         "InvalidSize (nao multiplo de 2 MiB)",
         "OutOfMemory (acima da regiao)"
       ],
-      "tested": "4 MiB, escrita/leitura, encolher para 2 MiB, tamanho invalido"
+      "tested": "4 MiB, escrita/leitura, encolher para 2 MiB, tamanho invalido",
+      "status": "implemented"
     },
     {
       "id": "0x02",
@@ -55,7 +57,8 @@
         "InvalidMemoryPermissions (X ou W sozinho)",
         "InvalidMemoryState (fora da heap)"
       ],
-      "tested": "Perm_R, Perm_Rw, Perm_Rx invalido, endereco desalinhado"
+      "tested": "Perm_R, Perm_Rw, Perm_Rx invalido, endereco desalinhado",
+      "status": "implemented"
     },
     {
       "id": "0x03",
@@ -69,7 +72,8 @@
         "InvalidAddress / InvalidSize",
         "InvalidMemoryState"
       ],
-      "tested": "liga e limpa IsUncached, IsBorrowed recusado"
+      "tested": "liga e limpa IsUncached, IsBorrowed recusado",
+      "status": "implemented"
     },
     {
       "id": "0x04",
@@ -86,7 +90,8 @@
         "InvalidMemoryRange (origem fora da heap ou destino fora da AliasRegion)",
         "OutOfRange (tabela de aliases cheia)"
       ],
-      "tested": "alias le e escreve a mesma memoria da origem; origem None + IsBorrowed"
+      "tested": "alias le e escreve a mesma memoria da origem; origem None + IsBorrowed",
+      "status": "implemented"
     },
     {
       "id": "0x05",
@@ -100,7 +105,8 @@
       "errors": [
         "InvalidMemoryRange (nao corresponde a um svcMapMemory)"
       ],
-      "tested": "dado escrito pelo alias permanece na origem; argumentos errados recusados"
+      "tested": "dado escrito pelo alias permanece na origem; argumentos errados recusados",
+      "status": "implemented"
     },
     {
       "id": "0x06",
@@ -114,7 +120,8 @@
       "errors": [
         "InvalidMemoryState (/proc/self/maps ilegivel)"
       ],
-      "tested": "heap, heap encolhida, origem emprestada, alias mapeado e desmapeado"
+      "tested": "heap, heap encolhida, origem emprestada, alias mapeado e desmapeado",
+      "status": "implemented"
     },
     {
       "id": "0x07",
@@ -126,7 +133,8 @@
         "_exit(0) (exit_group)"
       ],
       "errors": [],
-      "tested": "fim do svc_shim_test com codigo 0"
+      "tested": "fim do svc_shim_test com codigo 0",
+      "status": "implemented"
     },
     {
       "id": "0x08",
@@ -142,7 +150,8 @@
         "InvalidCoreId (fora de -2, 0..3)",
         "OutOfHandles (tabela cheia)"
       ],
-      "tested": "4 threads via threadCreate; prioridade 64 e cpuid 7 recusados"
+      "tested": "4 threads via threadCreate; prioridade 64 e cpuid 7 recusados",
+      "status": "implemented"
     },
     {
       "id": "0x09",
@@ -156,7 +165,8 @@
         "InvalidHandle",
         "InvalidState (ja iniciada)"
       ],
-      "tested": "4 threads via threadStart; handle invalido recusado"
+      "tested": "4 threads via threadStart; handle invalido recusado",
+      "status": "implemented"
     },
     {
       "id": "0x0A",
@@ -168,7 +178,8 @@
         "pthread_exit"
       ],
       "errors": [],
-      "tested": "thread que chama svcExitThread no meio da funcao: codigo depois dele nao roda e quem espera acorda"
+      "tested": "thread que chama svcExitThread no meio da funcao: codigo depois dele nao roda e quem espera acorda",
+      "status": "implemented"
     },
     {
       "id": "0x0B",
@@ -180,7 +191,32 @@
         "sched_yield (nano <= 0)"
       ],
       "errors": [],
-      "tested": "15 ms dormiu 15,13 ms; 0 e -1 fazem yield"
+      "tested": "15 ms dormiu 15,13 ms; 0 e -1 fazem yield",
+      "status": "implemented"
+    },
+    {
+      "id": "0x13",
+      "name": "svcMapSharedMemory",
+      "status": "dummy",
+      "prototype": "Result svcMapSharedMemory(Handle handle, void* addr, size_t size, u32 perm)",
+      "horizon": "Mapeia no processo a memoria compartilhada criada por um servico (o hid publica o estado dos controles assim).",
+      "posix": [],
+      "note": "Dummy: valida alinhamento e devolve sucesso sem mapear. Na libnx: shmemMap (usado por hidInitialize).",
+      "errors": [
+        "InvalidAddress / InvalidSize (desalinhado)"
+      ],
+      "tested": "sucesso e endereco desalinhado"
+    },
+    {
+      "id": "0x14",
+      "name": "svcUnmapSharedMemory",
+      "status": "dummy",
+      "prototype": "Result svcUnmapSharedMemory(Handle handle, void* addr, size_t size)",
+      "horizon": "Desfaz o svcMapSharedMemory.",
+      "posix": [],
+      "note": "Dummy. Na libnx: shmemUnmap (hidExit).",
+      "errors": [],
+      "tested": "devolve sucesso"
     },
     {
       "id": "0x16",
@@ -194,7 +230,19 @@
       "errors": [
         "InvalidHandle"
       ],
-      "tested": "threadClose depois de threadWaitForExit; thread criada e nunca iniciada"
+      "tested": "threadClose depois de threadWaitForExit; thread criada e nunca iniciada",
+      "status": "implemented"
+    },
+    {
+      "id": "0x17",
+      "name": "svcResetSignal",
+      "status": "dummy",
+      "prototype": "Result svcResetSignal(Handle handle)",
+      "horizon": "Limpa o sinal de um evento legivel (ex.: eventos de mensagem do applet).",
+      "posix": [],
+      "note": "Dummy. Na libnx: waitObjects (espera de eventos).",
+      "errors": [],
+      "tested": "devolve sucesso"
     },
     {
       "id": "0x18",
@@ -209,7 +257,8 @@
         "InvalidHandle",
         "TimedOut"
       ],
-      "tested": "threadWaitForExit x5; 20 ms numa thread parada -> TimedOut em 20,1 ms"
+      "tested": "threadWaitForExit x5; 20 ms numa thread parada -> TimedOut em 20,1 ms",
+      "status": "implemented"
     },
     {
       "id": "0x1A",
@@ -224,7 +273,8 @@
       "errors": [
         "InvalidAddress (tag desalinhada)"
       ],
-      "tested": "mutex no algoritmo da libnx, 4 threads x 200.000 secoes criticas, contagem exata"
+      "tested": "mutex no algoritmo da libnx, 4 threads x 200.000 secoes criticas, contagem exata",
+      "status": "implemented"
     },
     {
       "id": "0x1B",
@@ -238,7 +288,8 @@
       "errors": [
         "InvalidAddress (tag desalinhada)"
       ],
-      "tested": "mesmo teste de 4 threads; mutex termina em 0"
+      "tested": "mesmo teste de 4 threads; mutex termina em 0",
+      "status": "implemented"
     },
     {
       "id": "0x1C",
@@ -255,7 +306,8 @@
         "InvalidState (o chamador nao tem o mutex)",
         "TimedOut"
       ],
-      "tested": "produtor/consumidor com 1.000 itens; condvarWaitTimeout(10 ms) -> TimedOut e volta com o mutex"
+      "tested": "produtor/consumidor com 1.000 itens; condvarWaitTimeout(10 ms) -> TimedOut e volta com o mutex",
+      "status": "implemented"
     },
     {
       "id": "0x1D",
@@ -267,7 +319,37 @@
         "futex(FUTEX_WAKE)"
       ],
       "errors": [],
-      "tested": "condvarWakeAll no produtor/consumidor e no portao de largada do hb_threads"
+      "tested": "condvarWakeAll no produtor/consumidor e no portao de largada do hb_threads",
+      "status": "implemented"
+    },
+    {
+      "id": "0x1F",
+      "name": "svcConnectToNamedPort",
+      "status": "dummy",
+      "prototype": "Result svcConnectToNamedPort(Handle* session, const char* name)",
+      "horizon": "Abre uma sessao com uma porta nomeada do kernel; a libnx so a usa para \"sm:\" (gerenciador de servicos).",
+      "posix": [
+        "tabela de handles do shim (sessao ficticia)"
+      ],
+      "note": "Dummy com handle real na tabela, para svcSendSyncRequest/svcCloseHandle validarem. Na libnx: smInitialize.",
+      "errors": [
+        "OutOfRange (nome com mais de 11 caracteres)",
+        "OutOfHandles"
+      ],
+      "tested": "\"sm:\" devolve sessao; nome longo recusado"
+    },
+    {
+      "id": "0x21",
+      "name": "svcSendSyncRequest",
+      "status": "dummy",
+      "prototype": "Result svcSendSyncRequest(Handle session)",
+      "horizon": "Envia a mensagem IPC que esta no buffer da TLS (tpidrro_el0 + 0) e bloqueia ate a resposta voltar no mesmo buffer.",
+      "posix": [],
+      "note": "Dummy: valida a sessao e devolve sucesso sem processar a mensagem. Na libnx: serviceDispatch/cmif via smInitialize, appletInitialize, hidInitialize, fsInitialize e os cleanups (27 chamadas em _appletCleanup).",
+      "errors": [
+        "InvalidHandle (sessao inexistente ou fechada)"
+      ],
+      "tested": "sessao valida, invalida e fechada"
     },
     {
       "id": "0x26",
@@ -279,7 +361,8 @@
         "abort() (SIGABRT) quando nao e so notificacao"
       ],
       "errors": [],
-      "tested": "notificacao volta 0; Panic encerra o filho com SIGABRT"
+      "tested": "notificacao volta 0; Panic encerra o filho com SIGABRT",
+      "status": "implemented"
     },
     {
       "id": "0x27",
@@ -291,7 +374,8 @@
         "write(STDOUT_FILENO)"
       ],
       "errors": [],
-      "tested": "saida do svc_shim_test e do oraculo hb_compute"
+      "tested": "saida do svc_shim_test e do oraculo hb_compute",
+      "status": "implemented"
     },
     {
       "id": "0x28",
@@ -303,7 +387,8 @@
       ],
       "note": "O shim nao entrega excecoes do Horizon; o analogo POSIX seria retornar de um handler de sinal (sigreturn). Fora de um handler e erro fatal.",
       "errors": [],
-      "tested": "encerra o filho com SIGABRT"
+      "tested": "encerra o filho com SIGABRT",
+      "status": "implemented"
     },
     {
       "id": "0x29",
@@ -324,7 +409,19 @@
         "InvalidCombination (id1 != 0)",
         "InvalidEnumValue (tipo nao mapeado)"
       ],
-      "tested": "Alias/Heap, CoreMask, memoria total e usada, depurador, entropia, tipo 65000, handle invalido"
+      "tested": "Alias/Heap, CoreMask, memoria total e usada, depurador, entropia, tipo 65000, handle invalido",
+      "status": "implemented"
+    },
+    {
+      "id": "0x52",
+      "name": "svcUnmapTransferMemory",
+      "status": "dummy",
+      "prototype": "Result svcUnmapTransferMemory(Handle tmem_handle, void* addr, size_t size)",
+      "horizon": "Desfaz o mapeamento de uma memoria de transferencia (buffer emprestado a um servico).",
+      "posix": [],
+      "note": "Dummy. Na libnx: tmemUnmap (applet).",
+      "errors": [],
+      "tested": "devolve sucesso"
     }
   ],
   "api": {
@@ -352,5 +449,58 @@
       "condvarWakeAll"
     ],
     "note": "Mesmos tipos e layouts da libnx 2.10.0 (Thread, Mutex = _LOCK_T, RMutex = __lock_t, CondVar = u32); Mutex no algoritmo da libnx com a tag = handle da thread."
+  },
+  "ipc": {
+    "homebrew": "horizon_rt/hb_services/hb_services.c",
+    "nro": "hb_services.nro: 118.784 bytes, 343 relocations RELATIVE, 110 sitios (21 svc, 80 mrs tpidrro_el0, 9 mrs cntpct_el0), conferidos contra o ELF",
+    "ports": [
+      "sm:"
+    ],
+    "service_names_in_binary": [
+      "hid",
+      "fsp-srv",
+      "set:sys",
+      "time:u",
+      "time:a",
+      "time:s",
+      "apm"
+    ],
+    "ipc_buffer": "As mensagens IPC (CMIF/HIPC) ficam no inicio da TLS da thread (tpidrro_el0 + 0x0, 0x100 bytes); por isso as 80 leituras de tpidrro_el0.",
+    "callers": {
+      "svcConnectToNamedPort": [
+        "smInitialize"
+      ],
+      "svcSendSyncRequest": [
+        "_appletCleanup",
+        "fsInitialize",
+        "appletInitialize",
+        "_hidCleanup",
+        "hidInitialize",
+        "appletHolderClose"
+      ],
+      "svcMapSharedMemory": [
+        "shmemMap"
+      ],
+      "svcUnmapSharedMemory": [
+        "shmemUnmap"
+      ],
+      "svcResetSignal": [
+        "waitObjects"
+      ],
+      "svcUnmapTransferMemory": [
+        "tmemUnmap"
+      ]
+    },
+    "api_dummies": [
+      "smInitialize",
+      "smExit",
+      "appletInitialize",
+      "appletExit",
+      "hidInitialize",
+      "hidExit",
+      "fsInitialize",
+      "fsExit"
+    ],
+    "note": "Nomes de servico aparecem como strings no binario por causa do codigo da libnx que entra no link; nem todos sao abertos pelo hb_services."
   }
 }

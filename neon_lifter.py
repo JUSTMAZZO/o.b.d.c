@@ -3,7 +3,7 @@
 Uso:
   python neon_lifter.py ghidra_extraction_switch.json --expected 88196450180 --qwen reconstructed_switch.c
 """
-import argparse, glob, json, os, re, subprocess, sys, tempfile, urllib.request
+import argparse, glob, json, os, re, subprocess, sys, tempfile, urllib.error, urllib.request
 
 import cfg_skeleton
 from collections import Counter, defaultdict
@@ -758,7 +758,7 @@ def host_gate(code, ref_values, out):
     return (["a saida difere da referencia do lifter:\n    " + "\n    ".join(diff)] if diff else []), got
 
 
-def ask_qwen(summ, skel, out, loops, ref_values=None, retries=1):
+def ask_qwen(summ, skel, out, loops, ref_values=None, retries=1, ref_code=None):
     prompt = (
         "Um lifter simbolico deterministico analisou os loops vetorizados (NEON) da funcao `main` de um binario AArch64. "
         "Use as formulas abaixo como verdade absoluta:\n\n"
@@ -780,8 +780,15 @@ def ask_qwen(summ, skel, out, loops, ref_values=None, retries=1):
         f"5. Responda apenas com o bloco {BT3}c contendo o codigo final compilavel."
     )
     messages = [{"role": "user", "content": prompt}]
+    history, code = [], None
     for attempt in range(retries + 1):
-        content, code = qwen_chat(messages)
+        try:
+            content, code = qwen_chat(messages)
+        except (urllib.error.URLError, OSError) as e:      # Ollama fora do ar ou erro HTTP
+            problems = [f"Qwen indisponivel: {e}"]
+            print(f"[qwen] {problems[0]}")
+            history.append(problems)
+            break
         problems = check_placement(skel, code, loops)
         if problems:
             print("[qwen] estrutura divergente do esqueleto:\n  - " + "\n  - ".join(problems))
@@ -792,16 +799,43 @@ def ask_qwen(summ, skel, out, loops, ref_values=None, retries=1):
             else:
                 print(f"[gate host] OK: {len(got)} valores impressos identicos a referencia "
                       f"({', '.join(f'{k}={v}' for k, v in got)})")
+        history.append(problems)
         if not problems:
             break
         messages += [{"role": "assistant", "content": content},
                      {"role": "user", "content": "O codigo esta errado:\n- " + "\n- ".join(problems) +
                       f"\nCorrija e responda apenas com o bloco {BT3}c completo."}]
-    with open(out, 'w', encoding='utf-8', newline='\n') as f:
-        f.write(code)
-    if problems:
-        sys.exit(f"[qwen] codigo ainda reprovado apos {retries + 1} tentativas; salvo em {out} para inspecao")
-    print(f"[qwen] estrutura e saida conferidas -> {out}")
+
+    report = {"output": out, "attempts": len(history), "problems": history}
+    if not problems:
+        with open(out, 'w', encoding='utf-8', newline='\n') as f:
+            f.write(code)
+        report["source"] = "qwen"
+        print(f"[qwen] estrutura e saida conferidas -> {out}")
+    else:
+        if ref_code is None or ref_values is None:
+            sys.exit(f"[qwen] codigo reprovado e sem C de referencia validado no host para o fallback")
+        if code is not None:                               # guarda a tentativa reprovada para inspecao
+            rejected = os.path.splitext(out)[0] + '.qwen_rejected.c'
+            with open(rejected, 'w', encoding='utf-8', newline='\n') as f:
+                f.write(code)
+            report["rejected"] = rejected
+        gate_problems, got = host_gate(ref_code, ref_values, out)
+        if gate_problems:                                  # nao deve acontecer: e o proprio oraculo
+            sys.exit("[fallback] o C de referencia nao passou no gate:\n  - " + "\n  - ".join(gate_problems))
+        with open(out, 'w', encoding='utf-8', newline='\n') as f:
+            f.write(ref_code)
+        report["source"] = "fallback"
+        report["fallback_reason"] = history[-1]
+        print(f"[Fallback] Qwen falhou apos {len(history)} tentativa(s); usando C de referencia deterministico "
+              f"-> {out} (gate no host: {', '.join(f'{k}={v}' for k, v in got)})")
+    report["gate"] = dict(ref_values or [])
+    rpath = os.path.splitext(out)[0] + '.pipeline.json'
+    with open(rpath, 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+        f.write('\n')
+    print(f"[pipeline] relatorio -> {rpath} (fonte do C final: {report['source']})")
+    return report["source"]
 
 
 def main():
@@ -846,8 +880,9 @@ def main():
     # C de referencia (sem LLM) executado no host: valor do programa inteiro
     base = os.path.splitext(os.path.basename(args.json))[0]
     ref_path = args.emit_c or os.path.join(tempfile.gettempdir(), f"{base}_ref.c")
+    ref_code = fill_loops(skel, loops) + '\n'
     with open(ref_path, 'w', encoding='utf-8', newline='\n') as f:
-        f.write(fill_loops(skel, loops) + '\n')
+        f.write(ref_code)
     print(f"\n## C de referencia (esqueleto do CFG + loops do lifter, sem LLM) -> {ref_path}")
     ref_values, err = host_run(ref_path)
     if err:
@@ -864,7 +899,7 @@ def main():
                 sys.exit("[lifter] o C de referencia nao reproduz o valor do aparelho; abortando.")
 
     if args.qwen:
-        ask_qwen(summ, skel, args.qwen, loops, ref_values)
+        ask_qwen(summ, skel, args.qwen, loops, None if err else ref_values, ref_code=ref_code)
 
 
 if __name__ == '__main__':
