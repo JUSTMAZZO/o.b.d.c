@@ -747,6 +747,8 @@ static int child_signal(void (*fn)(void))
 }
 static void do_break_panic(void) { svcBreak(BreakReason_Panic, 0, 0); }
 static void do_return_from_exception(void) { svcReturnFromException(0); }
+static volatile u8 *s_tmem_peek;
+static void peek_tmem(void) { (void)*s_tmem_peek; }
 #endif /* __linux__ */
 
 int main(void)
@@ -902,7 +904,58 @@ int main(void)
     CHECK(svcCloseHandle(sess) == 0 && svcSendSyncRequest(sess) == KERNELRESULT(InvalidHandle), "svcCloseHandle(sessao) invalida o handle");
     CHECK(svcMapSharedMemory(sess, h, 0x1000, Perm_R) == 0 && svcMapSharedMemory(sess, h + 1, 0x1000, Perm_R) == KERNELRESULT(InvalidAddress) &&
           svcUnmapSharedMemory(sess, h, 0x1000) == 0, "svcMap/UnmapSharedMemory (dummy, valida alinhamento)");
-    CHECK(svcResetSignal(sess) == 0 && svcUnmapTransferMemory(sess, h, 0x1000) == 0, "svcResetSignal e svcUnmapTransferMemory (dummy)");
+    CHECK(svcResetSignal(sess) == 0, "svcResetSignal (dummy)");
+
+    /* ---- 0x15 / 0x51 / 0x52 transfer memory */
+    TransferMemory tm;
+    CHECK(tmemCreate(&tm, 0x3000, Perm_None) == 0 && tm.src_addr != NULL && tm.handle != INVALID_HANDLE && tm.size == 0x3000,
+          "tmemCreate(12 KiB, Perm_None) -> handle 0x%x (svcCreateTransferMemory)", tm.handle);
+    MemoryInfo tq = query(tm.src_addr);
+    CHECK(tq.perm == Perm_None && (tq.attr & MemAttr_IsBorrowed), "origem fica Perm_None + IsBorrowed (svcQueryMemory)");
+    s_tmem_peek = (volatile u8 *)tm.src_addr;
+    CHECK(child_signal(peek_tmem) == SIGSEGV, "ler a origem emprestada com Perm_None -> SIGSEGV (so o servico enxerga)");
+    CHECK(svcSendSyncRequest(tm.handle) == KERNELRESULT(InvalidHandle), "handle de transfer memory nao e sessao IPC");
+    CHECK(tmemMap(&tm) == 0 && tm.map_addr != NULL && query(tm.map_addr).type == MemType_TransferMemIsolated,
+          "tmemMap (svcMapTransferMemory) -> AliasRegion %p, TransferMemIsolated", tm.map_addr);
+    u8 *svc_side = (u8 *)tm.map_addr;
+    memset(svc_side, 0xC3, 0x3000);
+    svc_side[0x2FFF] = 0x5A;
+    CHECK(svcMapTransferMemory(tm.handle, (u8 *)tm.map_addr + 0x10000, 0x3000, Perm_None) == KERNELRESULT(InvalidState),
+          "mapear de novo o mesmo objeto -> InvalidState");
+    CHECK(tmemUnmap(&tm) == 0 && tm.map_addr == NULL && query(svc_side).type == MemType_Unmapped, "tmemUnmap (svcUnmapTransferMemory) -> destino Unmapped");
+    CHECK(svcUnmapTransferMemory(tm.handle, svc_side, 0x3000) == KERNELRESULT(InvalidMemoryRange), "desmapear de novo -> InvalidMemoryRange");
+    u8 *tsrc = (u8 *)tm.src_addr;
+    CHECK(tmemCloseHandle(&tm) == 0 && query(tsrc).perm == Perm_Rw && !(query(tsrc).attr & MemAttr_IsBorrowed) &&
+          tsrc[0] == 0xC3 && tsrc[0x2FFF] == 0x5A, "svcCloseHandle devolve Rw a origem, com o que o servico escreveu pelo alias");
+    CHECK(tmemClose(&tm) == 0 && tm.src_addr == NULL, "tmemClose libera a origem do tmemCreate");
+
+    Handle th1 = INVALID_HANDLE, th2 = INVALID_HANDLE;
+    u8 *hsrc = h + 0x40000, *hdst = (u8 *)(uintptr_t)alias + 0x200000;
+    CHECK(svcCreateTransferMemory(&th1, h + 1, 0x1000, Perm_Rw) == KERNELRESULT(InvalidAddress) &&
+          svcCreateTransferMemory(&th1, hsrc, 0x800, Perm_Rw) == KERNELRESULT(InvalidSize) &&
+          svcCreateTransferMemory(&th1, hsrc, 0x2000, Perm_Rx) == KERNELRESULT(InvalidMemoryPermissions),
+          "svcCreateTransferMemory: desalinhado / tamanho / Perm_Rx -> InvalidAddress / InvalidSize / InvalidMemoryPermissions");
+    hsrc[0] = 0x11;
+    CHECK(svcCreateTransferMemory(&th1, hsrc, 0x2000, Perm_R) == 0 && query(hsrc).perm == Perm_R,
+          "svcCreateTransferMemory na heap (memfd), Perm_R -> origem so leitura");
+    CHECK(svcCreateTransferMemory(&th2, hsrc + 0x1000, 0x1000, Perm_None) == KERNELRESULT(InvalidMemoryState), "emprestar de novo a mesma memoria -> InvalidMemoryState");
+    CHECK(svcMapTransferMemory(th1, hdst, 0x2000, Perm_Rw) == KERNELRESULT(InvalidState) &&
+          svcMapTransferMemory(th1, hdst, 0x1000, Perm_R) == KERNELRESULT(InvalidSize) &&
+          svcMapTransferMemory(th1, hsrc + 0x100000, 0x2000, Perm_R) == KERNELRESULT(InvalidMemoryRange),
+          "svcMapTransferMemory: perm diferente / tamanho / fora da AliasRegion -> InvalidState / InvalidSize / InvalidMemoryRange");
+    CHECK(svcMapTransferMemory(th1, hdst, 0x2000, Perm_R) == 0 && hdst[0] == 0x11 && query(hdst).type == MemType_TransferMem,
+          "svcMapTransferMemory da heap -> alias le a origem, TransferMem");
+    hdst[0x1FFF] = 0x77;
+    CHECK(hsrc[0x1FFF] == 0x77, "escrita pelo alias aparece na origem (mesmo memfd)");
+    CHECK(svcCloseHandle(th1) == 0 && query(hsrc).perm == Perm_Rw && query(hdst).type == MemType_Unmapped,
+          "svcCloseHandle com o objeto mapeado: desmapeia e devolve Rw");
+
+    void *anon = NULL;
+    Handle th3 = INVALID_HANDLE;
+    CHECK(posix_memalign(&anon, 0x1000, 0x2000) == 0 && svcCreateTransferMemory(&th3, anon, 0x2000, Perm_Rw) == 0 &&
+          svcMapTransferMemory(th3, hdst, 0x2000, Perm_Rw) == KERNELRESULT(InvalidMemoryState) && svcCloseHandle(th3) == 0,
+          "origem em malloc (sem memfd): cria, mas svcMapTransferMemory -> InvalidMemoryState");
+    free(anon);
     CHECK(smInitialize() == 0 && appletInitialize() == 0 && hidInitialize() == 0 && fsInitialize() == 0,
           "smInitialize / appletInitialize / hidInitialize / fsInitialize (dummy) -> 0");
     fsExit(); hidExit(); appletExit(); smExit();

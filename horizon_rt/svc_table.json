@@ -1,10 +1,11 @@
 {
-  "description": "Traducao dos SVCs do Horizon usados pelos homebrews de teste (hb_compute, hb_threads e hb_services) para Bionic/POSIX. Implementacao: switch_hle_shim.h (secao kernel). Teste: horizon_rt/svc_shim_test.c no Galaxy A56. Entradas com status \"dummy\" so devolvem sucesso: mapeiam a comunicacao IPC sem emular os servicos.",
+  "description": "Traducao dos SVCs do Horizon usados pelos homebrews de teste (hb_compute, hb_threads, hb_services e hb_fb) para Bionic/POSIX. Implementacao: switch_hle_shim.h (secao kernel). Teste: horizon_rt/svc_shim_test.c no Galaxy A56. Entradas com status \"dummy\" so devolvem sucesso: mapeiam a comunicacao IPC sem emular os servicos. Transfer memory (0x15/0x51/0x52) e real: alias por memfd.",
   "libnx": "2.10.0",
   "source_sites": [
     "horizon_rt/hb_compute/hb_compute.sites.json",
     "horizon_rt/hb_threads/hb_threads.sites.json",
-    "horizon_rt/hb_services/hb_services.sites.json"
+    "horizon_rt/hb_services/hb_services.sites.json",
+    "horizon_rt/hb_fb/hb_fb.sites.json"
   ],
   "implementation": "switch_hle_shim.h",
   "test": "horizon_rt/svc_shim_test.c",
@@ -219,6 +220,25 @@
       "tested": "devolve sucesso"
     },
     {
+      "id": "0x15",
+      "name": "svcCreateTransferMemory",
+      "prototype": "Result svcCreateTransferMemory(Handle* out, void* addr, size_t size, u32 perm)",
+      "horizon": "Cria um objeto de transfer memory sobre memoria ja mapeada para emprestar a um servico (nvdrv recebe assim a memoria da GPU no nvInitialize). Enquanto o objeto existe a origem fica com a permissao perm (None, R ou Rw) e atributo IsBorrowed.",
+      "posix": [
+        "mprotect(addr, size, perm) na origem",
+        "handle na tabela do HLE com o memfd da origem (heap do svcSetHeapSize ou memfd_create do tmemCreate)"
+      ],
+      "note": "Na libnx: tmemCreate / tmemCreateFromMemory (visto no hb_fb.nro, chamado pela inicializacao grafica). Origem sem memfd (ex.: malloc) cria o objeto, mas nao pode ser mapeada.",
+      "errors": [
+        "InvalidAddress / InvalidSize (desalinhado)",
+        "InvalidMemoryPermissions (perm fora de None/R/Rw)",
+        "InvalidMemoryState (ja emprestada ou nao mapeada)",
+        "OutOfHandles"
+      ],
+      "tested": "tmemCreate Perm_None (leitura da origem -> SIGSEGV), heap Perm_R, origem em malloc, erros de alinhamento/perm/sobreposicao",
+      "status": "implemented"
+    },
+    {
       "id": "0x16",
       "name": "svcCloseHandle",
       "prototype": "Result svcCloseHandle(Handle handle)",
@@ -413,15 +433,39 @@
       "status": "implemented"
     },
     {
+      "id": "0x51",
+      "name": "svcMapTransferMemory",
+      "prototype": "Result svcMapTransferMemory(Handle tmem_handle, void* addr, size_t size, u32 perm)",
+      "horizon": "O servico mapeia a transfer memory recebida (Rw para ele). perm tem de ser a da criacao; com perm None o bloco e TransferMemIsolated.",
+      "posix": [
+        "mmap(addr, MAP_SHARED | MAP_FIXED, memfd da origem, deslocamento)"
+      ],
+      "note": "Syscall privilegiado no Horizon (lado do servico); aqui o servico e HLE no mesmo processo, entao o alias e real. Na libnx: tmemMap. Destino na AliasRegion.",
+      "errors": [
+        "InvalidAddress / InvalidSize (desalinhado)",
+        "InvalidHandle",
+        "InvalidState (perm diferente ou ja mapeado)",
+        "InvalidMemoryRange (fora da AliasRegion)",
+        "InvalidMemoryState (origem sem memfd)"
+      ],
+      "tested": "alias le e escreve a origem (memfd do tmemCreate e heap), svcQueryMemory TransferMem/TransferMemIsolated, perm/tamanho/regiao errados",
+      "status": "implemented"
+    },
+    {
       "id": "0x52",
       "name": "svcUnmapTransferMemory",
-      "status": "dummy",
+      "status": "implemented",
       "prototype": "Result svcUnmapTransferMemory(Handle tmem_handle, void* addr, size_t size)",
-      "horizon": "Desfaz o mapeamento de uma memoria de transferencia (buffer emprestado a um servico).",
-      "posix": [],
-      "note": "Dummy. Na libnx: tmemUnmap (applet).",
-      "errors": [],
-      "tested": "devolve sucesso"
+      "horizon": "O servico desfaz o mapeamento de uma transfer memory (buffer emprestado).",
+      "posix": [
+        "mmap(addr, PROT_NONE, MAP_ANONYMOUS | MAP_FIXED | MAP_NORESERVE) (destino volta a ser reserva)"
+      ],
+      "note": "Na libnx: tmemUnmap. Fechar o handle (svcCloseHandle) tambem desmapeia e devolve Rw a origem.",
+      "errors": [
+        "InvalidHandle",
+        "InvalidMemoryRange (endereco/tamanho que nao estao mapeados)"
+      ],
+      "tested": "tmemUnmap -> destino Unmapped; desmapear de novo -> InvalidMemoryRange"
     }
   ],
   "api": {
@@ -448,7 +492,17 @@
       "condvarWakeOne",
       "condvarWakeAll"
     ],
-    "note": "Mesmos tipos e layouts da libnx 2.10.0 (Thread, Mutex = _LOCK_T, RMutex = __lock_t, CondVar = u32); Mutex no algoritmo da libnx com a tag = handle da thread."
+    "note": "Mesmos tipos e layouts da libnx 2.10.0 (Thread, Mutex = _LOCK_T, RMutex = __lock_t, CondVar = u32); Mutex no algoritmo da libnx com a tag = handle da thread.",
+    "tmem": [
+      "tmemCreate",
+      "tmemCreateFromMemory",
+      "tmemLoadRemote",
+      "tmemMap",
+      "tmemUnmap",
+      "tmemCloseHandle",
+      "tmemWaitForPermission",
+      "tmemClose"
+    ]
   },
   "ipc": {
     "homebrew": "horizon_rt/hb_services/hb_services.c",
@@ -489,6 +543,10 @@
       ],
       "svcUnmapTransferMemory": [
         "tmemUnmap"
+      ],
+      "svcCreateTransferMemory": [
+        "tmemCreate",
+        "tmemCreateFromMemory"
       ]
     },
     "api_dummies": [

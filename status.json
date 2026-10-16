@@ -56,8 +56,8 @@
       "file": "ExtractMain.java",
       "status": "done",
       "progress": 80,
-      "summary": "C descompilado + ASM AArch64 + .rodata + isolamento de loops + nomes dos alvos de bl e strings carregadas (formatos de printf)",
-      "next": "Tipos de ponteiro/structs, várias funções além do main"
+      "summary": "C descompilado + ASM AArch64 + .rodata + isolamento de loops + nomes dos alvos de bl e strings carregadas (formatos de printf) + ponteiros de função referenciados por endereço (callbacks como o hook do applet, função criada no Ghidra se faltar)",
+      "next": "Tipos de ponteiro/structs, objetos locais da pilha passados por endereço"
     },
     {
       "name": "NEON Symbolic Lifter",
@@ -65,7 +65,7 @@
       "status": "in_progress",
       "progress": 88,
       "summary": "Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG",
-      "next": "if/else e switch no estruturador, várias funções com loops, ld3/ld4 com binário real"
+      "next": "Reconstrução do hb_fb.elf: instruções escalares (umull, madd, msub, ubfiz, ubfx, bic, mvn, ldrb, ldrh), objetos locais da pilha, laços escalares deixados ao estruturador e if/else dentro de laços; depois switch, ld3/ld4 com binário real"
     },
     {
       "name": "Local LLM Qwen 2.5 7B",
@@ -87,9 +87,9 @@
       "name": "Switch HLE Shim",
       "file": "switch_hle_shim.h",
       "status": "in_progress",
-      "progress": 90,
-      "summary": "Primitivas libnx, 27 SVCs do kernel (21 implementados sobre Bionic/POSIX e 6 de IPC/memória compartilhada como dummies), API Thread/Mutex/RMutex/CondVar, time:u (timeGetCurrentTime sobre CLOCK_REALTIME, microssegundos, steady clock, calendário local), ciclo de vida do applet (hooks, foco, modo de operação, pedido de saída com appletLockExit, fila de mensagens entregue no appletMainLoop), framebuffer linear simulado (framebufferCreate/MakeLinear/Begin/End, RGBA8888/RGBX/BGRA/565/4444, checksum FNV-1a e PPM da tela), fs de alto nível (fsOpenSdCardFileSystem + fsFs/fsFile/fsDir sobre um diretório do host, portátil Bionic/Windows, caminhos normalizados contra \"..\"), dispositivos do stdio (fsdevMountSdmc/MountDevice/TranslatePath e romfsInit/MountSelf somente leitura, com fopen/opendir/stat/... roteados para sdmc:/ e romfs:/) e entrada desacoplada (roteiro por quadro + buffer ao vivo com seqlock, botões e analógicos, PadState compacta inalterada), com os tipos e resultados da libnx 2.10.0",
-      "next": "svcCreateTransferMemory (0x15, visto no hb_fb.nro), padRepeater, caminhos relativos a partir de sdmc:/; depois emular as respostas IPC (CMIF) de sm, hid e fs no buffer da TLS"
+      "progress": 92,
+      "summary": "Primitivas libnx, 29 SVCs do kernel (24 implementados sobre Bionic/POSIX e 5 de IPC/memória compartilhada como dummies), transfer memory completa (svcCreateTransferMemory/svcMapTransferMemory/svcUnmapTransferMemory e tmemCreate/Map/Unmap/Close: origem protegida com a permissão pedida, alias real por memfd), API Thread/Mutex/RMutex/CondVar, time:u (timeGetCurrentTime sobre CLOCK_REALTIME, microssegundos, steady clock, calendário local), ciclo de vida do applet (hooks, foco, modo de operação, pedido de saída com appletLockExit, fila de mensagens entregue no appletMainLoop), framebuffer linear simulado (framebufferCreate/MakeLinear/Begin/End, RGBA8888/RGBX/BGRA/565/4444, checksum FNV-1a e PPM da tela), fs de alto nível (fsOpenSdCardFileSystem + fsFs/fsFile/fsDir sobre um diretório do host, portátil Bionic/Windows, caminhos normalizados contra \"..\"), dispositivos do stdio (fsdevMountSdmc/MountDevice/TranslatePath e romfsInit/MountSelf somente leitura, com fopen/opendir/stat/... roteados para sdmc:/ e romfs:/) e entrada desacoplada (roteiro por quadro + buffer ao vivo com seqlock, botões e analógicos, PadState compacta inalterada), com os tipos e resultados da libnx 2.10.0",
+      "next": "padRepeater, caminhos relativos a partir de sdmc:/; depois emular as respostas IPC (CMIF) de sm, hid e fs no buffer da TLS"
     },
     {
       "name": "Horizon Static Analysis",
@@ -197,7 +197,7 @@
       "phase": 3,
       "title": "Loader ELF e Tradução de ABI / Syscalls",
       "status": "in_progress",
-      "progress": 90,
+      "progress": 92,
       "items": [
         {
           "name": "Shim HLE de primitivas libnx (console, applet, pad, timer) — switch_hle_shim.h",
@@ -262,6 +262,14 @@
         {
           "name": "time:u, ciclo de vida do applet (foco, hooks, pedido de saída) e framebuffer linear 1280x720 no shim; svc_shim_test 192/192 no A56 e 138/138 no host; hb_fb validado (checksum e PPM = referência numpy)",
           "done": true
+        },
+        {
+          "name": "Transfer memory completa (0x15 / 0x51 / 0x52 + tmem*, alias por memfd) no shim; svc_shim_test 210/210 no A56 (15×); regressão de 12 binários idêntica",
+          "done": true
+        },
+        {
+          "name": "Reconstrução C do hb_fb.elf (instruções escalares e if/else no estruturador)",
+          "done": false
         },
         {
           "name": "Shim de libnx completo (fs, hid real, time, serviços IPC)",
@@ -1102,7 +1110,7 @@
         "reconstructed": {
           "binary": "hb_fb_oracle",
           "status": "hle_port",
-          "note": "Barras de cor rolando, degradê animado e quadrado em movimento; a animação depende só do número do quadro (o tick do sistema só mede o tempo de render), por isso o checksum é determinístico. O mesmo hb_fb.c compila com a libnx 2.10.0 real (devkitA64, 0 warnings) e como oráculo pelo shim, no qual o sistema pede a saída depois do quadro 60 (appletLockExit + hook OnExitRequest, appletMainLoop devolve false). A tela apresentada pelo shim é conferida com o FNV-1a calculado pelo app e gravada em PPM, idêntico byte a byte à referência numpy (ref_hb_fb.py) no host e no A56. Render por software no A56: mediana 2,82 ms/frame (2,79–2,91, 15×, cpu7). O hb_fb.nro real usa svcCreateTransferMemory (0x15), ainda fora do shim."
+          "note": "Barras de cor rolando, degradê animado e quadrado em movimento; a animação depende só do número do quadro (o tick do sistema só mede o tempo de render), por isso o checksum é determinístico. O mesmo hb_fb.c compila com a libnx 2.10.0 real (devkitA64, 0 warnings) e como oráculo pelo shim, no qual o sistema pede a saída depois do quadro 60 (appletLockExit + hook OnExitRequest, appletMainLoop devolve false). A tela apresentada pelo shim é conferida com o FNV-1a calculado pelo app e gravada em PPM, idêntico byte a byte à referência numpy (ref_hb_fb.py) no host e no A56. Render por software no A56: mediana 2,82 ms/frame (2,79–2,91, 15×, cpu7). O hb_fb.nro real usa svcCreateTransferMemory (0x15), agora tratado pelo shim. Reconstrução do hb_fb.elf pelo pipeline pendente: o Ghidra extrai main, out e o callback on_applet (ghidra_extraction_hb_fb.json), mas o lifter e o esqueleto ainda não tratam 9 instruções escalares, objetos locais da pilha e if/else dentro dos laços de pixel."
         },
         "attempts": [],
         "device_runs": [
@@ -1134,6 +1142,21 @@
             "check": "hb_fb.nro: sítios do nro_tool.py conferidos contra o hb_fb.elf",
             "value": "210 (24 svc, 0x15 novo), OK",
             "ok": true
+          },
+          {
+            "check": "svc_shim_test no A56 com transfer memory (0x15/0x51/0x52), 10× taskset 80 + 5× taskset f0",
+            "value": "210/210",
+            "ok": true
+          },
+          {
+            "check": "Regressão: 12 binários (suíte + hb_fb) com transfer memory, fim dos 60 quadros como pedido de saída e OBDC_INPUT, × shim anterior no A56 e no host; main() igual",
+            "value": "12/12",
+            "ok": true
+          },
+          {
+            "check": "Pipeline no hb_fb.elf: Ghidra (main + out + on_applet) → cfg_skeleton/neon_lifter → reconstructed_hb_fb.c → A56 (FNV 0x2a45a5f1c5fad331)",
+            "value": "pendente: para em ldrb w6,[sp,#0x63] (escalares e if/else)",
+            "ok": null
           },
           {
             "check": "svc_shim_test: time, applet e framebuffer portáveis no host (llvm-mingw)",

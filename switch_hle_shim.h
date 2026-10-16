@@ -121,7 +121,8 @@ typedef struct {
  *   1. buffer ao vivo (shimInputSetLive), se ativo: um produtor (ex.: thread de input do Android) publica
  *      estados por seqlock e cada padUpdate le um retrato consistente, sem misturar dois estados;
  *   2. senao, o roteiro por quadro (shimInputSetScript): cada evento vale do seu quadro ate o proximo.
- * Sem roteiro customizado vale o padrao deterministico do benchmark (A no quadro 30, Plus no 60).
+ * Sem roteiro customizado vale o padrao deterministico do benchmark (A no quadro 30, Plus no 60), a menos
+ * que a variavel de ambiente OBDC_INPUT=none desligue o roteiro padrao.
  */
 typedef struct {
     u64 buttons;                     /* HidNpadButton_* */
@@ -209,11 +210,22 @@ static ShimInputState shim_input_live(void)
     return st;
 }
 
+/* OBDC_INPUT=none: sem roteiro padrao (para rodar binarios sem mexer no codigo, ex.: o C reconstruido). */
+static bool shim_input_env_none(void)
+{
+    static int none = -1;
+    if (none < 0) {
+        const char *v = getenv("OBDC_INPUT");
+        none = v && strcmp(v, "none") == 0;
+    }
+    return none != 0;
+}
+
 static ShimInputState shim_input_at(u32 frame)
 {
     const ShimInputEvent *ev = g_shim_input_custom ? g_shim_input_script : g_shim_input_default;
     u32 n = g_shim_input_custom ? g_shim_input_count
-                                : (u32)(sizeof g_shim_input_default / sizeof g_shim_input_default[0]);
+          : shim_input_env_none() ? 0 : (u32)(sizeof g_shim_input_default / sizeof g_shim_input_default[0]);
     ShimInputState st = {0};
     for (u32 k = 0; k < n && ev[k].frame <= frame; k++)
         st = ev[k].state;
@@ -280,7 +292,8 @@ SHIM_API HidAnalogStickState padGetStickPos(const PadState *pad, unsigned i)
  * isso so acontece com appletLockExit; sem a trava o sistema mata o processo sem aviso, o shim sempre
  * deixa o laco terminar. Fora de foco o shim nao suspende o appletMainLoop (so atualiza o estado e chama
  * os hooks), para nao travar oraculos sem ninguem para devolver o foco.
- * Sem mensagens, o limite deterministico de SHIM_FRAMES quadros continua valendo.
+ * Sem mensagens, o limite deterministico de SHIM_FRAMES quadros continua valendo e chega ao programa como
+ * um pedido de saida (hooks OnExitRequest + false).
  */
 enum { LibnxError_AlreadyInitialized = 7, LibnxError_NotInitialized = 8 };
 
@@ -408,13 +421,18 @@ static void shim_applet_process(void)
     }
 }
 
+/* O fim da execucao deterministica (SHIM_FRAMES quadros) e entregue como pedido de saida do sistema:
+ * hooks OnExitRequest uma vez e false, como no Switch quando o usuario fecha o programa (com appletLockExit). */
 SHIM_API bool appletMainLoop(void)
 {
     shim_applet_process();
     if (g_shim_exit_requested)
         return false;
-    if (g_shim_frame >= SHIM_FRAMES)
+    if (g_shim_frame >= SHIM_FRAMES) {
+        g_shim_exit_requested = true;
+        shim_applet_call_hooks(AppletHookType_OnExitRequest);
         return false;
+    }
     g_shim_frame++;
     return true;
 }
@@ -487,7 +505,8 @@ typedef enum {
     Perm_Rw = Perm_R | Perm_W, Perm_Rx = Perm_R | Perm_X, Perm_DontCare = BIT(28),
 } Permission;
 
-enum { MemType_Unmapped = 0x00, MemType_Normal = 0x02, MemType_Heap = 0x05, MemType_MappedMemory = 0x0B };
+enum { MemType_Unmapped = 0x00, MemType_Normal = 0x02, MemType_Heap = 0x05, MemType_MappedMemory = 0x0B,
+       MemType_TransferMemIsolated = 0x0D, MemType_TransferMem = 0x0E };
 enum { MemAttr_IsBorrowed = BIT(0), MemAttr_IsUncached = BIT(3) };
 enum { BreakReason_Panic = 0, BreakReason_Assert = 1, BreakReason_User = 2,
        BreakReason_NotificationOnlyFlag = 0x80000000 };
@@ -1939,6 +1958,8 @@ SHIM_API Result svcUnmapMemory(void *dst_addr, void *src_addr, u64 size)
     return KERNELRESULT(InvalidMemoryRange);
 }
 
+static void shim_tmem_query(u64 addr, MemoryInfo *mi);   /* transfer memory: definido com a tabela de handles */
+
 /* svc 0x06: bloco que contem addr, a partir de /proc/self/maps (lacunas e reservas = Unmapped). */
 SHIM_API Result svcQueryMemory(MemoryInfo *meminfo_ptr, u32 *pageinfo, u64 addr)
 {
@@ -1984,6 +2005,7 @@ SHIM_API Result svcQueryMemory(MemoryInfo *meminfo_ptr, u32 *pageinfo, u64 addr)
         if (g_shim_attrs[k].size && addr >= g_shim_attrs[k].addr && addr < g_shim_attrs[k].addr + g_shim_attrs[k].size)
             mi.attr |= g_shim_attrs[k].attr;
     }
+    shim_tmem_query(addr, &mi);
     *meminfo_ptr = mi;
     if (pageinfo)
         *pageinfo = 0;
@@ -2138,6 +2160,13 @@ typedef struct {
     pthread_t th;
     ThreadFunc entry;
     void *arg;
+    int is_tmem;                 /* transfer memory (svcCreateTransferMemory) */
+    u8 *tmem_src;                /* memoria de origem (protegida com tmem_perm enquanto o objeto existe) */
+    u64 tmem_size;
+    u32 tmem_perm;
+    int tmem_fd;                 /* memfd que guarda a origem (-1: sem alias possivel) */
+    off_t tmem_off;
+    u8 *tmem_map;                /* destino do svcMapTransferMemory (NULL = nao mapeado) */
 } ShimObj;
 
 static ShimObj g_shim_objs[SHIM_MAX_HANDLES];
@@ -2264,6 +2293,17 @@ SHIM_API void svcSleepThread(s64 nano)
         ;
 }
 
+/* Transfer memory: desfaz o mapeamento (se houver) e devolve Rw a origem. Chamar com g_shim_obj_lock. */
+static void shim_tmem_release(ShimObj *o)
+{
+    if (o->tmem_map) {
+        mmap(o->tmem_map, o->tmem_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED | MAP_NORESERVE, -1, 0);
+        o->tmem_map = NULL;
+    }
+    mprotect(o->tmem_src, o->tmem_size, PROT_READ | PROT_WRITE);
+    o->is_tmem = 0;
+}
+
 /* svc 0x16: fecha o handle; thread ainda rodando continua e o objeto e liberado quando ela termina. */
 SHIM_API Result svcCloseHandle(Handle handle)
 {
@@ -2282,6 +2322,9 @@ SHIM_API Result svcCloseHandle(Handle handle)
         }
         pthread_detach(o->th);
         o->closed = 1;
+    } else if (o->is_tmem) {
+        shim_tmem_release(o);      /* desfaz o mapeamento e devolve Rw a origem */
+        o->used = 0;
     } else {
         o->used = 0;
     }
@@ -2493,7 +2536,7 @@ SHIM_API Result svcSendSyncRequest(Handle session)
 {
     pthread_mutex_lock(&g_shim_obj_lock);
     ShimObj *o = shim_obj(session);
-    int ok = o && !o->is_thread;
+    int ok = o && !o->is_thread && !o->is_tmem;
     pthread_mutex_unlock(&g_shim_obj_lock);
     return ok ? 0 : KERNELRESULT(InvalidHandle);
 }
@@ -2522,11 +2565,294 @@ SHIM_API Result svcResetSignal(Handle handle)
     return 0;
 }
 
-/* svc 0x52: desfaz o mapeamento de memoria de transferencia (applet). Dummy. */
+/* ------------------------------------------------------------------ transfer memory (0x15 / 0x51 / 0x52) */
+/*
+ * No Horizon, transfer memory empresta memoria do processo a um servico (nvdrv recebe assim a memoria da
+ * GPU no nvInitialize; o applet, buffers grandes). svcCreateTransferMemory cria o objeto sobre memoria ja
+ * mapeada e, enquanto ele existe, a origem fica com a permissao `perm` no proprio processo (Perm_None =
+ * so o servico enxerga) e atributo IsBorrowed. O servico mapeia o objeto com svcMapTransferMemory (Rw para
+ * ele) e desfaz com svcUnmapTransferMemory; fechar o handle devolve Rw a origem.
+ *
+ * Aqui o "servico" e HLE e roda no mesmo processo: o mapeamento e um alias real (mmap MAP_SHARED do
+ * mesmo memfd), entao o que um lado escreve o outro le. Isso exige que a origem esteja num memfd:
+ *   - tmemCreate aloca a origem num memfd proprio (obdc-tmem);
+ *   - a heap do svcSetHeapSize ja e um memfd;
+ *   - outra memoria (ex.: malloc do Bionic) cria o objeto e protege a origem, mas svcMapTransferMemory
+ *     devolve InvalidMemoryState (nao ha como fazer alias de memoria anonima privada).
+ * O destino tem de estar na AliasRegion (como no svcMapMemory). A permissao do mapeamento tem de ser a
+ * mesma da criacao (o kernel compara com a do dono: InvalidState).
+ */
+#define SHIM_TMEM_ALIAS_OFF (1ULL << 30)   /* tmemMap usa a AliasRegion a partir de +1 GiB */
+
+typedef struct { u8 *addr; u64 size; int fd; } ShimTmemBacking;
+static ShimTmemBacking g_shim_tmem_backing[SHIM_MAX_RANGES];   /* origens alocadas por tmemCreate */
+static u64 g_shim_tmem_next;                                    /* proximo endereco do tmemMap (bump) */
+
+typedef struct {
+    Handle handle;
+    size_t size;
+    Permission perm;
+    void *src_addr;
+    void *map_addr;
+} TransferMemory;
+
+/* memfd + deslocamento que guardam [addr, addr + size), ou -1. Chamar com g_shim_obj_lock. */
+static int shim_tmem_fd(u64 addr, u64 size, off_t *off)
+{
+    if (shim_in(g_shim_heap_base, g_shim_heap_size, addr, size)) {
+        *off = (off_t)(addr - (u64)(uintptr_t)g_shim_heap_base);
+        return g_shim_heap_fd;
+    }
+    for (int k = 0; k < SHIM_MAX_RANGES; k++) {
+        const ShimTmemBacking *b = &g_shim_tmem_backing[k];
+        if (b->addr && shim_in(b->addr, b->size, addr, size)) {
+            *off = (off_t)(addr - (u64)(uintptr_t)b->addr);
+            return b->fd;
+        }
+    }
+    return -1;
+}
+
+static void shim_tmem_query(u64 addr, MemoryInfo *mi)
+{
+    pthread_mutex_lock(&g_shim_obj_lock);
+    for (int k = 0; k < SHIM_MAX_HANDLES; k++) {
+        const ShimObj *o = &g_shim_objs[k];
+        if (!o->used || !o->is_tmem)
+            continue;
+        if (addr >= (u64)(uintptr_t)o->tmem_src && addr < (u64)(uintptr_t)o->tmem_src + o->tmem_size)
+            mi->attr |= MemAttr_IsBorrowed;
+        if (o->tmem_map && addr >= (u64)(uintptr_t)o->tmem_map && addr < (u64)(uintptr_t)o->tmem_map + o->tmem_size)
+            mi->type = o->tmem_perm == Perm_None ? MemType_TransferMemIsolated : MemType_TransferMem;
+    }
+    pthread_mutex_unlock(&g_shim_obj_lock);
+}
+
+/* svc 0x15: cria o objeto sobre [addr, addr + size) e protege a origem com perm (None, R ou Rw). */
+SHIM_API Result svcCreateTransferMemory(Handle *out, void *addr, size_t size, u32 perm)
+{
+    u64 a = (u64)(uintptr_t)addr;
+    if (a % SHIM_PAGE)
+        return KERNELRESULT(InvalidAddress);
+    if (size == 0 || size % SHIM_PAGE)
+        return KERNELRESULT(InvalidSize);
+    if (perm != Perm_None && perm != Perm_R && perm != Perm_Rw)
+        return KERNELRESULT(InvalidMemoryPermissions);
+    pthread_mutex_lock(&g_shim_obj_lock);
+    for (int k = 0; k < SHIM_MAX_HANDLES; k++) {
+        const ShimObj *o = &g_shim_objs[k];
+        if (o->used && o->is_tmem && a < (u64)(uintptr_t)o->tmem_src + o->tmem_size && (u64)(uintptr_t)o->tmem_src < a + size) {
+            pthread_mutex_unlock(&g_shim_obj_lock);
+            return KERNELRESULT(InvalidMemoryState);          /* ja emprestada */
+        }
+    }
+    if (mprotect(addr, size, shim_prot(perm))) {
+        pthread_mutex_unlock(&g_shim_obj_lock);
+        return KERNELRESULT(InvalidMemoryState);              /* nao mapeada */
+    }
+    Handle h = shim_alloc_obj(0);
+    ShimObj *o = shim_obj(h);
+    if (o) {
+        o->is_tmem = 1;
+        o->tmem_src = (u8 *)addr;
+        o->tmem_size = size;
+        o->tmem_perm = perm;
+        o->tmem_fd = shim_tmem_fd(a, size, &o->tmem_off);
+    } else {
+        mprotect(addr, size, PROT_READ | PROT_WRITE);
+    }
+    pthread_mutex_unlock(&g_shim_obj_lock);
+    if (h == INVALID_HANDLE)
+        return KERNELRESULT(OutOfHandles);
+    *out = h;
+    return 0;
+}
+
+/* svc 0x51: mapeia o objeto em addr (AliasRegion) com Rw para o "servico". perm = a da criacao. */
+SHIM_API Result svcMapTransferMemory(Handle tmem_handle, void *addr, size_t size, u32 perm)
+{
+    u64 a = (u64)(uintptr_t)addr;
+    if (a % SHIM_PAGE)
+        return KERNELRESULT(InvalidAddress);
+    if (size == 0 || size % SHIM_PAGE)
+        return KERNELRESULT(InvalidSize);
+    if (!shim_in(g_shim_alias_base, SHIM_ALIAS_REGION, a, size))
+        return KERNELRESULT(InvalidMemoryRange);
+    pthread_mutex_lock(&g_shim_obj_lock);
+    ShimObj *o = shim_obj(tmem_handle);
+    Result rc = 0;
+    if (!o || !o->is_tmem)
+        rc = KERNELRESULT(InvalidHandle);
+    else if (size != o->tmem_size)
+        rc = KERNELRESULT(InvalidSize);
+    else if (perm != o->tmem_perm || o->tmem_map)
+        rc = KERNELRESULT(InvalidState);
+    else if (o->tmem_fd < 0 ||
+             mmap(addr, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, o->tmem_fd, o->tmem_off) == MAP_FAILED)
+        rc = KERNELRESULT(InvalidMemoryState);
+    else
+        o->tmem_map = (u8 *)addr;
+    pthread_mutex_unlock(&g_shim_obj_lock);
+    return rc;
+}
+
+/* svc 0x52: desfaz o svcMapTransferMemory (o destino volta a ser reserva PROT_NONE). */
 SHIM_API Result svcUnmapTransferMemory(Handle tmem_handle, void *addr, size_t size)
 {
-    (void)tmem_handle; (void)addr; (void)size;
-    return 0;
+    pthread_mutex_lock(&g_shim_obj_lock);
+    ShimObj *o = shim_obj(tmem_handle);
+    Result rc = 0;
+    if (!o || !o->is_tmem)
+        rc = KERNELRESULT(InvalidHandle);
+    else if (!o->tmem_map || o->tmem_map != (u8 *)addr || o->tmem_size != size)
+        rc = KERNELRESULT(InvalidMemoryRange);
+    else {
+        mmap(addr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED | MAP_NORESERVE, -1, 0);
+        o->tmem_map = NULL;
+    }
+    pthread_mutex_unlock(&g_shim_obj_lock);
+    return rc;
+}
+
+/* ---- API da libnx (kernel/tmem.h) */
+SHIM_API Result tmemCreateFromMemory(TransferMemory *t, void *buf, size_t size, Permission perm)
+{
+    memset(t, 0, sizeof *t);
+    Result rc = svcCreateTransferMemory(&t->handle, buf, size, perm);
+    if (R_SUCCEEDED(rc)) {
+        t->size = size;
+        t->perm = perm;
+        t->src_addr = buf;
+    }
+    return rc;
+}
+
+/* Origem num memfd proprio (na libnx: memalign de 0x1000 na heap), para o mapeamento ser um alias real. */
+SHIM_API Result tmemCreate(TransferMemory *t, size_t size, Permission perm)
+{
+    memset(t, 0, sizeof *t);
+    if (size == 0 || size % SHIM_PAGE)
+        return KERNELRESULT(InvalidSize);
+    Result rc = shim_reserve_regions();                      /* AliasRegion para o tmemMap */
+    if (R_FAILED(rc))
+        return rc;
+    int fd = (int)syscall(SYS_memfd_create, "obdc-tmem", 0);
+    if (fd < 0 || ftruncate(fd, (off_t)size) != 0) {
+        if (fd >= 0)
+            close(fd);
+        return LIBNXRESULT(OutOfMemory);
+    }
+    void *p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (p == MAP_FAILED) {
+        close(fd);
+        return LIBNXRESULT(OutOfMemory);
+    }
+    int slot = -1;
+    pthread_mutex_lock(&g_shim_obj_lock);
+    for (int k = 0; k < SHIM_MAX_RANGES && slot < 0; k++)
+        if (!g_shim_tmem_backing[k].addr) {
+            g_shim_tmem_backing[k] = (ShimTmemBacking){ (u8 *)p, size, fd };
+            slot = k;
+        }
+    pthread_mutex_unlock(&g_shim_obj_lock);
+    rc = slot < 0 ? LIBNXRESULT(OutOfMemory) : tmemCreateFromMemory(t, p, size, perm);
+    if (R_FAILED(rc)) {
+        pthread_mutex_lock(&g_shim_obj_lock);
+        if (slot >= 0)
+            g_shim_tmem_backing[slot].addr = NULL;
+        pthread_mutex_unlock(&g_shim_obj_lock);
+        munmap(p, size);
+        close(fd);
+    }
+    return rc;
+}
+
+/* Objeto recebido de outro processo (so preenche a estrutura, como na libnx). */
+SHIM_API void tmemLoadRemote(TransferMemory *t, Handle handle, size_t size, Permission perm)
+{
+    memset(t, 0, sizeof *t);
+    t->handle = handle;
+    t->size = size;
+    t->perm = perm;
+}
+
+/* Mapeia na AliasRegion (operacao privilegiada no Horizon: aqui faz o papel do servico HLE). */
+SHIM_API Result tmemMap(TransferMemory *t)
+{
+    if (t->map_addr)
+        return KERNELRESULT(InvalidState);
+    Result rc = shim_reserve_regions();
+    if (R_FAILED(rc))
+        return rc;
+    pthread_mutex_lock(&g_shim_obj_lock);
+    if (g_shim_tmem_next == 0 || g_shim_tmem_next + t->size > SHIM_ALIAS_REGION)
+        g_shim_tmem_next = SHIM_TMEM_ALIAS_OFF;
+    u8 *dst = g_shim_alias_base + g_shim_tmem_next;
+    g_shim_tmem_next += (t->size + SHIM_PAGE - 1) & ~(SHIM_PAGE - 1);
+    pthread_mutex_unlock(&g_shim_obj_lock);
+    rc = svcMapTransferMemory(t->handle, dst, t->size, t->perm);
+    if (R_SUCCEEDED(rc))
+        t->map_addr = dst;
+    return rc;
+}
+
+SHIM_API Result tmemUnmap(TransferMemory *t)
+{
+    Result rc = svcUnmapTransferMemory(t->handle, t->map_addr, t->size);
+    if (R_SUCCEEDED(rc))
+        t->map_addr = NULL;
+    return rc;
+}
+
+SHIM_API Result tmemCloseHandle(TransferMemory *t)
+{
+    Result rc = 0;
+    if (t->handle != INVALID_HANDLE) {
+        rc = svcCloseHandle(t->handle);
+        t->handle = INVALID_HANDLE;
+    }
+    return rc;
+}
+
+/* Espera a origem voltar a perm (na libnx: depois que o servico desfaz o mapeamento e o objeto morre). */
+SHIM_API Result tmemWaitForPermission(TransferMemory *t, Permission perm)
+{
+    for (;;) {
+        MemoryInfo mi;
+        u32 pi;
+        Result rc = svcQueryMemory(&mi, &pi, (u64)(uintptr_t)t->src_addr);
+        if (R_FAILED(rc))
+            return rc;
+        if ((mi.perm & perm) == perm)
+            return 0;
+        svcSleepThread(100000);
+    }
+}
+
+/* Desmapeia, fecha o handle, espera a origem voltar a Rw e libera a origem se ela foi alocada por tmemCreate. */
+SHIM_API Result tmemClose(TransferMemory *t)
+{
+    Result rc = 0;
+    if (t->map_addr)
+        rc = tmemUnmap(t);
+    if (R_SUCCEEDED(rc))
+        rc = tmemCloseHandle(t);
+    if (R_SUCCEEDED(rc) && t->src_addr) {
+        rc = tmemWaitForPermission(t, Perm_Rw);
+        pthread_mutex_lock(&g_shim_obj_lock);
+        for (int k = 0; k < SHIM_MAX_RANGES; k++) {
+            ShimTmemBacking *b = &g_shim_tmem_backing[k];
+            if (b->addr == (u8 *)t->src_addr) {
+                munmap(b->addr, b->size);
+                close(b->fd);
+                b->addr = NULL;
+            }
+        }
+        pthread_mutex_unlock(&g_shim_obj_lock);
+    }
+    if (R_SUCCEEDED(rc))
+        memset(t, 0, sizeof *t);
+    return rc;
 }
 
 #endif /* __linux__ */

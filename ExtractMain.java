@@ -48,6 +48,35 @@ public class ExtractMain extends GhidraScript {
             }
         }
 
+        // Ponteiros de funcao (ex.: callback passado a appletHook com adrp + add): codigo referenciado como
+        // dado pelas funcoes selecionadas. O Ghidra nem sempre cria a funcao nesse endereco (nao ha bl); aqui
+        // ela e criada e entra na extracao, para o esqueleto emitir o callback com o nome certo.
+        Set<Address> codePtrs = new HashSet<>();
+        FunctionIterator selIt = currentProgram.getFunctionManager().getFunctions(true);
+        while (selIt.hasNext()) {
+            Function f = selIt.next();
+            if (!f.getName().toLowerCase().contains("main") && !extra.contains(f.getName())) {
+                continue;
+            }
+            InstructionIterator it = currentProgram.getListing().getInstructions(f.getBody(), true);
+            while (it.hasNext()) {
+                for (Reference ref : it.next().getReferencesFrom()) {
+                    if (!ref.isMemoryReference() || ref.getReferenceType().isFlow()) continue;
+                    Address to = ref.getToAddress();
+                    MemoryBlock blk = mem.getBlock(to);
+                    if (blk != null && blk.isExecute() && !f.getBody().contains(to)) codePtrs.add(to);
+                }
+            }
+        }
+        for (Address a : codePtrs) {
+            Function f = currentProgram.getFunctionManager().getFunctionAt(a);
+            if (f == null) f = createFunction(a, null);
+            if (f != null) {
+                extra.add(f.getName());
+                println("[+] ponteiro de funcao: " + f.getName() + " @ " + a);
+            }
+        }
+
         FunctionIterator functions = currentProgram.getFunctionManager().getFunctions(true);
         boolean firstFunc = true;
 
