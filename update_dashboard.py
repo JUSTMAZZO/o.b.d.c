@@ -2,7 +2,7 @@
 
 Uso: python update_dashboard.py [status.json] [README.md]
 """
-import json, sys
+import json, os, sys
 from urllib.parse import quote
 
 STATUS = {
@@ -62,7 +62,7 @@ def attempts_table(b, expected):
     return out
 
 
-def render(d):
+def render(d, src_path="status.json"):
     p, t = d['project'], d['telemetry']
     phases = d['roadmap']
     endgame = round(sum(ph['progress'] for ph in phases) / len(phases))
@@ -181,6 +181,20 @@ def render(d):
                     f"- Conferência: {inv['crosscheck']}"]
         out.append('')
 
+    if d.get('svc_map'):
+        table_path = os.path.join(os.path.dirname(os.path.abspath(src_path)), d['svc_map'])
+        with open(table_path, encoding='utf-8') as f:
+            st = json.load(f)
+        out += ['## 🧷 SVCs do Horizon → Bionic/POSIX', '',
+                f"{len(st['svcs'])} SVCs (libnx {st['libnx']}) · especificação em `{d['svc_map']}` · "
+                f"handlers em `{st['implementation']}` · teste `{st['test']}`", '',
+                '| SVC | Função | Tradução Bionic/POSIX | Testado no A56 |', '|:---:|---|---|---|']
+        cell = lambda t: t.replace('|', '\\|')   # | dentro da celula quebraria a tabela
+        for s in st['svcs']:
+            posix = '<br>'.join(f"`{cell(p)}`" for p in s['posix']) or f"— <sub>{cell(s.get('note', ''))}</sub>"
+            out.append(f"| `{s['id']}` | `{s['name']}` | {posix} | {cell(s['tested'])} |")
+        out.append('')
+
     out += ['## 🛠️ Toolchain', '', '| Ferramenta | Versão | Papel |', '|---|---|---|']
     out += [f"| {x['name']} | {x['version']} | {x['role']} |" for x in d['toolchain']]
     if p.get('license'):
@@ -199,7 +213,7 @@ def main():
     with open(src, encoding='utf-8') as f:
         data = json.load(f)
     with open(dst, 'w', encoding='utf-8', newline='\n') as f:
-        f.write(render(data))
+        f.write(render(data, src))
     print(f"[+] {dst} gerado a partir de {src}")
 
 

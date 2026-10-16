@@ -2,7 +2,7 @@
   "project": {
     "name": "o.b.d.c",
     "tagline": "Recompilação estática AArch64 → AArch64: binários de Nintendo Switch rodando nativamente no Android",
-    "updated": "2026-10-15",
+    "updated": "2026-10-16",
     "license": "MIT",
     "repo": "https://github.com/JUSTMAZZO/o.b.d.c",
     "vision": {
@@ -87,17 +87,17 @@
       "name": "Switch HLE Shim",
       "file": "switch_hle_shim.h",
       "status": "in_progress",
-      "progress": 15,
-      "summary": "Tipos e primitivas libnx (console, appletMainLoop, pad/hid determinístico, armGetSystemTick a 19,2 MHz) sobre Bionic/POSIX",
-      "next": "Shim de fs/time/sync, entrada real (toque/gamepad), loader ELF/NRO e tradução de svc"
+      "progress": 35,
+      "summary": "Primitivas libnx (console, applet, pad, timer) e handlers dos SVCs do kernel (heap, memória, mutex, info, debug, exit, break) sobre Bionic/POSIX, com os protótipos e resultados da libnx 2.10.0",
+      "next": "Threads (svcCreateThread/StartThread), eventos, sleep e serviços IPC"
     },
     {
       "name": "Horizon Static Analysis",
       "file": "horizon_rt/ (nro_tool.py, probe/)",
       "status": "in_progress",
-      "progress": 30,
-      "summary": "Leitor de NRO (segmentos, MOD0, .dynamic, RELA/RELR) com inventário de svc e leituras de registradores de sistema; sonda empírica do ambiente EL0 do A56",
-      "next": "Mapa dos svc do Horizon para chamadas Bionic/POSIX e inventário de NROs maiores"
+      "progress": 45,
+      "summary": "Leitor de NRO (segmentos, MOD0, .dynamic, RELA/RELR) com inventário de svc e leituras de registradores de sistema; sonda do ambiente EL0 do A56; tabela de tradução dos SVCs para Bionic/POSIX com handlers testados no aparelho",
+      "next": "Inventário de NROs maiores (serviços IPC: sm, fs, hid) e SVCs de threads/sincronização"
     }
   ],
   "roadmap": [
@@ -197,7 +197,7 @@
       "phase": 3,
       "title": "Loader ELF e Tradução de ABI / Syscalls",
       "status": "in_progress",
-      "progress": 30,
+      "progress": 45,
       "items": [
         {
           "name": "Shim HLE de primitivas libnx (console, applet, pad, timer) — switch_hle_shim.h",
@@ -224,8 +224,12 @@
           "done": true
         },
         {
-          "name": "Mapa de svc do Horizon → chamadas Bionic/POSIX",
-          "done": false
+          "name": "Mapa de svc do Horizon → chamadas Bionic/POSIX (horizon_rt/svc_table.json, 12 SVCs do hb_compute)",
+          "done": true
+        },
+        {
+          "name": "Handlers HLE dos SVCs no switch_hle_shim.h, testados no A56 (svc_shim_test: 33/33)",
+          "done": true
         },
         {
           "name": "Shim de libnx completo (fs, hid real, time, sync)",
@@ -692,6 +696,54 @@
             "ok": true
           }
         ]
+      },
+      {
+        "id": "hb_compute",
+        "title": "Homebrew mínimo libnx (sem serviços): 100.000 partículas × 60 frames, saída por svcOutputDebugString",
+        "ops": "oráculo pelo switch_hle_shim.h (svcOutputDebugString, armGetSystemTick)",
+        "expected": {
+          "Checksum": "88196450180",
+          "Última partícula": "1734747"
+        },
+        "neon_median_s": 0.0043204,
+        "scalar_median_s": null,
+        "reconstructed": {
+          "binary": "hb_oracle",
+          "status": "hle_port",
+          "note": "Mesmo hb_compute.c que gera o NRO com devkitA64/libnx, compilado para Android com -DOBDC_ORACLE sobre o switch_hle_shim.h. A versão Switch (hb_compute.nro) é só inventariada pelo nro_tool.py."
+        },
+        "attempts": [],
+        "device_runs": [
+          {
+            "binary": "hb_oracle (shim com os handlers de SVC, taskset cpu7)",
+            "runs": 15,
+            "median_s": 0.0043204,
+            "min_s": 0.0042613,
+            "result": "88196450180"
+          }
+        ],
+        "validation": [
+          {
+            "check": "Oráculo no host (llvm-mingw)",
+            "value": "60 / 88196450180 / 1734747",
+            "ok": true
+          },
+          {
+            "check": "Oráculo no A56 (15×, taskset 80)",
+            "value": "60 / 88196450180 / 1734747",
+            "ok": true
+          },
+          {
+            "check": "hb_compute.nro: 21 sítios do nro_tool.py conferidos contra o hb_compute.elf",
+            "value": "21/21",
+            "ok": true
+          },
+          {
+            "check": "Handlers dos SVCs no A56 (svc_shim_test, sucesso e erros da libnx)",
+            "value": "33/33",
+            "ok": true
+          }
+        ]
       }
     ]
   },
@@ -920,5 +972,6 @@
       "sites": "12 svc (0x1, 0x2, 0x3, 0x5, 0x6, 0x7, 0x1a, 0x1b, 0x26, 0x27, 0x28, 0x29), 7 mrs tpidrro_el0, 2 mrs cntpct_el0",
       "crosscheck": "21/21 sítios conferidos contra o disassembly do hb_compute.elf"
     }
-  }
+  },
+  "svc_map": "horizon_rt/svc_table.json"
 }
