@@ -762,19 +762,29 @@ SHIM_API Result shimFsSetSdCardRoot(const char *dir)
     return 0;
 }
 
-SHIM_API Result fsOpenSdCardFileSystem(FsFileSystem *out)
+/* Raiz do host: valor do shim > variavel de ambiente > padrao da macro; sem barras no fim. 0 ou TooLongPath. */
+static Result shim_fs_resolve_root(const char *setting, const char *env, const char *fallback, char *out)
 {
-    const char *root = g_shim_sdcard_root[0] ? g_shim_sdcard_root : getenv("OBDC_SDCARD");
+    const char *root = setting[0] ? setting : getenv(env);
     if (!root || !*root)
-        root = OBDC_SDCARD_ROOT;
+        root = fallback;
     size_t n = strlen(root);
     while (n > 1 && (root[n - 1] == '/' || root[n - 1] == '\\'))
         n--;
     if (n >= SHIM_FS_ROOT_MAX)
         return FSRESULT(TooLongPath);
+    memcpy(out, root, n);
+    out[n] = '\0';
+    return 0;
+}
+
+SHIM_API Result fsOpenSdCardFileSystem(FsFileSystem *out)
+{
     char buf[SHIM_FS_ROOT_MAX];
-    memcpy(buf, root, n);
-    buf[n] = '\0';
+    Result rc = shim_fs_resolve_root(g_shim_sdcard_root, "OBDC_SDCARD", OBDC_SDCARD_ROOT, buf);
+    if (R_FAILED(rc))
+        return rc;
+    size_t n = strlen(buf);
     if (shim_fs_kind(buf, true) != FsDirEntryType_Dir)
         return FSRESULT(SdCardNotPresent);
     shim_fs_lock();
@@ -1228,6 +1238,389 @@ SHIM_API void fsDirClose(FsDir *d)
     shim_fs_unlock();
     if (d)
         memset(d, 0, sizeof *d);
+}
+
+/* ------------------------------------------------------------------ dispositivos: fsdev (sdmc:) e romfs: */
+/*
+ * Na libnx, caminhos "nome:/..." do stdio do newlib passam pelos devoptabs: fsdevMountSdmc monta "sdmc"
+ * (o __appInit padrao ainda faz chdir("sdmc:/")) e romfsInit monta "romfs" (somente leitura, embutido no
+ * NRO). Aqui cada dispositivo e uma raiz no host:
+ *   fsdev (sdmc e fsdevMountDevice) -> raiz do FsFileSystem montado (a do cartao SD);
+ *   romfs                           -> shimRomfsSetRoot(dir) > OBDC_ROMFS > OBDC_ROMFS_ROOT ("./romfs").
+ * shimTranslatePath troca "nome:/caminho" pelo caminho do host com a mesma normalizacao do fs (".." nao
+ * sai da raiz: EACCES). Caminho sem "nome:" segue direto para o host (no Windows, "C:" so vale como drive
+ * se nao houver dispositivo "C"). No romfs, abrir para escrita, criar, apagar e renomear dao EROFS, como
+ * no devoptab de romfs da libnx.
+ *
+ * Roteamento transparente do stdio: no fim deste header, fopen/opendir/stat/mkdir/rmdir/remove/unlink/
+ * rename/access viram macros para os wrappers shim* (desligue com -DOBDC_NO_STDIO_REDIRECT). Inclua os
+ * headers do sistema antes do shim. No Windows o shimFopen sempre abre em binario, como o newlib.
+ * Diferenca: a libnx resolve caminhos relativos a partir de "sdmc:/" (chdir do __appInit); o shim os deixa
+ * relativos ao diretorio atual do host.
+ */
+#ifndef OBDC_ROMFS_ROOT
+#define OBDC_ROMFS_ROOT "./romfs"
+#endif
+
+#define SHIM_DEV_NAME_MAX 32      /* libnx: nome com ate 31 caracteres, sem ":" */
+#define SHIM_MAX_DEVICES  8
+
+enum { LibnxError_AlreadyMapped = 3, LibnxError_NotFound = 9 };
+
+typedef struct {
+    bool used;
+    bool romfs;                   /* somente leitura, sem FsFileSystem */
+    char name[SHIM_DEV_NAME_MAX];
+    FsFileSystem fs;              /* fsdev: o dispositivo e dono do fs (fechado no unmount) */
+    char root[SHIM_FS_ROOT_MAX];
+} ShimDevice;
+
+static ShimDevice g_shim_devices[SHIM_MAX_DEVICES];
+static char g_shim_romfs_root[SHIM_FS_ROOT_MAX];     /* "" = OBDC_ROMFS ou OBDC_ROMFS_ROOT */
+
+/* Chamar com o lock. name tem n caracteres (sem ":"). */
+static ShimDevice *shim_dev_find(const char *name, size_t n)
+{
+    for (int k = 0; k < SHIM_MAX_DEVICES; k++) {
+        ShimDevice *d = &g_shim_devices[k];
+        if (d->used && strlen(d->name) == n && strncmp(d->name, name, n) == 0)
+            return d;
+    }
+    return NULL;
+}
+
+/* Indice do novo dispositivo ou -1 (errno: EINVAL nome invalido, EEXIST ja montado, ENOMEM tabela cheia). */
+static int shim_dev_add(const char *name, bool romfs, const FsFileSystem *fs, const char *root)
+{
+    size_t n = name ? strlen(name) : 0;
+    if (n == 0 || n >= SHIM_DEV_NAME_MAX || strchr(name, ':') || strchr(name, '/')) {
+        errno = EINVAL;
+        return -1;
+    }
+    int slot = -1;
+    shim_fs_lock();
+    if (shim_dev_find(name, n)) {
+        shim_fs_unlock();
+        errno = EEXIST;
+        return -1;
+    }
+    for (int k = 0; k < SHIM_MAX_DEVICES && slot < 0; k++)
+        if (!g_shim_devices[k].used)
+            slot = k;
+    if (slot >= 0) {
+        ShimDevice *d = &g_shim_devices[slot];
+        memset(d, 0, sizeof *d);
+        d->used = true;
+        d->romfs = romfs;
+        memcpy(d->name, name, n + 1);
+        if (fs)
+            d->fs = *fs;
+        memcpy(d->root, root, strlen(root) + 1);
+    }
+    shim_fs_unlock();
+    if (slot < 0)
+        errno = ENOMEM;
+    return slot;
+}
+
+/* Remove o dispositivo (romfs ou fsdev, conforme want_romfs); fecha o fs de um fsdev. 0 ou -1 (ENOENT). */
+static int shim_dev_remove(const char *name, bool want_romfs)
+{
+    size_t n = name ? strlen(name) : 0;
+    shim_fs_lock();
+    ShimDevice *d = n ? shim_dev_find(name, n) : NULL;
+    FsFileSystem fs = {0};
+    bool close_fs = false;
+    if (d && d->romfs == want_romfs) {
+        fs = d->fs;
+        close_fs = !d->romfs;
+        d->used = false;
+    } else {
+        d = NULL;
+    }
+    shim_fs_unlock();
+    if (!d) {
+        errno = ENOENT;
+        return -1;
+    }
+    if (close_fs)
+        fsFsClose(&fs);
+    return 0;
+}
+
+static int shim_fs_result_errno(Result rc)
+{
+    if (rc == FSRESULT(TooLongPath))           return ENAMETOOLONG;
+    if (rc == FSRESULT(DirectoryUnobtainable)) return EACCES;
+    if (rc == FSRESULT(NullptrArgument))       return EFAULT;
+    return EINVAL;                                     /* InvalidCharacter, InvalidPathFormat */
+}
+
+/* "nome:resto" -> dispositivo + caminho do fs normalizado ("/a/b", raiz = ""). 1 = tem dispositivo,
+ * 0 = caminho do host sem dispositivo, -1 = erro (errno). Copia o dispositivo para *out. */
+static int shim_dev_split(const char *path, ShimDevice *out, char *norm)
+{
+    if (!path) {
+        errno = EFAULT;
+        return -1;
+    }
+    const char *colon = strchr(path, ':');
+    const char *slash = strchr(path, '/');
+    if (!colon || colon == path || (slash && slash < colon))
+        return 0;
+    size_t n = (size_t)(colon - path);
+    shim_fs_lock();
+    ShimDevice *d = shim_dev_find(path, n);
+    if (d)
+        *out = *d;
+    shim_fs_unlock();
+    if (!d) {
+#if defined(_WIN32)
+        if (n == 1)
+            return 0;                                  /* "C:/..." = drive do Windows */
+#endif
+        errno = ENODEV;
+        return -1;
+    }
+    char tmp[FS_MAX_PATH + 1];
+    const char *rest = colon + 1;
+    if (snprintf(tmp, sizeof tmp, "%s%s", rest[0] == '/' ? "" : "/", rest) >= (int)sizeof tmp) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    Result rc = shim_fs_normalize(tmp, norm);
+    if (R_FAILED(rc)) {
+        errno = shim_fs_result_errno(rc);
+        return -1;
+    }
+    return 1;
+}
+
+/* Caminho do stdio ("sdmc:/x", "romfs:/x" ou do host) -> caminho do host. 0 ou -1 (errno). */
+SHIM_API int shimTranslatePath(const char *path, char *host, size_t size, bool *read_only)
+{
+    ShimDevice d;
+    char norm[FS_MAX_PATH];
+    if (read_only)
+        *read_only = false;
+    if (!host || size == 0) {
+        errno = EFAULT;
+        return -1;
+    }
+    int r = shim_dev_split(path, &d, norm);
+    if (r < 0)
+        return -1;
+    int w = r == 0 ? snprintf(host, size, "%s", path) : snprintf(host, size, "%s%s", d.root, norm);
+    if (w < 0 || (size_t)w >= size) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    if (read_only)
+        *read_only = r == 1 && d.romfs;
+    return 0;
+}
+
+/* ---- fsdev */
+SHIM_API int fsdevMountDevice(const char *name, FsFileSystem fs)
+{
+    ShimFsMount *m = shim_fs_mount(&fs);
+    int slot = m ? shim_dev_add(name, false, &fs, m->root) : -1;
+    if (!m)
+        errno = EINVAL;
+    if (slot < 0)
+        fsFsClose(&fs);                                /* como na libnx: fecha o fs tambem na falha */
+    return slot;
+}
+
+SHIM_API int fsdevUnmountDevice(const char *name) { return shim_dev_remove(name, false); }
+
+SHIM_API Result fsdevUnmountAll(void)
+{
+    for (int k = 0; k < SHIM_MAX_DEVICES; k++) {
+        char name[SHIM_DEV_NAME_MAX] = "";
+        shim_fs_lock();
+        if (g_shim_devices[k].used && !g_shim_devices[k].romfs)
+            memcpy(name, g_shim_devices[k].name, sizeof name);
+        shim_fs_unlock();
+        if (name[0])
+            shim_dev_remove(name, false);
+    }
+    return 0;
+}
+
+SHIM_API Result fsdevMountSdmc(void)
+{
+    FsFileSystem sd;
+    Result rc = fsOpenSdCardFileSystem(&sd);
+    if (R_FAILED(rc))
+        return rc;
+    return fsdevMountDevice("sdmc", sd) < 0 ? LIBNXRESULT(AlreadyMapped) : 0;
+}
+
+/* Ponteiro para o FsFileSystem do dispositivo (valido ate o unmount); NULL se nao existe ou e romfs. */
+SHIM_API FsFileSystem *fsdevGetDeviceFileSystem(const char *name)
+{
+    size_t n = name ? strlen(name) : 0;
+    if (n && name[n - 1] == ':')
+        n--;
+    shim_fs_lock();
+    ShimDevice *d = n ? shim_dev_find(name, n) : NULL;
+    shim_fs_unlock();
+    return d && !d->romfs ? &d->fs : NULL;
+}
+
+SHIM_API Result fsdevCommitDevice(const char *name)
+{
+    FsFileSystem *fs = fsdevGetDeviceFileSystem(name);
+    return fs ? fsFsCommit(fs) : LIBNXRESULT(NotFound);
+}
+
+/* outpath (FS_MAX_PATH) recebe o caminho do fs; sem "nome:" vale o "sdmc" (o diretorio atual da libnx). */
+SHIM_API int fsdevTranslatePath(const char *path, FsFileSystem **device, char *outpath)
+{
+    ShimDevice d;
+    char norm[FS_MAX_PATH], tmp[FS_MAX_PATH + 8];
+    int r = shim_dev_split(path, &d, norm);
+    if (r < 0)
+        return -1;
+    if (r == 0) {
+        if (snprintf(tmp, sizeof tmp, "sdmc:%s%s", path[0] == '/' ? "" : "/", path) >= (int)sizeof tmp) {
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+        if (shim_dev_split(tmp, &d, norm) != 1)
+            return -1;
+    }
+    if (d.romfs) {
+        errno = ENODEV;
+        return -1;
+    }
+    if (outpath)
+        snprintf(outpath, FS_MAX_PATH, "%s", norm[0] ? norm : "/");
+    if (device)
+        *device = fsdevGetDeviceFileSystem(d.name);
+    return 0;
+}
+
+/* ---- romfs */
+/* Raiz do proximo romfsMountSelf; NULL volta a OBDC_ROMFS / OBDC_ROMFS_ROOT. */
+SHIM_API Result shimRomfsSetRoot(const char *dir)
+{
+    if (!dir) {
+        g_shim_romfs_root[0] = '\0';
+        return 0;
+    }
+    size_t n = strlen(dir);
+    if (n == 0)
+        return FSRESULT(InvalidPathFormat);
+    if (n >= SHIM_FS_ROOT_MAX)
+        return FSRESULT(TooLongPath);
+    memcpy(g_shim_romfs_root, dir, n + 1);
+    return 0;
+}
+
+/* Num NRO monta a secao RomFS embutida; aqui monta o diretorio de assets do host (somente leitura).
+ * Raiz inexistente -> LibnxError_NotFound; nome ja montado -> LibnxError_AlreadyMapped. */
+SHIM_API Result romfsMountSelf(const char *name)
+{
+    char root[SHIM_FS_ROOT_MAX];
+    Result rc = shim_fs_resolve_root(g_shim_romfs_root, "OBDC_ROMFS", OBDC_ROMFS_ROOT, root);
+    if (R_FAILED(rc))
+        return rc;
+    if (shim_fs_kind(root, true) != FsDirEntryType_Dir)
+        return LIBNXRESULT(NotFound);
+    if (shim_dev_add(name, true, NULL, root) < 0)
+        return errno == EEXIST ? LIBNXRESULT(AlreadyMapped) : LIBNXRESULT(BadInput);
+    return 0;
+}
+
+SHIM_API Result romfsUnmount(const char *name) { return shim_dev_remove(name, true) ? LIBNXRESULT(NotFound) : 0; }
+SHIM_API Result romfsInit(void) { return romfsMountSelf("romfs"); }
+SHIM_API Result romfsExit(void) { return romfsUnmount("romfs"); }
+
+/* ---- wrappers do stdio (alvo das macros do fim do header) */
+static int shim_dev_host(const char *path, char *host, bool for_write)
+{
+    bool ro;
+    if (shimTranslatePath(path, host, SHIM_FS_HOST_MAX, &ro))
+        return -1;
+    if (ro && for_write) {
+        errno = EROFS;
+        return -1;
+    }
+    return 0;
+}
+
+SHIM_API FILE *shimFopen(const char *path, const char *mode)
+{
+    char host[SHIM_FS_HOST_MAX], m[16];
+    if (!mode || strlen(mode) + 2 > sizeof m) {
+        errno = EINVAL;
+        return NULL;
+    }
+    if (shim_dev_host(path, host, strpbrk(mode, "wa+") != NULL))
+        return NULL;
+    snprintf(m, sizeof m, "%s%s", mode, strchr(mode, 'b') ? "" : "b");   /* newlib nao traduz CRLF */
+    return fopen(host, m);
+}
+
+SHIM_API DIR *shimOpendir(const char *path)
+{
+    char host[SHIM_FS_HOST_MAX];
+    return shim_dev_host(path, host, false) ? NULL : opendir(host);
+}
+
+SHIM_API int shimStat(const char *path, struct stat *st)
+{
+    char host[SHIM_FS_HOST_MAX];
+    return shim_dev_host(path, host, false) ? -1 : stat(host, st);
+}
+
+SHIM_API int shimMkdir(const char *path, int mode)
+{
+    char host[SHIM_FS_HOST_MAX];
+    if (shim_dev_host(path, host, true))
+        return -1;
+#if defined(_WIN32)
+    (void)mode;
+    return _mkdir(host);
+#else
+    return mkdir(host, (mode_t)mode);
+#endif
+}
+
+SHIM_API int shimRmdir(const char *path)
+{
+    char host[SHIM_FS_HOST_MAX];
+    return shim_dev_host(path, host, true) ? -1 : shim_sys_rmdir(host);
+}
+
+SHIM_API int shimUnlink(const char *path)
+{
+    char host[SHIM_FS_HOST_MAX];
+    return shim_dev_host(path, host, true) ? -1 : shim_sys_unlink(host);
+}
+
+SHIM_API int shimRemove(const char *path)
+{
+    char host[SHIM_FS_HOST_MAX];
+    return shim_dev_host(path, host, true) ? -1 : remove(host);
+}
+
+SHIM_API int shimRename(const char *cur_path, const char *new_path)
+{
+    char a[SHIM_FS_HOST_MAX], b[SHIM_FS_HOST_MAX];
+    if (shim_dev_host(cur_path, a, true) || shim_dev_host(new_path, b, true))
+        return -1;
+    return rename(a, b);
+}
+
+SHIM_API int shimAccess(const char *path, int mode)
+{
+    char host[SHIM_FS_HOST_MAX];
+    if (shim_dev_host(path, host, (mode & W_OK) != 0))
+        return -1;
+    return access(host, mode);
 }
 
 #if defined(__linux__)
@@ -1988,5 +2381,21 @@ SHIM_API u64 armGetSystemTick(void)
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return armNsToTicks((u64)ts.tv_sec * 1000000000ULL + (u64)ts.tv_nsec);
 }
+
+/* ------------------------------------------------------------------ roteamento do stdio (sdmc:/ e romfs:/) */
+/* Daqui em diante (codigo do homebrew), as chamadas de arquivo do stdio/POSIX traduzem "nome:/" pelos
+ * dispositivos do shim. O codigo do proprio shim, acima, nao e afetado. */
+#if !defined(OBDC_NO_STDIO_REDIRECT)
+#undef access                                  /* o io.h do mingw define access como macro */
+#define fopen(path, mode)  shimFopen((path), (mode))
+#define opendir(path)      shimOpendir(path)
+#define stat(path, st)     shimStat((path), (st))
+#define mkdir(path, mode)  shimMkdir((path), (mode))
+#define rmdir(path)        shimRmdir(path)
+#define remove(path)       shimRemove(path)
+#define unlink(path)       shimUnlink(path)
+#define rename(a, b)       shimRename((a), (b))
+#define access(path, mode) shimAccess((path), (mode))
+#endif
 
 #endif /* SWITCH_HLE_SHIM_H */

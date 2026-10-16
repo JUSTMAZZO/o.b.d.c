@@ -10,7 +10,7 @@
  *
  * Build: aarch64-linux-android35-clang -O2 -Wall -Wextra -I .. svc_shim_test.c -o svc_shim_test  (pthread vem na libc do Bionic)
  * Host:  clang -O2 -Wall -Wextra -I .. svc_shim_test.c -o svc_shim_test.exe -lpthread  (llvm-mingw)
- * O teste de fs cria e apaga ./obdc_sdcard_test no diretorio atual.
+ * O teste de fs cria e apaga ./obdc_sdcard_test e ./obdc_romfs_test no diretorio atual.
  */
 #include <stddef.h>
 #if defined(__linux__)
@@ -312,6 +312,125 @@ static void test_fs(void)
     shim_sys_rmdir(TEST_ROOT);
 }
 
+/* ---------------------------------------------- romfs:/ e sdmc:/ pelo stdio (fsdev, romfs, macros de redirecionamento) */
+#define TEST_ROMFS "obdc_romfs_test"
+
+static size_t slurp(FILE *f, char *buf, size_t cap)
+{
+    size_t n = f ? fread(buf, 1, cap - 1, f) : 0;
+    buf[n] = '\0';
+    if (f)
+        fclose(f);
+    return n;
+}
+
+static void test_devices(void)
+{
+    char buf[64];
+    struct stat st;
+
+    /* assets do romfs criados pelo caminho do host (sem dispositivo: passa direto) */
+    shim_sys_mkdir(TEST_ROMFS);
+    shim_sys_mkdir(TEST_ROMFS "/data");
+    FILE *w = fopen(TEST_ROMFS "/data/a.txt", "w");
+    if (w) { fputs("asset romfs", w); fclose(w); }
+    w = fopen(TEST_ROMFS "/data/crlf.txt", "wb");
+    if (w) { fputs("a\r\nb", w); fclose(w); }
+
+    CHECK(shimRomfsSetRoot("obdc_romfs_nao_existe") == 0 && romfsInit() == LIBNXRESULT(NotFound),
+          "romfsInit(raiz inexistente) -> LibnxError_NotFound (0x%x)", LIBNXRESULT(NotFound));
+    CHECK(shimRomfsSetRoot(TEST_ROMFS "/") == 0 && romfsInit() == 0, "romfsInit -> romfs:/ = " TEST_ROMFS);
+    CHECK(romfsInit() == LIBNXRESULT(AlreadyMapped), "romfsInit de novo -> LibnxError_AlreadyMapped");
+
+    CHECK(slurp(fopen("romfs:/data/a.txt", "r"), buf, sizeof buf) == 11 && !strcmp(buf, "asset romfs"), "fopen(\"romfs:/data/a.txt\") le o asset");
+    CHECK(slurp(fopen("romfs:data/./a.txt", "r"), buf, sizeof buf) == 11, "\"romfs:data/./a.txt\" (sem \"/\" inicial) -> mesmo arquivo");
+    CHECK(slurp(fopen("romfs:/data/crlf.txt", "r"), buf, sizeof buf) == 4, "modo \"r\" sem traducao de CRLF (4 bytes, como o newlib)");
+    CHECK(stat("romfs:/data/a.txt", &st) == 0 && st.st_size == 11 && stat("romfs:/data", &st) == 0 && S_ISDIR(st.st_mode),
+          "stat(romfs:/data/a.txt) -> 11 bytes; romfs:/data -> diretorio");
+    DIR *dir = opendir("romfs:/data");
+    int entries = 0;
+    struct dirent *e;
+    while (dir && (e = readdir(dir)) != NULL)
+        entries += strcmp(e->d_name, ".") && strcmp(e->d_name, "..");
+    if (dir)
+        closedir(dir);
+    CHECK(dir && entries == 2, "opendir(romfs:/data) -> %d entradas", entries);
+    CHECK(access("romfs:/data/a.txt", F_OK) == 0 && access("romfs:/nada", F_OK) != 0, "access(romfs:/...) F_OK");
+
+    errno = 0;
+    CHECK(fopen("romfs:/novo.txt", "w") == NULL && errno == EROFS, "fopen(romfs:/..., \"w\") -> EROFS");
+    errno = 0;
+    CHECK(fopen("romfs:/data/a.txt", "r+") == NULL && errno == EROFS, "fopen(romfs:/..., \"r+\") -> EROFS");
+    CHECK(mkdir("romfs:/d", 0777) != 0 && errno == EROFS && remove("romfs:/data/a.txt") != 0 && errno == EROFS &&
+          rename("romfs:/data/a.txt", "romfs:/b.txt") != 0 && errno == EROFS && access("romfs:/data/a.txt", W_OK) != 0 && errno == EROFS,
+          "mkdir/remove/rename/access(W_OK) no romfs -> EROFS");
+    errno = 0;
+    CHECK(fopen("romfs:/../" TEST_ROMFS "/data/a.txt", "r") == NULL && errno == EACCES &&
+          stat("romfs:/data/../../" TEST_ROOT, &st) != 0 && errno == EACCES, "\"..\" acima da raiz do romfs -> EACCES");
+    errno = 0;
+    CHECK(fopen("romfs:/a\\..\\..\\x", "r") == NULL && errno == EINVAL, "\"\\\" no caminho do romfs -> EINVAL");
+    errno = 0;
+    CHECK(fopen("nada:/x", "r") == NULL && errno == ENODEV, "dispositivo desconhecido -> ENODEV");
+
+    /* fsdev: sdmc:/ sobre o cartao SD do shim */
+    shim_sys_mkdir(TEST_ROOT);
+    shimFsSetSdCardRoot(TEST_ROOT);
+    CHECK(fsdevMountSdmc() == 0 && fsdevGetDeviceFileSystem("sdmc") != NULL, "fsdevMountSdmc -> sdmc:/ = " TEST_ROOT);
+    CHECK(fsdevMountSdmc() == LIBNXRESULT(AlreadyMapped), "fsdevMountSdmc de novo -> AlreadyMapped");
+    w = fopen("sdmc:/f.bin", "w");
+    size_t wrote = w ? fwrite("0123456789", 1, 10, w) : 0;
+    if (w)
+        fclose(w);
+    FsDirEntryType type;
+    FsFile ff;
+    s64 fsize = 0;
+    FsFileSystem *dev = fsdevGetDeviceFileSystem("sdmc:");
+    int fs_ok = wrote == 10 && dev && fsFsGetEntryType(dev, "/f.bin", &type) == 0 && type == FsDirEntryType_File &&
+                fsFsOpenFile(dev, "/f.bin", FsOpenMode_Read, &ff) == 0 && fsFileGetSize(&ff, &fsize) == 0 && fsize == 10;
+    fsFileClose(&ff);
+    CHECK(fs_ok, "fwrite em sdmc:/f.bin aparece no fs (fsdevGetDeviceFileSystem): 10 bytes");
+    FILE *hf = fopen(TEST_ROOT "/f.bin", "rb");
+    CHECK(slurp(hf, buf, sizeof buf) == 10 && !strcmp(buf, "0123456789"), "sdmc:/f.bin = " TEST_ROOT "/f.bin no host");
+
+    char out[FS_MAX_PATH];
+    FsFileSystem *tdev = NULL;
+    CHECK(fsdevTranslatePath("sdmc:/x/../f.bin", &tdev, out) == 0 && !strcmp(out, "/f.bin") && tdev == dev &&
+          fsdevTranslatePath("f.bin", NULL, out) == 0 && !strcmp(out, "/f.bin") &&
+          fsdevTranslatePath("sdmc:", NULL, out) == 0 && !strcmp(out, "/"), "fsdevTranslatePath: sdmc:/x/../f.bin, relativo e raiz");
+    errno = 0;
+    CHECK(fsdevTranslatePath("romfs:/data/a.txt", NULL, out) == -1 && errno == ENODEV &&
+          fsdevGetDeviceFileSystem("romfs") == NULL, "romfs nao e fsdev: fsdevTranslatePath -> ENODEV, sem FsFileSystem");
+    CHECK(fsdevCommitDevice("sdmc") == 0 && fsdevCommitDevice("nada") == LIBNXRESULT(NotFound), "fsdevCommitDevice");
+
+    CHECK(mkdir("sdmc:/d", 0777) == 0 && rename("sdmc:/f.bin", "sdmc:/d/g.bin") == 0 && stat("sdmc:/d/g.bin", &st) == 0 &&
+          st.st_size == 10 && access("sdmc:/d/g.bin", W_OK) == 0 && remove("sdmc:/d/g.bin") == 0 && rmdir("sdmc:/d") == 0 &&
+          stat("sdmc:/d", &st) != 0, "mkdir/rename/stat/access/remove/rmdir em sdmc:/");
+    errno = 0;
+    CHECK(fopen("sdmc:/../fora.txt", "w") == NULL && errno == EACCES, "\"..\" acima da raiz do sdmc -> EACCES");
+
+    FsFileSystem extra;
+    fsOpenSdCardFileSystem(&extra);
+    errno = 0;
+    CHECK(fsdevMountDevice("a:b", extra) == -1 && errno == EINVAL && fsFsCommit(&extra) == KERNELRESULT(InvalidHandle),
+          "fsdevMountDevice(nome com \":\") -> -1 e fecha o fs, como na libnx");
+    fsOpenSdCardFileSystem(&extra);
+    CHECK(fsdevMountDevice("save", extra) >= 0 && access("save:/", F_OK) == 0, "fsdevMountDevice(\"save\") -> save:/");
+
+    CHECK(fsdevUnmountAll() == 0 && fsdevGetDeviceFileSystem("sdmc") == NULL && fsdevGetDeviceFileSystem("save") == NULL &&
+          access("romfs:/data/a.txt", F_OK) == 0, "fsdevUnmountAll desmonta sdmc e save, mantem romfs");
+    errno = 0;
+    CHECK(fopen("sdmc:/x", "r") == NULL && errno == ENODEV && fsdevUnmountDevice("sdmc") == -1, "sdmc:/ desmontado -> ENODEV");
+    CHECK(romfsExit() == 0 && romfsExit() == LIBNXRESULT(NotFound) && access("romfs:/data/a.txt", F_OK) != 0, "romfsExit; de novo -> NotFound");
+    shimRomfsSetRoot(NULL);
+    shimFsSetSdCardRoot(NULL);
+
+    remove(TEST_ROMFS "/data/a.txt");
+    remove(TEST_ROMFS "/data/crlf.txt");
+    rmdir(TEST_ROMFS "/data");
+    rmdir(TEST_ROMFS);
+    rmdir(TEST_ROOT);
+}
+
 #if defined(__linux__)
 /* ---------------------------------------------- seqlock do buffer ao vivo: produtor x padUpdate */
 #define LIVE_WRITES 200000
@@ -348,9 +467,15 @@ static void test_input_live_threads(void)
     }
     threadWaitForExit(&tp);
     threadClose(&tp);
+    /* A ultima leitura do laco pode ter acontecido antes do produtor rodar (num nucleo so, ele faz as
+     * 200000 escritas de uma vez e o laco sai ao ver s_live_done). Depois do join, ler de novo e obrigatorio. */
+    padUpdate(&pad);
+    HidAnalogStickState lf = padGetStickPos(&pad, 0);
+    u64 final = pad.buttons_cur;
     shimInputClearLive();
-    CHECK(torn == 0 && back == 0 && last == LIVE_WRITES, "buffer ao vivo (seqlock): %llu leituras x %d escritas, %llu estados misturados, ultimo = %llu",
-          (unsigned long long)reads, LIVE_WRITES, (unsigned long long)torn, (unsigned long long)last);
+    CHECK(torn == 0 && back == 0 && final == LIVE_WRITES && lf.x == LIVE_WRITES && lf.y == -LIVE_WRITES,
+          "buffer ao vivo (seqlock): %llu leituras x %d escritas, %llu estados misturados, %llu regressoes, final = %llu",
+          (unsigned long long)reads, LIVE_WRITES, (unsigned long long)torn, (unsigned long long)back, (unsigned long long)final);
 }
 
 static MemoryInfo query(void *p)
@@ -447,6 +572,7 @@ int main(void)
     /* ---- portavel: entrada (hid/pad) e fs (cartao SD) */
     test_input();
     test_fs();
+    test_devices();
 
 #if defined(__linux__)
     test_input_live_threads();

@@ -37,5 +37,8 @@ horizon_rt/**/*.nro
 horizon_rt/**/*.map
 horizon_rt/**/*.dis
 
+# RomFS de teste gerado (python horizon_rt/hb_assets/gen_romfs.py)
+horizon_rt/hb_assets/romfs/
+
 # Executaveis do gate no host gerados ao lado do --emit-c
 *_host.exe

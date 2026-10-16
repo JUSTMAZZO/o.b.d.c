@@ -87,9 +87,9 @@
       "name": "Switch HLE Shim",
       "file": "switch_hle_shim.h",
       "status": "in_progress",
-      "progress": 70,
-      "summary": "Primitivas libnx, 27 SVCs do kernel (21 implementados sobre Bionic/POSIX e 6 de IPC/memória compartilhada como dummies), API Thread/Mutex/RMutex/CondVar, fs de alto nível (fsOpenSdCardFileSystem + fsFs/fsFile/fsDir sobre um diretório do host, portátil Bionic/Windows, caminhos normalizados contra \"..\") e entrada desacoplada (roteiro por quadro + buffer ao vivo com seqlock, botões e analógicos, PadState compacta inalterada), com os tipos e resultados da libnx 2.10.0",
-      "next": "fsdev (sdmc:/ pelo stdio do newlib), padRepeater, time:u; depois emular as respostas IPC (CMIF) de sm, hid e fs no buffer da TLS"
+      "progress": 80,
+      "summary": "Primitivas libnx, 27 SVCs do kernel (21 implementados sobre Bionic/POSIX e 6 de IPC/memória compartilhada como dummies), API Thread/Mutex/RMutex/CondVar, fs de alto nível (fsOpenSdCardFileSystem + fsFs/fsFile/fsDir sobre um diretório do host, portátil Bionic/Windows, caminhos normalizados contra \"..\"), dispositivos do stdio (fsdevMountSdmc/MountDevice/TranslatePath e romfsInit/MountSelf somente leitura, com fopen/opendir/stat/... roteados para sdmc:/ e romfs:/) e entrada desacoplada (roteiro por quadro + buffer ao vivo com seqlock, botões e analógicos, PadState compacta inalterada), com os tipos e resultados da libnx 2.10.0",
+      "next": "padRepeater, time:u, caminhos relativos a partir de sdmc:/ (chdir do __appInit); depois emular as respostas IPC (CMIF) de sm, hid e fs no buffer da TLS"
     },
     {
       "name": "Horizon Static Analysis",
@@ -197,7 +197,7 @@
       "phase": 3,
       "title": "Loader ELF e Tradução de ABI / Syscalls",
       "status": "in_progress",
-      "progress": 75,
+      "progress": 80,
       "items": [
         {
           "name": "Shim HLE de primitivas libnx (console, applet, pad, timer) — switch_hle_shim.h",
@@ -253,6 +253,10 @@
         },
         {
           "name": "fs (cartão SD sobre diretório do host) e entrada desacoplada (roteiro + buffer ao vivo, analógicos) no shim; svc_shim_test 124/124 no A56 e 70/70 no host; hb_io validado",
+          "done": true
+        },
+        {
+          "name": "RomFS (romfs:/ somente leitura) e fsdev (sdmc:/) com stdio roteado no shim; svc_shim_test 153/153 no A56 e 99/99 no host; hb_assets validado",
           "done": true
         },
         {
@@ -1008,6 +1012,72 @@
           },
           {
             "check": "-Wall -Wextra sem warnings: shim + suíte (NDK r28 e llvm-mingw) e hb_io (devkitA64)",
+            "value": "0 warnings",
+            "ok": true
+          }
+        ]
+      },
+      {
+        "id": "hb_assets",
+        "title": "Homebrew libnx com RomFS: 256 KiB de assets lidos por romfs:/ (stdio) com CRC-32, gravação em sdmc:/",
+        "ops": "romfsInit, fsdevMountSdmc, fopen/fread/fseek/fgets/stat/opendir/remove com romfs:/ e sdmc:/, romfsExit, fsdevUnmountAll",
+        "expected": {
+          "CRC-32": "0x5d07c479",
+          "FNV-1a": "0x3e52039d8d7f4325",
+          "Bytes em 0x10000": "8d34db82",
+          "Entradas em romfs:/": "2",
+          "Acessos recusados no romfs": "2/2"
+        },
+        "neon_median_s": null,
+        "scalar_median_s": null,
+        "reconstructed": {
+          "binary": "hb_assets_oracle",
+          "status": "hle_port",
+          "note": "Assets gerados por gen_romfs.py (que também calcula o CRC-32 pelo zlib e o FNV-1a). O mesmo hb_assets.c vira NRO com o RomFS embutido (devkitA64 + libnx 2.10.0, elf2nro --romfsdir) e oráculo pelo shim, no qual romfs:/ é um diretório do host (OBDC_ROMFS=/data/local/tmp/romfs no A56) e fopen/stat/opendir passam pelos wrappers de dispositivo. Escrita e \"..\" acima da raiz do romfs são recusados (EROFS / EACCES). Leitura de 256 KiB + CRC + FNV no A56: mediana 1,11 ms (0,81–1,60, 15×, cpu7)."
+        },
+        "attempts": [],
+        "device_runs": [
+          {
+            "binary": "hb_assets_oracle (taskset cpu7, romfs em /data/local/tmp/romfs)",
+            "runs": 15,
+            "median_s": 0.001109,
+            "min_s": 0.000812,
+            "result": "0x5d07c479"
+          }
+        ],
+        "validation": [
+          {
+            "check": "Referência Python (gen_romfs.py: zlib.crc32 e FNV-1a do bloco)",
+            "value": "0x5d07c479 / 0x3e52039d8d7f4325 / 8d34db82",
+            "ok": true
+          },
+          {
+            "check": "Oráculo no host (llvm-mingw) e no A56 (15×, taskset 80): saída idêntica",
+            "value": "0x5d07c479 / 2 entradas / 2/2 recusados / sdmc ok",
+            "ok": true
+          },
+          {
+            "check": "hb_assets.nro (RomFS embutido): sítios do nro_tool.py conferidos contra o hb_assets.elf",
+            "value": "89 (18 svc), OK",
+            "ok": true
+          },
+          {
+            "check": "svc_shim_test: romfs:/, sdmc:/, fsdev e stdio roteado no host (llvm-mingw)",
+            "value": "99/99",
+            "ok": true
+          },
+          {
+            "check": "svc_shim_test no A56 (10× taskset 80 + 5× taskset f0)",
+            "value": "153/153",
+            "ok": true
+          },
+          {
+            "check": "Regressão: 10 binários da suíte com o shim novo × anterior no A56 (15× taskset 80; hb_threads também f0) e no host; main() igual instrução a instrução",
+            "value": "10/10",
+            "ok": true
+          },
+          {
+            "check": "-Wall -Wextra sem warnings: shim + suíte (NDK r28 e llvm-mingw) e hb_assets (devkitA64)",
             "value": "0 warnings",
             "ok": true
           }

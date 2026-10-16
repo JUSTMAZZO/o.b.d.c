@@ -5,9 +5,9 @@
 
 ### Recompilação estática AArch64 → AArch64: binários de Nintendo Switch rodando nativamente no Android
 
-![Endgame](https://img.shields.io/badge/Endgame-69%25-orange?style=for-the-badge) ![Fase atual](https://img.shields.io/badge/Fase%20atual-3%20%E2%80%93%20Em%20andamento-yellow?style=for-the-badge) ![ISA](https://img.shields.io/badge/ISA-AArch64%20%E2%86%92%20AArch64-informational?style=for-the-badge&logo=arm&logoColor=white) ![Alvo](https://img.shields.io/badge/Alvo-Galaxy%20A56%20%C2%B7%20Exynos%201580-1428A0?style=for-the-badge&logo=samsung&logoColor=white)
+![Endgame](https://img.shields.io/badge/Endgame-70%25-orange?style=for-the-badge) ![Fase atual](https://img.shields.io/badge/Fase%20atual-3%20%E2%80%93%20Em%20andamento-yellow?style=for-the-badge) ![ISA](https://img.shields.io/badge/ISA-AArch64%20%E2%86%92%20AArch64-informational?style=for-the-badge&logo=arm&logoColor=white) ![Alvo](https://img.shields.io/badge/Alvo-Galaxy%20A56%20%C2%B7%20Exynos%201580-1428A0?style=for-the-badge&logo=samsung&logoColor=white)
 
-![Validação](https://img.shields.io/badge/Valida%C3%A7%C3%A3o-50%2F50%20OK-brightgreen?style=for-the-badge) ![Benchmarks](https://img.shields.io/badge/Benchmarks-8%20no%20A56-teal?style=for-the-badge&logo=android&logoColor=white) ![Instruções](https://img.shields.io/badge/Instru%C3%A7%C3%B5es-24%20suportadas-blueviolet?style=for-the-badge) ![LLM](https://img.shields.io/badge/LLM-qwen2.5--coder%207b-black?style=for-the-badge&logo=ollama&logoColor=white) ![Atualizado](https://img.shields.io/badge/Atualizado-2026--10--16-lightgrey?style=for-the-badge) [![Licença](https://img.shields.io/badge/Licen%C3%A7a-MIT-green?style=for-the-badge)](LICENSE)
+![Validação](https://img.shields.io/badge/Valida%C3%A7%C3%A3o-57%2F57%20OK-brightgreen?style=for-the-badge) ![Benchmarks](https://img.shields.io/badge/Benchmarks-9%20no%20A56-teal?style=for-the-badge&logo=android&logoColor=white) ![Instruções](https://img.shields.io/badge/Instru%C3%A7%C3%B5es-24%20suportadas-blueviolet?style=for-the-badge) ![LLM](https://img.shields.io/badge/LLM-qwen2.5--coder%207b-black?style=for-the-badge&logo=ollama&logoColor=white) ![Atualizado](https://img.shields.io/badge/Atualizado-2026--10--16-lightgrey?style=for-the-badge) [![Licença](https://img.shields.io/badge/Licen%C3%A7a-MIT-green?style=for-the-badge)](LICENSE)
 
 </div>
 
@@ -30,7 +30,7 @@ Switch ELF/NSO ──► Ghidra (ASM + CFG + .rodata) ──► Lifter simbólic
 Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── shim ABI/svc ◄──┘
 ```
 
-## 📈 Progresso até o Endgame: `██████████████░░░░░░ 69%`
+## 📈 Progresso até o Endgame: `██████████████░░░░░░ 70%`
 
 ## 🧩 Módulos atuais
 
@@ -40,7 +40,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | **NEON Symbolic Lifter**<br>`neon_lifter.py` | 🟡 Em andamento | `█████████░ 88%` | Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG | if/else e switch no estruturador, várias funções com loops, ld3/ld4 com binário real |
 | **Local LLM Qwen 2.5 7B**<br>`qwen2.5-coder:7b (Ollama, CUDA parcial)` | 🟡 Em andamento | `████████░░ 80%` | Gera C a partir do resumo do lifter + esqueleto do CFG; checagem de estrutura e gate no host antes do ADB, com 1 nova tentativa guiada. Se o Qwen esgota as tentativas (ou o Ollama falha), o pipeline usa o C de referência determinístico e registra o motivo em <saida>.pipeline.json | Fazer o Qwen respeitar for (;;) com break do GCC e renomear variáveis de registrador |
 | **Android AArch64 Runner**<br>`Galaxy A56 via ADB` | 🟡 Em andamento | `████░░░░░░ 45%` | push + chmod + execução em /data/local/tmp, medições intercaladas (15×) | Script único de round-trip (compilar → push → rodar → comparar), afinidade de núcleo (taskset) |
-| **Switch HLE Shim**<br>`switch_hle_shim.h` | 🟡 Em andamento | `███████░░░ 70%` | Primitivas libnx, 27 SVCs do kernel (21 implementados sobre Bionic/POSIX e 6 de IPC/memória compartilhada como dummies), API Thread/Mutex/RMutex/CondVar, fs de alto nível (fsOpenSdCardFileSystem + fsFs/fsFile/fsDir sobre um diretório do host, portátil Bionic/Windows, caminhos normalizados contra "..") e entrada desacoplada (roteiro por quadro + buffer ao vivo com seqlock, botões e analógicos, PadState compacta inalterada), com os tipos e resultados da libnx 2.10.0 | fsdev (sdmc:/ pelo stdio do newlib), padRepeater, time:u; depois emular as respostas IPC (CMIF) de sm, hid e fs no buffer da TLS |
+| **Switch HLE Shim**<br>`switch_hle_shim.h` | 🟡 Em andamento | `████████░░ 80%` | Primitivas libnx, 27 SVCs do kernel (21 implementados sobre Bionic/POSIX e 6 de IPC/memória compartilhada como dummies), API Thread/Mutex/RMutex/CondVar, fs de alto nível (fsOpenSdCardFileSystem + fsFs/fsFile/fsDir sobre um diretório do host, portátil Bionic/Windows, caminhos normalizados contra ".."), dispositivos do stdio (fsdevMountSdmc/MountDevice/TranslatePath e romfsInit/MountSelf somente leitura, com fopen/opendir/stat/... roteados para sdmc:/ e romfs:/) e entrada desacoplada (roteiro por quadro + buffer ao vivo com seqlock, botões e analógicos, PadState compacta inalterada), com os tipos e resultados da libnx 2.10.0 | padRepeater, time:u, caminhos relativos a partir de sdmc:/ (chdir do __appInit); depois emular as respostas IPC (CMIF) de sm, hid e fs no buffer da TLS |
 | **Horizon Static Analysis**<br>`horizon_rt/ (nro_tool.py, probe/)` | 🟡 Em andamento | `██████░░░░ 65%` | Leitor de NRO com inventário de svc/mrs conferido contra o ELF em 3 homebrews (hb_compute: 21 sítios, hb_threads: 36, hb_services: 110); quem chama cada SVC de IPC, porta sm: e nomes de serviço no binário; tabela de 27 SVCs | Decodificar as mensagens CMIF (comandos por serviço) a partir das chamadas a serviceDispatch |
 
 ## 🗺️ Roadmap de subsistemas
@@ -49,7 +49,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 |:---:|---|---|---|
 | **1** | Lifter NEON Aritmético | ✅ Concluído | `██████████ 100%` |
 | **2** | Memória, Arrays e Ponteiros | ✅ Concluído | `██████████ 100%` |
-| **3** | Loader ELF e Tradução de ABI / Syscalls | 🟡 Em andamento | `████████░░ 75%` |
+| **3** | Loader ELF e Tradução de ABI / Syscalls | 🟡 Em andamento | `████████░░ 80%` |
 | **4** | Subsistema de Áudio, Threads e Vulkan Mobile | ⚪ Planejado | `░░░░░░░░░░ 0%` |
 
 <details>
@@ -84,7 +84,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 </details>
 
 <details open>
-<summary><b>Fase 3 — Loader ELF e Tradução de ABI / Syscalls</b> (14/17)</summary>
+<summary><b>Fase 3 — Loader ELF e Tradução de ABI / Syscalls</b> (15/18)</summary>
 
 - [x] Shim HLE de primitivas libnx (console, applet, pad, timer) — switch_hle_shim.h
 - [x] Homebrew estilo libnx compilado do fonte e validado no A56 (switch_particle_bench)
@@ -100,6 +100,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 - [x] Fallback determinístico no pipeline: Qwen reprovado → C de referência validado no gate (hb_compute)
 - [x] Inventário IPC com hb_services (sm, applet, hid, fs): 6 SVCs de IPC/memória compartilhada mapeados, dummies no shim
 - [x] fs (cartão SD sobre diretório do host) e entrada desacoplada (roteiro + buffer ao vivo, analógicos) no shim; svc_shim_test 124/124 no A56 e 70/70 no host; hb_io validado
+- [x] RomFS (romfs:/ somente leitura) e fsdev (sdmc:/) com stdio roteado no shim; svc_shim_test 153/153 no A56 e 99/99 no host; hb_assets validado
 - [ ] Shim de libnx completo (fs, hid real, time, serviços IPC)
 - [ ] TLS (tpidrro_el0) / registrador x18 e convenções de ABI
 - [ ] Primeiro homebrew binário (NRO) traduzido rodando no A56
@@ -129,6 +130,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | **`hb_threads`**<br>Homebrew libnx multi-thread: 4 threads × 25.000 partículas × 60 frames, Mutex + CondVar + sleep | threadCreate/Start/WaitForExit/Close, mutexLock/Unlock, condvarWait/WakeAll, svcSleepThread (oráculo pelo shim) | Checksum: `88196450180`<br>Última partícula: `1734747`<br>Threads: `4` | 0.0061 s | — | — | 🎮 `hb_threads_oracle` |
 | **`hb_services`**<br>Homebrew libnx com serviços: sm, applet, hid e fs abertos e fechados, 60 frames de padUpdate | smInitialize, appletInitialize, hidInitialize, fsInitialize, padUpdate, appletMainLoop (IPC dummy no shim) | Servicos abertos: `4`<br>Frames: `60`<br>Botoes pressionados: `2` | — | — | — | 🎮 `hb_services_oracle` |
 | **`hb_io`**<br>Homebrew libnx com cartão SD e analógicos: 1 MiB escrito e lido pelo fs + 60 frames de pad | fsOpenSdCardFileSystem, fsFsCreateDirectory/CreateFile/OpenFile/RenameFile/OpenDirectory/DeleteDirectoryRecursively, fsFileWrite (Append)/Read/GetSize/Flush, fsDirGetEntryCount, padUpdate, padGetStickPos | FNV-1a (1 MiB): `0x3cc5e3ccd09fa325`<br>Frames: `60`<br>Botoes pressionados: `2`<br>Analógicos (Σ lx / ly / rx): `-46080 / 514560 / 655340` | — | — | — | 🎮 `hb_io_oracle` |
+| **`hb_assets`**<br>Homebrew libnx com RomFS: 256 KiB de assets lidos por romfs:/ (stdio) com CRC-32, gravação em sdmc:/ | romfsInit, fsdevMountSdmc, fopen/fread/fseek/fgets/stat/opendir/remove com romfs:/ e sdmc:/, romfsExit, fsdevUnmountAll | CRC-32: `0x5d07c479`<br>FNV-1a: `0x3e52039d8d7f4325`<br>Bytes em 0x10000: `8d34db82`<br>Entradas em romfs:/: `2`<br>Acessos recusados no romfs: `2/2` | — | — | — | 🎮 `hb_assets_oracle` |
 
 📱 = C reconstruído validado no aparelho · 🎮 = fonte libnx portado via shim HLE e validado · ⏳ = aguardando aparelho · ❌ = diverge
 
@@ -363,6 +365,28 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | Regressão: 9 binários da suíte com o shim novo × antigo no A56 (15× taskset 80; hb_threads também f0) e no host | `saída idêntica, valores do status.json` | ✅ |
 | Regressão: main() dos 9 binários (NDK r28) igual instrução a instrução, só endereços de .rodata mudam; frames de pilha idênticos | `9/9` | ✅ |
 | -Wall -Wextra sem warnings: shim + suíte (NDK r28 e llvm-mingw) e hb_io (devkitA64) | `0 warnings` | ✅ |
+
+### `hb_assets` — Homebrew libnx com RomFS: 256 KiB de assets lidos por romfs:/ (stdio) com CRC-32, gravação em sdmc:/
+
+> 🎮 Assets gerados por gen_romfs.py (que também calcula o CRC-32 pelo zlib e o FNV-1a). O mesmo hb_assets.c vira NRO com o RomFS embutido (devkitA64 + libnx 2.10.0, elf2nro --romfsdir) e oráculo pelo shim, no qual romfs:/ é um diretório do host (OBDC_ROMFS=/data/local/tmp/romfs no A56) e fopen/stat/opendir passam pelos wrappers de dispositivo. Escrita e ".." acima da raiz do romfs são recusados (EROFS / EACCES). Leitura de 256 KiB + CRC + FNV no A56: mediana 1,11 ms (0,81–1,60, 15×, cpu7).
+
+**Execução no aparelho**
+
+| Binário | Execuções | Mediana | Mínimo | Resultado |
+|---|:---:|---:|---:|---|
+| hb_assets_oracle (taskset cpu7, romfs em /data/local/tmp/romfs) | 15 | 0.0011 s | 0.0008 s | `0x5d07c479` ✅ |
+
+**Validação**
+
+| Verificação | Valor | |
+|---|---|:---:|
+| Referência Python (gen_romfs.py: zlib.crc32 e FNV-1a do bloco) | `0x5d07c479 / 0x3e52039d8d7f4325 / 8d34db82` | ✅ |
+| Oráculo no host (llvm-mingw) e no A56 (15×, taskset 80): saída idêntica | `0x5d07c479 / 2 entradas / 2/2 recusados / sdmc ok` | ✅ |
+| hb_assets.nro (RomFS embutido): sítios do nro_tool.py conferidos contra o hb_assets.elf | `89 (18 svc), OK` | ✅ |
+| svc_shim_test: romfs:/, sdmc:/, fsdev e stdio roteado no host (llvm-mingw) | `99/99` | ✅ |
+| svc_shim_test no A56 (10× taskset 80 + 5× taskset f0) | `153/153` | ✅ |
+| Regressão: 10 binários da suíte com o shim novo × anterior no A56 (15× taskset 80; hb_threads também f0) e no host; main() igual instrução a instrução | `10/10` | ✅ |
+| -Wall -Wextra sem warnings: shim + suíte (NDK r28 e llvm-mingw) e hb_assets (devkitA64) | `0 warnings` | ✅ |
 
 ## 🧮 Instruções ARM64/NEON no lifter
 
