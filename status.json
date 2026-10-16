@@ -63,9 +63,9 @@
       "name": "NEON Symbolic Lifter",
       "file": "neon_lifter.py",
       "status": "in_progress",
-      "progress": 85,
-      "summary": "Elevação simbólica NEON sem código por binário: memória contígua (ldr/str q, ldp/stp, ld1/st1) e array of structs (ld2/st2, campos .fN), pós-incremento, constantes do main; esqueleto do main gerado do CFG com structs, ponteiros e PadState tipados; C de referência no host",
-      "next": "Testar ld3/ld4 com binário real, if/else e switch no estruturador, várias funções além do main"
+      "progress": 88,
+      "summary": "Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG",
+      "next": "if/else e switch no estruturador, várias funções com loops, ld3/ld4 com binário real"
     },
     {
       "name": "Local LLM Qwen 2.5 7B",
@@ -73,7 +73,7 @@
       "status": "in_progress",
       "progress": 75,
       "summary": "Gera C a partir do resumo do lifter + esqueleto do CFG; antes do ADB passa por checagem de estrutura (profundidade e ordem das chamadas) e pelo gate no host, que compila, executa e compara a saída com o C de referência, com 1 nova tentativa guiada pelo diff",
-      "next": "Fazer o Qwen renomear variáveis de registrador (w21, x23, sp_0x10) e tipar PadState"
+      "next": "No hb_compute (GCC) o Qwen tira o segundo armGetSystemTick e o loop de física de dentro do for (;;) mesmo com dicas e nova tentativa; a checagem barra, o C de referência segue validado"
     },
     {
       "name": "Android AArch64 Runner",
@@ -87,16 +87,16 @@
       "name": "Switch HLE Shim",
       "file": "switch_hle_shim.h",
       "status": "in_progress",
-      "progress": 35,
-      "summary": "Primitivas libnx (console, applet, pad, timer) e handlers dos SVCs do kernel (heap, memória, mutex, info, debug, exit, break) sobre Bionic/POSIX, com os protótipos e resultados da libnx 2.10.0",
-      "next": "Threads (svcCreateThread/StartThread), eventos, sleep e serviços IPC"
+      "progress": 50,
+      "summary": "Primitivas libnx (console, applet, pad, timer), 21 SVCs do kernel (heap, memória, mutex, condvar, threads, sleep, espera, info, debug, exit, break) e a API Thread/Mutex/RMutex/CondVar sobre Bionic/POSIX, com os tipos e resultados da libnx 2.10.0",
+      "next": "Eventos (svcCreateEvent), serviços IPC (sm, fs, hid) e tempo (svcGetSystemTick, time)"
     },
     {
       "name": "Horizon Static Analysis",
       "file": "horizon_rt/ (nro_tool.py, probe/)",
       "status": "in_progress",
-      "progress": 45,
-      "summary": "Leitor de NRO (segmentos, MOD0, .dynamic, RELA/RELR) com inventário de svc e leituras de registradores de sistema; sonda do ambiente EL0 do A56; tabela de tradução dos SVCs para Bionic/POSIX com handlers testados no aparelho",
+      "progress": 55,
+      "summary": "Leitor de NRO com inventário de svc/mrs conferido contra o ELF em 2 homebrews (hb_compute: 21 sítios, hb_threads: 36); sonda do ambiente EL0 do A56; tabela de 21 SVCs para Bionic/POSIX",
       "next": "Inventário de NROs maiores (serviços IPC: sm, fs, hid) e SVCs de threads/sincronização"
     }
   ],
@@ -197,7 +197,7 @@
       "phase": 3,
       "title": "Loader ELF e Tradução de ABI / Syscalls",
       "status": "in_progress",
-      "progress": 45,
+      "progress": 60,
       "items": [
         {
           "name": "Shim HLE de primitivas libnx (console, applet, pad, timer) — switch_hle_shim.h",
@@ -232,7 +232,19 @@
           "done": true
         },
         {
-          "name": "Shim de libnx completo (fs, hid real, time, sync)",
+          "name": "C reconstruído do hb_compute.elf (devkitA64/GCC) pelo pipeline: lifter + esqueleto do CFG, validado no host e no A56",
+          "done": true
+        },
+        {
+          "name": "Threads, sleep e sincronização da libnx no shim (9 SVCs + Thread/Mutex/RMutex/CondVar), svc_shim_test 46/46 no A56",
+          "done": true
+        },
+        {
+          "name": "Homebrew multi-thread hb_threads (devkitA64) inventariado e com oráculo no A56 em 1 e 4 núcleos",
+          "done": true
+        },
+        {
+          "name": "Shim de libnx completo (fs, hid real, time, serviços IPC)",
           "done": false
         },
         {
@@ -700,7 +712,7 @@
       {
         "id": "hb_compute",
         "title": "Homebrew mínimo libnx (sem serviços): 100.000 partículas × 60 frames, saída por svcOutputDebugString",
-        "ops": "oráculo pelo switch_hle_shim.h (svcOutputDebugString, armGetSystemTick)",
+        "ops": "ELF do devkitA64 (GCC 16.1.0): str/ldr q [base, índice], dup, eor, and, ushr, loop escalar ldr w pós-incremento, mrs cntpct_el0, ccmp, umulh",
         "expected": {
           "Checksum": "88196450180",
           "Última partícula": "1734747"
@@ -708,17 +720,49 @@
         "neon_median_s": 0.0043204,
         "scalar_median_s": null,
         "reconstructed": {
-          "binary": "hb_oracle",
-          "status": "hle_port",
-          "note": "Mesmo hb_compute.c que gera o NRO com devkitA64/libnx, compilado para Android com -DOBDC_ORACLE sobre o switch_hle_shim.h. A versão Switch (hb_compute.nro) é só inventariada pelo nro_tool.py."
+          "binary": "hb_compute_ref.c",
+          "status": "verified",
+          "note": "C reconstruído do hb_compute.elf (devkitA64) pelo pipeline: Ghidra extrai main e out(); o lifter eleva os 2 loops NEON e o loop escalar do checksum; o esqueleto do CFG traz out() com chamada de cauda, mrs cntpct_el0 -> armGetSystemTick(), ccmp e a conversão de ticks com umulh. Validado no host e no A56. O Qwen foi reprovado pela checagem de estrutura nas duas tentativas."
         },
-        "attempts": [],
+        "attempts": [
+          {
+            "n": 1,
+            "input": "Resumo do lifter + esqueleto do CFG (main + out)",
+            "binary": "hb_compute.elf",
+            "formula": true,
+            "iterations": "erro",
+            "result": "—",
+            "llm_seconds": 59.1,
+            "note": "Qwen moveu armGetSystemTick e o loop de física para fora do for (;;) e removeu w2 = 1; barrado pela checagem (2 tentativas)"
+          }
+        ],
         "device_runs": [
           {
             "binary": "hb_oracle (shim com os handlers de SVC, taskset cpu7)",
             "runs": 15,
             "median_s": 0.0043204,
             "min_s": 0.0042613,
+            "result": "88196450180"
+          },
+          {
+            "binary": "hb_ref (C reconstruído do ELF, taskset cpu7)",
+            "runs": 15,
+            "median_s": 0.0062746,
+            "min_s": 0.0058423,
+            "result": "88196450180"
+          },
+          {
+            "binary": "hb_oracle (intercalado A/B, cpu7)",
+            "runs": 20,
+            "median_s": 0.004466,
+            "min_s": 0.004259,
+            "result": "88196450180"
+          },
+          {
+            "binary": "hb_ref (intercalado A/B, cpu7)",
+            "runs": 20,
+            "median_s": 0.005151,
+            "min_s": 0.004358,
             "result": "88196450180"
           }
         ],
@@ -741,6 +785,82 @@
           {
             "check": "Handlers dos SVCs no A56 (svc_shim_test, sucesso e erros da libnx)",
             "value": "33/33",
+            "ok": true
+          },
+          {
+            "check": "Lifter: 2 loops NEON + 1 escalar do ELF do devkitA64 (instruções × fórmulas)",
+            "value": "5/5 comparações",
+            "ok": true
+          },
+          {
+            "check": "C reconstruído do ELF no host (llvm-mingw)",
+            "value": "60 / 88196450180 / 1734747",
+            "ok": true
+          },
+          {
+            "check": "C reconstruído do ELF no A56 (15×, taskset 80)",
+            "value": "60 / 88196450180 / 1734747",
+            "ok": true
+          },
+          {
+            "check": "Desempenho do C reconstruído vs fonte via shim (20 pares intercalados, razão mediana)",
+            "value": "1,051×",
+            "ok": true
+          }
+        ]
+      },
+      {
+        "id": "hb_threads",
+        "title": "Homebrew libnx multi-thread: 4 threads × 25.000 partículas × 60 frames, Mutex + CondVar + sleep",
+        "ops": "threadCreate/Start/WaitForExit/Close, mutexLock/Unlock, condvarWait/WakeAll, svcSleepThread (oráculo pelo shim)",
+        "expected": {
+          "Checksum": "88196450180",
+          "Última partícula": "1734747",
+          "Threads": "4"
+        },
+        "neon_median_s": 0.0060866,
+        "scalar_median_s": null,
+        "reconstructed": {
+          "binary": "hb_threads_oracle",
+          "status": "hle_port",
+          "note": "Mesmo hb_threads.c do NRO do devkitA64 (21 SVCs, 36 sítios conferidos pelo nro_tool.py), compilado para Android com -DOBDC_ORACLE: as threads da libnx viram pthreads e a sincronização usa futex. Mesmo checksum em 1 núcleo (taskset 80) e em 4 (taskset f0)."
+        },
+        "attempts": [],
+        "device_runs": [
+          {
+            "binary": "hb_threads_oracle (taskset 80, 1 núcleo)",
+            "runs": 15,
+            "median_s": 0.0123655,
+            "min_s": 0.0110695,
+            "result": "88196450180"
+          },
+          {
+            "binary": "hb_threads_oracle (taskset f0, 4 núcleos grandes)",
+            "runs": 15,
+            "median_s": 0.0060866,
+            "min_s": 0.0051004,
+            "result": "88196450180"
+          }
+        ],
+        "validation": [
+          {
+            "check": "hb_threads.nro: sítios do nro_tool.py conferidos contra o hb_threads.elf",
+            "value": "36/36 (21 svc)",
+            "ok": true
+          },
+          {
+            "check": "Oráculo no A56 em 1 núcleo (15×)",
+            "value": "60 / 4 / 88196450180 / 1734747",
+            "ok": true
+          },
+          {
+            "check": "Oráculo no A56 em 4 núcleos (15×)",
+            "value": "60 / 4 / 88196450180 / 1734747",
+            "ok": true
+          },
+          {
+            "check": "svc_shim_test no A56 (21 SVCs + Thread/Mutex/RMutex/CondVar)",
+            "value": "46/46",
             "ok": true
           }
         ]
