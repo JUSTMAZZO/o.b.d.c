@@ -422,6 +422,11 @@ def step(body, vec, scal, sem, ptr_names=None, sym_mode=False, contrib=None, sto
     return branch
 
 
+def uses_simd(body):
+    """O corpo usa registradores SIMD/FP (v, q, d, s, h, b)? Desvios como b.ne nao contam."""
+    return any(re.search(r'\b[vqdshb]\d+\b', line.split(': ', 1)[1]) for line in body)
+
+
 def lift_single_loop(loop, resolved_data, idx, consts=None, prior=None):
     body = loop['body']
     scal, vec, ptr_names, sym_vecs, notes = resolve_preheader(loop['preheader'], resolved_data, body, consts, prior)
@@ -520,6 +525,8 @@ def validate_all(loops, trips_check=500):
     """Por loop, na mesma memoria compartilhada: execucao concreta das instrucoes NEON x formulas
     simbolicas. Devolve [(loop, o que foi comparado, concreto, simbolico)]. O valor do programa
     inteiro (frames, chamadas, printf) vem da execucao do C de referencia no host."""
+    if not loops:                     # so loops escalares (estruturador do CFG): nada a comparar aqui
+        return []
     n_check = min(trips_check * max(L['stride'] for L in loops), min(L['total'] for L in loops))
     mem_c = defaultdict(lambda: [0] * n_check * 4)   # uint32 planos; ate 4 campos por elemento
     mem_s = defaultdict(lambda: [0] * n_check * 4)
@@ -854,10 +861,17 @@ def main():
     neon_loops = [lp for lp in fn['loops'] if not any(': bl ' in insn for insn in lp['body'])]
 
     loops = []
-    for i, lp in enumerate(neon_loops):
+    for lp in neon_loops:
         prior = [(int(L['start'], 16), int(L['end'], 16), L['exit']) for L in loops]
-        loops.append(lift_single_loop(lp, fn['resolved_data'], i + 1,
-                                      fn_consts(fn['assembly'], int(lp['start'], 16)), prior))
+        try:
+            loops.append(lift_single_loop(lp, fn['resolved_data'], len(loops) + 1,
+                                          fn_consts(fn['assembly'], int(lp['start'], 16)), prior))
+        except LiftError as e:
+            # loop escalar (sem registrador SIMD) que o lifter simbolico nao eleva (ex.: if/else no corpo):
+            # fica com o estruturador do CFG, que o emite como C comum; loop NEON continua obrigatorio
+            if uses_simd(lp['body']):
+                raise
+            print(f"[lifter] loop escalar {lp['start']}-{lp['end']} fica com o estruturador do CFG ({e})")
     summ = summary_all(loops)
     print(summ)
 
