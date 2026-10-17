@@ -13,6 +13,8 @@
  * O teste de fs cria e apaga ./obdc_sdcard_test e ./obdc_romfs_test no diretorio atual.
  */
 #include <stddef.h>
+#include <pthread.h>
+#include <sched.h>
 #if defined(__linux__)
 #include <signal.h>
 #include <sys/wait.h>
@@ -616,6 +618,125 @@ static void test_framebuffer(void)
     CHECK(conv_ok, "BGRA8888 / RGB565 / RGBA4444 (64x32, 1 buffer): stride e cor no PPM");
 }
 
+/* ---------------------------------------------- TLS do Horizon (tpidrro_el0) em pthreads paralelas */
+#define TLS_THREADS 8
+#define TLS_ROUNDS  2000
+
+typedef struct {
+    int id, layout_ok, data_ok, x18_ok;
+    u8 *tls;
+} TlsArg;
+
+static pthread_barrier_t s_tls_barrier;
+
+static u64 read_x18(void)              /* so le x18 (Shadow Call Stack do Bionic); nao o usa como temporario */
+{
+#if defined(__aarch64__)
+    u64 v;
+    __asm__ volatile("mov %0, x18" : "=r"(v));
+    return v;
+#else
+    return 0;
+#endif
+}
+
+static int tls_layout_ok(u8 *t)
+{
+    u64 mrs = 0;
+    SHIM_MRS_TPIDRRO(mrs);
+    ThreadVars *tv = shimGetThreadVars();
+    return t != NULL && (uintptr_t)t % SHIM_TLS_SIZE == 0 && t == (u8 *)armGetTls() && mrs == (u64)(uintptr_t)t &&
+           (u8 *)tv == t + 0x1E0 && tv->magic == THREADVARS_MAGIC && (u8 *)&tv->tls_tp == t + 0x1F8;
+}
+
+static void *tls_worker(void *p)
+{
+    TlsArg *a = (TlsArg *)p;
+    u64 x18_before = read_x18();
+    u8 *t = (u8 *)shimGetTls();                /* primeira consulta: aloca o bloco da thread */
+    a->x18_ok = read_x18() == x18_before;
+    a->tls = t;
+    a->layout_ok = tls_layout_ok(t);
+    pthread_barrier_wait(&s_tls_barrier);      /* as 8 TLS existem ao mesmo tempo */
+    int ok = t != NULL;
+    for (int r = 0; ok && r < TLS_ROUNDS; r++) {
+        u8 v = (u8)(a->id * 31 + r);
+        memset(t, v, SHIM_TLS_IPC_SIZE);       /* buffer IPC da thread */
+        if ((r & 63) == 0)
+            sched_yield();
+        for (int k = 0; k < SHIM_TLS_IPC_SIZE; k++)
+            ok &= t[k] == v;
+        ok &= (u8 *)shimGetTls() == t;
+    }
+    a->data_ok = ok;
+    pthread_barrier_wait(&s_tls_barrier);
+    return NULL;
+}
+
+#if defined(__linux__)
+static Handle s_tls_handle_seen, s_tls_handle_self;
+static void tls_libnx_thread(void *arg)
+{
+    (void)arg;
+    s_tls_handle_seen = shimGetThreadVars()->handle;
+    s_tls_handle_self = threadGetCurHandle();
+}
+#endif
+
+static void test_tls(void)
+{
+    u8 *main_tls = (u8 *)shimGetTls();
+    CHECK(tls_layout_ok(main_tls) && (u8 *)shimGetTls() == main_tls,
+          "TLS da thread principal: %p, alinhada em 0x200, estavel; armGetTls = SHIM_MRS_TPIDRRO; ThreadVars em +0x1E0 (magic 0x%x)",
+          (void *)main_tls, THREADVARS_MAGIC);
+    memset(main_tls, 0xA5, SHIM_TLS_IPC_SIZE);
+    u32 live_before = __atomic_load_n(&g_shim_tls_live, __ATOMIC_ACQUIRE);
+
+    pthread_t th[TLS_THREADS];
+    TlsArg args[TLS_THREADS];
+    pthread_barrier_init(&s_tls_barrier, NULL, TLS_THREADS);
+    int created = 1;
+    for (int k = 0; k < TLS_THREADS; k++) {
+        args[k] = (TlsArg){ .id = k };
+        created &= pthread_create(&th[k], NULL, tls_worker, &args[k]) == 0;
+    }
+    for (int k = 0; k < TLS_THREADS; k++)
+        pthread_join(th[k], NULL);
+    pthread_barrier_destroy(&s_tls_barrier);
+
+    int layout = 1, data = 1, x18 = 1, distinct = 1;
+    for (int k = 0; k < TLS_THREADS; k++) {
+        layout &= args[k].layout_ok;
+        data &= args[k].data_ok;
+        x18 &= args[k].x18_ok;
+        distinct &= args[k].tls != main_tls;
+        for (int j = 0; j < k; j++)
+            distinct &= args[k].tls != args[j].tls;
+    }
+    CHECK(created && layout, "%d pthreads: TLS propria alinhada em 0x200, ThreadVars no lugar", TLS_THREADS);
+    CHECK(distinct, "blocos de TLS distintos entre as %d threads e a principal", TLS_THREADS);
+    CHECK(data, "buffer IPC de cada thread intacto em %d rodadas paralelas (sem interferencia)", TLS_ROUNDS);
+    int main_intact = 1;
+    for (int k = 0; k < SHIM_TLS_IPC_SIZE; k++)
+        main_intact &= main_tls[k] == 0xA5;
+    CHECK(main_intact && (u8 *)shimGetTls() == main_tls, "TLS da thread principal intacta depois das threads");
+    CHECK(__atomic_load_n(&g_shim_tls_live, __ATOMIC_ACQUIRE) == live_before,
+          "pthread_key libera a TLS de cada thread no fim (blocos vivos: %u)", __atomic_load_n(&g_shim_tls_live, __ATOMIC_ACQUIRE));
+#if defined(__aarch64__)
+    CHECK(x18, "x18 (Shadow Call Stack) igual antes e depois da primeira shimGetTls em cada thread");
+#else
+    CHECK(x18, "x18: so se aplica a AArch64 (host x86_64)");
+#endif
+#if defined(__linux__)
+    Thread lt;
+    CHECK(threadCreate(&lt, tls_libnx_thread, NULL, NULL, 0x10000, 0x2C, -2) == 0 && threadStart(&lt) == 0 &&
+          threadWaitForExit(&lt) == 0 && threadClose(&lt) == 0 && s_tls_handle_seen != INVALID_HANDLE &&
+          s_tls_handle_seen == s_tls_handle_self, "thread da libnx: ThreadVars.handle = threadGetCurHandle() (0x%x)", s_tls_handle_seen);
+    CHECK(shimGetThreadVars()->handle == threadGetCurHandle(), "thread principal: ThreadVars.handle = threadGetCurHandle()");
+#endif
+    memset(main_tls, 0, SHIM_TLS_IPC_SIZE);
+}
+
 #if defined(__linux__)
 /* ---------------------------------------------- seqlock do buffer ao vivo: produtor x padUpdate */
 #define LIVE_WRITES 200000
@@ -763,6 +884,7 @@ int main(void)
     test_time();
     test_applet();
     test_framebuffer();
+    test_tls();
 
 #if defined(__linux__)
     test_input_live_threads();

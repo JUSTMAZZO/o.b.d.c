@@ -2873,6 +2873,88 @@ SHIM_API u64 armGetSystemTick(void)
     return armNsToTicks((u64)ts.tv_sec * 1000000000ULL + (u64)ts.tv_nsec);
 }
 
+/* ------------------------------------------------------------------ TLS do Horizon (tpidrro_el0) */
+/*
+ * No Switch, tpidrro_el0 aponta para a regiao de TLS da thread: 0x200 bytes alinhados em 0x200.
+ *   0x000-0x0FF  buffer das mensagens IPC (CMIF/HIPC) que svcSendSyncRequest envia;
+ *   0x100-0x1DF  uso do usuario / sistema;
+ *   0x1E0-0x1FF  ThreadVars da libnx (internal.h): magic, handle da thread, Thread*, reent do newlib e
+ *                tls_tp em +0x1F8 (lido por __aarch64_read_tp).
+ * No Android isso nao pode ser reproduzido no registrador:
+ *   - mrs tpidrro_el0 em EL0 le 0 (o kernel nao publica TLS ali; sonda no A56);
+ *   - tpidr_el0 pertence ao Bionic e x18 e a Shadow Call Stack: nenhum dos dois pode ser reaproveitado.
+ * O shim guarda o bloco guest numa variavel __thread do C (o compilador a acessa via tpidr_el0 do Bionic,
+ * sem x18), criado na primeira consulta da thread e liberado por um pthread_key quando a thread termina.
+ * shimGetTls() / armGetTls() devolvem o endereco que o Horizon poria em tpidrro_el0; SHIM_MRS_TPIDRRO(x)
+ * e a forma para codigo traduzido (no lugar de `mrs x, tpidrro_el0`). O shim nao tem assembly inline:
+ * nenhum registrador e reservado, e x18 continua so do SCS (o NDK compila com -ffixed-x18 quando ativo).
+ * Ainda sem segmento TLS do guest: tls_tp e thread_ptr ficam NULL; o handle e o da thread do HLE (Linux).
+ */
+#include <pthread.h>
+
+#define SHIM_TLS_SIZE     0x200
+#define SHIM_TLS_IPC_SIZE 0x100
+#define THREADVARS_MAGIC  0x21545624   /* "!TV$" */
+
+typedef struct {
+    u32 magic;
+    Handle handle;
+    void *thread_ptr;          /* struct Thread * */
+    void *reent;               /* struct _reent * do newlib (sem uso sobre o Bionic) */
+    void *tls_tp;              /* +0x1F8 */
+} ThreadVars;
+
+_Static_assert(sizeof(ThreadVars) == 0x20, "ThreadVars da libnx tem 0x20 bytes (0x1E0..0x1FF)");
+
+static __thread u8 *t_shim_tls;
+static pthread_key_t g_shim_tls_key;
+static pthread_once_t g_shim_tls_once = PTHREAD_ONCE_INIT;
+static u32 g_shim_tls_live;                /* blocos vivos (teste de vazamento) */
+
+static void shim_tls_free(void *raw)
+{
+    free(raw);
+    __atomic_sub_fetch(&g_shim_tls_live, 1, __ATOMIC_ACQ_REL);
+}
+
+static void shim_tls_key_init(void) { pthread_key_create(&g_shim_tls_key, shim_tls_free); }
+
+/* Endereco da TLS guest da thread atual (o que o Horizon poria em tpidrro_el0); NULL sem memoria. */
+SHIM_API void *shimGetTls(void)
+{
+    if (t_shim_tls)
+        return t_shim_tls;
+    pthread_once(&g_shim_tls_once, shim_tls_key_init);
+    void *raw = calloc(2, SHIM_TLS_SIZE);  /* alinhamento manual: o Bionic nao garante _Alignas(0x200) em __thread */
+    if (!raw)
+        return NULL;
+    u8 *tls = (u8 *)(((uintptr_t)raw + SHIM_TLS_SIZE - 1) & ~(uintptr_t)(SHIM_TLS_SIZE - 1));
+    ThreadVars *tv = (ThreadVars *)(tls + SHIM_TLS_SIZE - sizeof(ThreadVars));
+    tv->magic = THREADVARS_MAGIC;
+#if defined(__linux__)
+    tv->handle = threadGetCurHandle();
+#else
+    tv->handle = INVALID_HANDLE;
+#endif
+    pthread_setspecific(g_shim_tls_key, raw);
+    __atomic_add_fetch(&g_shim_tls_live, 1, __ATOMIC_ACQ_REL);
+    t_shim_tls = tls;
+    return tls;
+}
+
+/* libnx: armGetTls() le tpidrro_el0 (arm/tls.h). */
+SHIM_API void *armGetTls(void) { return shimGetTls(); }
+
+/* libnx: getThreadVars() (internal.h) = ultimos 0x20 bytes da TLS. */
+SHIM_API ThreadVars *shimGetThreadVars(void)
+{
+    u8 *tls = (u8 *)shimGetTls();
+    return tls ? (ThreadVars *)(tls + SHIM_TLS_SIZE - sizeof(ThreadVars)) : NULL;
+}
+
+/* Codigo traduzido: `mrs xN, tpidrro_el0` -> SHIM_MRS_TPIDRRO(xN). */
+#define SHIM_MRS_TPIDRRO(dst) ((dst) = (u64)(uintptr_t)shimGetTls())
+
 /* ------------------------------------------------------------------ time (time:u) */
 /*
  * timeGetCurrentTime devolve segundos POSIX (UTC), como a libnx. Os tres relogios do Horizon (usuario,
