@@ -24,10 +24,10 @@ static void sub_1004f0(void *a0) {
   }
   mutexUnlock((Mutex *)((uintptr_t)(0x117ea8)));
 
-  start = ((uint32_t *)a0)[0];
-  end = ((uint32_t *)a0)[1];
-  buf_x0 = (uint32_t *)(*(uintptr_t *)(uintptr_t)0x117eb8);
-  buf_x19 = (uint32_t *)(*(uintptr_t *)(uintptr_t)0x117ec0);
+  start = *(uint32_t *)a0;
+  end = *(uint32_t *)((uint8_t *)a0 + 4);
+  buf_x0 = *(uint32_t **)(uintptr_t)0x117eb8;
+  buf_x19 = *(uint32_t **)(uintptr_t)0x117ec0;
 
   for (uint32_t frame = 1; frame <= 60; frame++) {
     uint32_t boost = (frame == 30) ? 65 : 1;
@@ -44,8 +44,8 @@ static void sub_1004f0(void *a0) {
   }
 
   mutexLock((Mutex *)((uintptr_t)(0x117ea8)));
-  *(uint64_t *)(uintptr_t)(0x117ec8) += sum;
-  *(uint32_t *)(uintptr_t)(0x117ed0) += 1;
+  __atomic_fetch_add((uint64_t *)(uintptr_t)0x117ec8, sum, __ATOMIC_SEQ_CST);
+  __atomic_fetch_add((uint32_t *)(uintptr_t)0x117ed0, 1, __ATOMIC_SEQ_CST);
   mutexUnlock((Mutex *)((uintptr_t)(0x117ea8)));
 }
 

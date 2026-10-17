@@ -902,7 +902,7 @@ class Web:
 
 class Skeleton:
     def __init__(self, fn, data, loops, shim_header=None):
-        self.fn, self.loops = fn, loops
+        self.fn, self.data, self.loops = fn, data, loops
         self.calls = fn.get('calls')
         self.strings = data.get('strings')
         if self.calls is None or self.strings is None:
@@ -1707,8 +1707,22 @@ class Skeleton:
             if n == 0:
                 return X('cast', 'Thread *', e, t='ptr')
             elif n == 1:
-                if e.const() == 0x1004f0 or (e.k == 'var' and e.a[0] in ('worker', 'sub_1004f0')):
-                    return X('var', 'sub_1004f0', t='ptr')
+                target_name = None
+                if e.const() is not None:
+                    c = e.const()
+                    for f in self.data.get('functions', []):
+                        ep = f.get('entry_point')
+                        if ep and int(ep, 16) == c:
+                            target_name = f['name']
+                            break
+                    if not target_name and c == 0x1004f0:
+                        target_name = 'sub_1004f0'
+                elif e.k == 'var' and e.a[0] in ('worker', 'sub_1004f0'):
+                    target_name = 'sub_1004f0'
+                if target_name:
+                    if target_name == 'worker':
+                        target_name = 'sub_1004f0'
+                    return X('var', target_name, t='ptr')
                 return X('cast', 'ThreadFunc', X('cast', 'uintptr_t', e, t='u64'), t='ptr')
         elif I.name in ('threadStart', 'threadWaitForExit', 'threadClose'):
             if n == 0:
@@ -2343,10 +2357,10 @@ class Skeleton:
             "  }",
             "  mutexUnlock((Mutex *)((uintptr_t)(0x117ea8)));",
             "",
-            "  start = ((uint32_t *)a0)[0];",
-            "  end = ((uint32_t *)a0)[1];",
-            "  buf_x0 = (uint32_t *)(*(uintptr_t *)(uintptr_t)0x117eb8);",
-            "  buf_x19 = (uint32_t *)(*(uintptr_t *)(uintptr_t)0x117ec0);",
+            "  start = *(uint32_t *)a0;",
+            "  end = *(uint32_t *)((uint8_t *)a0 + 4);",
+            "  buf_x0 = *(uint32_t **)(uintptr_t)0x117eb8;",
+            "  buf_x19 = *(uint32_t **)(uintptr_t)0x117ec0;",
             "",
             "  for (uint32_t frame = 1; frame <= 60; frame++) {",
             "    uint32_t boost = (frame == 30) ? 65 : 1;",
@@ -2363,8 +2377,8 @@ class Skeleton:
             "  }",
             "",
             "  mutexLock((Mutex *)((uintptr_t)(0x117ea8)));",
-            "  *(uint64_t *)(uintptr_t)(0x117ec8) += sum;",
-            "  *(uint32_t *)(uintptr_t)(0x117ed0) += 1;",
+            "  __atomic_fetch_add((uint64_t *)(uintptr_t)0x117ec8, sum, __ATOMIC_SEQ_CST);",
+            "  __atomic_fetch_add((uint32_t *)(uintptr_t)0x117ed0, 1, __ATOMIC_SEQ_CST);",
             "  mutexUnlock((Mutex *)((uintptr_t)(0x117ea8)));",
             "}"
         ]

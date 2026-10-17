@@ -52,6 +52,22 @@ class TestStrictCAndBss(unittest.TestCase):
         self.assertIn('threadWaitForExit((Thread *)(b19))', text)
         self.assertIn('threadClose((Thread *)', text)
 
+    def test_worker_func_emission(self):
+        """Verifica se sub_1004f0 e emitida com range [start, end), buffers BSS e operacoes atomicas."""
+        d = nro_tool.generate_disasm_json('horizon_rt/hb_threads/hb_threads.nro', elf_path='horizon_rt/hb_threads/hb_threads.elf')
+        fn = next(f for f in d['functions'] if f['name'] == 'main')
+        text = cfg_skeleton.build(fn, d, [])
+        self.assertIn('static void sub_1004f0(void *a0) {', text)
+        self.assertIn('start = *(uint32_t *)a0;', text)
+        self.assertIn('end = *(uint32_t *)((uint8_t *)a0 + 4);', text)
+        self.assertIn('buf_x0 = *(uint32_t **)(uintptr_t)0x117eb8;', text)
+        self.assertIn('buf_x19 = *(uint32_t **)(uintptr_t)0x117ec0;', text)
+        self.assertIn('__atomic_fetch_add((uint64_t *)(uintptr_t)0x117ec8, sum, __ATOMIC_SEQ_CST);', text)
+        self.assertIn('__atomic_fetch_add((uint32_t *)(uintptr_t)0x117ed0, 1, __ATOMIC_SEQ_CST);', text)
+        self.assertIn('*(uint32_t *)(uintptr_t)0x117ed0', text)
+        self.assertIn('*(uint64_t *)(uintptr_t)0x117ec8', text)
+        self.assertIn('*(uint32_t *)((uint8_t *)(*(uintptr_t *)(uintptr_t)0x117ec0) + 399996)', text)
+
     def test_ndk_compilation_hb_threads_and_services(self):
         """Compila ambos reconstructed_hb_threads.c e reconstructed_hb_services.c com NDK r28 Clang -Werror."""
         ndk_clang = r"C:\Users\user\AppData\Local\Android\Sdk\ndk\28.2.13676358\toolchains\llvm\prebuilt\windows-x86_64\bin\aarch64-linux-android35-clang.cmd"
@@ -65,3 +81,4 @@ class TestStrictCAndBss(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
