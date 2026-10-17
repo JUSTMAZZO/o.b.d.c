@@ -931,24 +931,80 @@ SHIM_API Result svcSendSyncRequest(Handle session)
     return 0;
 }
 
-SHIM_API Result threadCreate(Thread *t, ThreadFunc entry, void *arg, void *stack_mem, size_t stack_sz, int prio, int cpuid)
-{
-    (void)t; (void)entry; (void)arg; (void)stack_mem; (void)stack_sz; (void)prio; (void)cpuid;
+typedef struct {
+    ThreadFunc entry;
+    void *arg;
+    HANDLE hThread;
+} WinShimThread;
+
+static WinShimThread g_win_threads[64];
+static LONG g_win_th_idx = 0;
+
+static DWORD WINAPI win32_thread_trampoline(LPVOID p) {
+    WinShimThread *slot = (WinShimThread *)p;
+    if (slot && slot->entry)
+        slot->entry(slot->arg);
     return 0;
 }
-SHIM_API Result threadStart(Thread *t) { (void)t; return 0; }
-SHIM_API Result threadWaitForExit(Thread *t) { (void)t; return 0; }
-SHIM_API Result threadClose(Thread *t) { (void)t; return 0; }
+
+SHIM_API Result threadCreate(Thread *t, ThreadFunc entry, void *arg, void *stack_mem, size_t stack_sz, int prio, int cpuid)
+{
+    (void)stack_mem; (void)stack_sz; (void)prio; (void)cpuid;
+    LONG idx = InterlockedIncrement(&g_win_th_idx) - 1;
+    if (idx < 0 || idx >= 64) return 1;
+    g_win_threads[idx].entry = entry;
+    g_win_threads[idx].arg = arg;
+    g_win_threads[idx].hThread = NULL;
+    if (t) t->handle = (Handle)(idx + 1);
+    return 0;
+}
+
+SHIM_API Result threadStart(Thread *t) {
+    if (!t || t->handle == 0 || t->handle > 64) return 1;
+    WinShimThread *slot = &g_win_threads[t->handle - 1];
+    slot->hThread = CreateThread(NULL, 0, win32_thread_trampoline, slot, 0, NULL);
+    return slot->hThread ? 0 : 1;
+}
+
+SHIM_API Result threadWaitForExit(Thread *t) {
+    if (!t || t->handle == 0 || t->handle > 64) return 1;
+    WinShimThread *slot = &g_win_threads[t->handle - 1];
+    if (slot->hThread) {
+        WaitForSingleObject(slot->hThread, INFINITE);
+    }
+    return 0;
+}
+
+SHIM_API Result threadClose(Thread *t) {
+    if (!t || t->handle == 0 || t->handle > 64) return 1;
+    WinShimThread *slot = &g_win_threads[t->handle - 1];
+    if (slot->hThread) {
+        CloseHandle(slot->hThread);
+        slot->hThread = NULL;
+    }
+    return 0;
+}
 
 SHIM_API void mutexInit(Mutex *m) { if (m) *m = 0; }
-SHIM_API void mutexLock(Mutex *m) { (void)m; }
-SHIM_API bool mutexTryLock(Mutex *m) { (void)m; return true; }
-SHIM_API void mutexUnlock(Mutex *m) { (void)m; }
+SHIM_API void mutexLock(Mutex *m) {
+    if (!m) return;
+    while (InterlockedCompareExchange((volatile LONG *)m, 1, 0) != 0) {
+        Sleep(0);
+    }
+}
+SHIM_API bool mutexTryLock(Mutex *m) {
+    if (!m) return true;
+    return InterlockedCompareExchange((volatile LONG *)m, 1, 0) == 0;
+}
+SHIM_API void mutexUnlock(Mutex *m) {
+    if (!m) return;
+    InterlockedExchange((volatile LONG *)m, 0);
+}
 
 SHIM_API void rmutexInit(RMutex *m) { if (m) { m->lock = 0; m->counter = 0; } }
-SHIM_API void rmutexLock(RMutex *m) { (void)m; }
-SHIM_API bool rmutexTryLock(RMutex *m) { (void)m; return true; }
-SHIM_API void rmutexUnlock(RMutex *m) { (void)m; }
+SHIM_API void rmutexLock(RMutex *m) { if (m) mutexLock(&m->lock); }
+SHIM_API bool rmutexTryLock(RMutex *m) { return m ? mutexTryLock(&m->lock) : true; }
+SHIM_API void rmutexUnlock(RMutex *m) { if (m) mutexUnlock(&m->lock); }
 
 SHIM_API void svcSleepThread(s64 nano)
 {
@@ -968,8 +1024,17 @@ SHIM_API Result svcWaitProcessWideKeyAtomic(u32 *key, u32 *tag_location, u32 sel
     return 0;
 }
 SHIM_API void condvarInit(CondVar *c) { if (c) *c = 0; }
-SHIM_API Result condvarWait(CondVar *c, Mutex *m) { (void)c; (void)m; return 0; }
-SHIM_API Result condvarWaitTimeout(CondVar *c, Mutex *m, u64 timeout) { (void)c; (void)m; (void)timeout; return 0; }
+SHIM_API Result condvarWait(CondVar *c, Mutex *m) {
+    (void)c;
+    if (m) mutexUnlock(m);
+    Sleep(1);
+    if (m) mutexLock(m);
+    return 0;
+}
+SHIM_API Result condvarWaitTimeout(CondVar *c, Mutex *m, u64 timeout) {
+    (void)timeout;
+    return condvarWait(c, m);
+}
 SHIM_API Result condvarWake(CondVar *c, int num) { (void)c; (void)num; return 0; }
 SHIM_API Result condvarWakeOne(CondVar *c) { (void)c; return 0; }
 SHIM_API Result condvarWakeAll(CondVar *c) { (void)c; return 0; }

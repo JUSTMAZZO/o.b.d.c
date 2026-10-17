@@ -45,7 +45,7 @@ class TestStrictCAndBss(unittest.TestCase):
         fn = next(f for f in d['functions'] if f['name'] == 'main')
         sk = cfg_skeleton.Skeleton(fn, d, [], shim_header='switch_hle_shim.h')
         text = '\n'.join(sk.function_text())
-        self.assertIn('threadCreate((Thread *)(b21), (ThreadFunc)((uintptr_t)(0x1004f0))', text)
+        self.assertIn('threadCreate((Thread *)(b21), sub_1004f0', text)
         self.assertIn('threadStart((Thread *)(b21))', text)
         self.assertIn('mutexLock((Mutex *)((uintptr_t)(0x117ea8)))', text)
         self.assertIn('svcSignalProcessWideKey((u32 *)((uintptr_t)(0x117eb0))', text)

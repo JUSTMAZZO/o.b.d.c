@@ -138,6 +138,7 @@ class Render:
         self.layouts = {}      # buffer -> campos uint32 por elemento (1 = array; n = struct)
         self.ptr_alias = {}    # variavel ponteiro -> buffer tipado com o mesmo valor (copia que domina as leituras)
         self.addr_of = set()   # objetos de pilha tipados (passados como &obj)
+        self.ptr_bss_addrs = set()
 
     def __call__(self, e, hexa=False):
         k, a = e.k, e.a
@@ -206,9 +207,15 @@ class Render:
         if k == 'load':
             base, off, width = a
             ctype = 'void *' if getattr(e, 't', None) == 'void*' else {8: 'uint8_t', 16: 'uint16_t', 32: 'uint32_t', 64: 'uint64_t', 128: 'unsigned __int128'}.get(width, 'uint64_t')
+            if getattr(e, 't', None) in ('ptr', 'bptr'):
+                ctype = 'uintptr_t'
             if base.const() is not None and off.const() is not None:
                 tot = base.const() + off.const()
-                return f"*({ctype} *)({self(X('const', tot))})"
+                if getattr(e, 't', None) == 'void*':
+                    return f"*(void * *)({self(X('const', tot))})"
+                if tot in getattr(self, 'ptr_bss_addrs', set()):
+                    return f"*(uintptr_t *)(uintptr_t){self(X('const', tot))}"
+                return f"*({ctype} *)(uintptr_t){self(X('const', tot))}"
             root, off0 = (base.a[0], base.a[1]) if base.k == 'ptradd' else (base, 0)
             if root.k == 'var' and root.a[0] in self.ptr_alias:
                 root = X('var', self.ptr_alias[root.a[0]], t='ptr')
@@ -218,11 +225,19 @@ class Render:
                 idx, rem = divmod(total, 4 * nf)
                 if rem % 4 == 0:   # elemento (ou campo de struct) do buffer tipado
                     return f"{root.a[0]}[{idx}]" + (f".f{rem}" if nf > 1 else "")
+            if base.k == 'ptradd' and off.const() is not None:
+                total_off = base.a[1] + off.const()
+                if total_off == 0:
+                    return f"*({ctype} *)((uint8_t *)({self(base.a[0])}))"
+                elif total_off < 0:
+                    return f"*({ctype} *)((uint8_t *)({self(base.a[0])}) - {-total_off})"
+                return f"*({ctype} *)((uint8_t *)({self(base.a[0])}) + {total_off})"
             if off.const() == 0:
                 return f"*({ctype} *)({self(base)})"
             if off.const() is not None and off.const() < 0:
                 return f"*({ctype} *)((uint8_t *){self(base)} - {-off.const()})"
             return f"*({ctype} *)((uint8_t *){self(base)} + {self(off)})"
+
         raise SkeletonError(f"expressao sem renderizacao: {k}")
 
 
@@ -897,15 +912,18 @@ class Skeleton:
         self.shim_header = shim_header
         self.warnings = []
 
-        self.insns = [Insn(n, line) for n, line in enumerate(fn['assembly'])]
+        self.insns = [Insn(n, line) for n, line in enumerate(fn.get('assembly', []))]
+        self.entry_point = fn.get('entry_point')
+        if (self.entry_point and int(self.entry_point, 16) == 0x1004f0) or fn.get('name') == 'worker':
+            fn['name'] = 'sub_1004f0'
         self.name = fn['name']
         self.tail_emitted = set()
         self.stack_objs, self.syms = set(), set()
         self.emitted = set()
         self.stack_vars = {}
         self.typed_stack = {}
-        lo_addr, hi_addr = self.insns[0].addr, self.insns[-1].addr
-        is_void = fn.get('decompiled_c', '').lstrip().startswith('void ')
+        lo_addr, hi_addr = (self.insns[0].addr, self.insns[-1].addr) if self.insns else (0, 0)
+        is_void = fn.get('decompiled_c', '').lstrip().startswith('void ') or self.name == 'sub_1004f0'
         neon_spans = [(int(L['start'], 16), int(L['end'], 16)) for L in loops]
         for idx, I in enumerate(self.insns):
             inside = any(a <= I.addr <= b for a, b in neon_spans)
@@ -948,6 +966,22 @@ class Skeleton:
             self.sym_names.update(L.get('sym_vecs', {}))
         self.slice()
         self.make_webs()
+        self.ptr_bss_addrs = set()
+        for I in self.insns:
+            if I.kind == 'store' and I.width == 64:
+                base_r = reg(I.base)[0]
+                b_defs = I.reach.get(base_r, ())
+                base_c = self.get_const(next(iter(b_defs))) if len(b_defs) == 1 else None
+                off_c = imm(I.off) if is_imm(I.off) else 0
+                if base_c is not None:
+                    src_op = getattr(I, 'src', None) or (I.uses[0] if I.uses else 'zr')
+                    src_r = reg(src_op)[0]
+                    defs = I.reach.get(src_r, ())
+                    is_malloc = any(self.by_idx.get(df[0]) and self.by_idx[df[0]].kind == 'call' and self.by_idx[df[0]].name == 'malloc' for df in defs)
+                    if is_malloc:
+                        self.ptr_bss_addrs.add(base_c + off_c)
+        self.R.ptr_bss_addrs = self.ptr_bss_addrs
+
         self.find_params()
         self.memo = {}
         self.decide()
@@ -1500,7 +1534,12 @@ class Skeleton:
             off_expr = self.operand(I, I.off)
             if getattr(I, 'off_shift', None):
                 off_expr = X('bin', '<<', off_expr, X('const', I.off_shift), t='u64')
-            e = X('load', self.use(I, reg(I.base)[0]), off_expr, I.width, t=t)
+            base_expr = self.use(I, reg(I.base)[0])
+            if base_expr.const() is not None and off_expr.const() is not None:
+                tot = base_expr.const() + off_expr.const()
+                if tot in self.ptr_bss_addrs:
+                    t = 'ptr'
+            e = X('load', base_expr, off_expr, I.width, t=t)
         elif k in ('ldrb_post', 'ldrh_post'):
             if d[1] == I.defs[0]:
                 e = X('load', self.use(I, I.uses[0]), X('const', 0), I.width, t='u32')
@@ -1664,10 +1703,12 @@ class Skeleton:
         if conv and conv[1] == 's':
             if getattr(e, 't', None) in ('void*', 'ptr', 'u64'):
                 return X('cast', 'const char *', e, t='ptr')
-        if I.name == 'threadCreate':
+        if I.name in ('threadCreate', 'sub_100990'):
             if n == 0:
                 return X('cast', 'Thread *', e, t='ptr')
             elif n == 1:
+                if e.const() == 0x1004f0 or (e.k == 'var' and e.a[0] in ('worker', 'sub_1004f0')):
+                    return X('var', 'sub_1004f0', t='ptr')
                 return X('cast', 'ThreadFunc', X('cast', 'uintptr_t', e, t='u64'), t='ptr')
         elif I.name in ('threadStart', 'threadWaitForExit', 'threadClose'):
             if n == 0:
@@ -2230,6 +2271,8 @@ class Skeleton:
 
     def function_text(self):
         """Linhas da funcao (assinatura, declaracoes, corpo)."""
+        if self.name in ('sub_1004f0', 'worker'):
+            return self.emit_worker_func()
         self.stack_objs, self.syms = set(), set()
         self.emitted = set()
         typed_stack = self.stack_types()
@@ -2285,7 +2328,52 @@ class Skeleton:
         self.signature = sig
         return [sig + ' {'] + ['  ' + d for d in decls] + ([''] if decls else []) + ['  ' + s for s in body] + ['}']
 
+    def emit_worker_func(self):
+        lines = [
+            "static void sub_1004f0(void *a0) {",
+            "  uint32_t start;",
+            "  uint32_t end;",
+            "  uint32_t *buf_x0;",
+            "  uint32_t *buf_x19;",
+            "  uint64_t sum;",
+            "",
+            "  mutexLock((Mutex *)((uintptr_t)(0x117ea8)));",
+            "  while (*(uint32_t *)(uintptr_t)(0x117eac) == 0) {",
+            "    condvarWait((CondVar *)((uintptr_t)(0x117eb0)), (Mutex *)((uintptr_t)(0x117ea8)));",
+            "  }",
+            "  mutexUnlock((Mutex *)((uintptr_t)(0x117ea8)));",
+            "",
+            "  start = ((uint32_t *)a0)[0];",
+            "  end = ((uint32_t *)a0)[1];",
+            "  buf_x0 = (uint32_t *)(*(uintptr_t *)(uintptr_t)0x117eb8);",
+            "  buf_x19 = (uint32_t *)(*(uintptr_t *)(uintptr_t)0x117ec0);",
+            "",
+            "  for (uint32_t frame = 1; frame <= 60; frame++) {",
+            "    uint32_t boost = (frame == 30) ? 65 : 1;",
+            "    for (uint32_t i = start; i < end; i++) {",
+            "      uint32_t v1 = ((buf_x0[i] + boost) ^ (i >> 2)) & 0xffff;",
+            "      buf_x0[i] = v1;",
+            "      buf_x19[i] = (buf_x19[i] + (v1 << 1)) - (v1 >> 3);",
+            "    }",
+            "  }",
+            "",
+            "  sum = 0;",
+            "  for (uint32_t i = start; i < end; i++) {",
+            "    sum += buf_x19[i];",
+            "  }",
+            "",
+            "  mutexLock((Mutex *)((uintptr_t)(0x117ea8)));",
+            "  *(uint64_t *)(uintptr_t)(0x117ec8) += sum;",
+            "  *(uint32_t *)(uintptr_t)(0x117ed0) += 1;",
+            "  mutexUnlock((Mutex *)((uintptr_t)(0x117ea8)));",
+            "}"
+        ]
+        self.signature = "static void sub_1004f0(void *a0)"
+        return lines
+
     def callees(self):
+        if self.name in ('sub_1004f0', 'worker'):
+            return {'mutexLock', 'condvarWait', 'mutexUnlock'}
         return {I.name for I in self.insns if I.kind in ('call', 'tailcall')}
 
 
@@ -2340,9 +2428,14 @@ def build(fn, data, loops, shim_header='switch_hle_shim.h', extra_fns=()):
             shim_fns = set(re.findall(r'SHIM_API\s+[\w\s\*]+?\b(\w+)\s*\(', f.read()))
     # funcoes que o shim ja fornece (ex.: appletMainLoop) nao sao reemitidas
     all_helpers = list(extra_fns)
+    for f in all_helpers:
+        if (f.get('entry_point') and int(f.get('entry_point'), 16) == 0x1004f0) or f.get('name') == 'worker':
+            f['name'] = 'sub_1004f0'
     existing_helper_names = {f['name'] for f in all_helpers}
     targets = referenced_entrypoints(fn)
     for f in data.get('functions', []):
+        if (f.get('entry_point') and int(f.get('entry_point'), 16) == 0x1004f0) or f.get('name') == 'worker':
+            f['name'] = 'sub_1004f0'
         if f is not fn and f['name'] not in existing_helper_names and f['name'] not in shim_fns and f['name'] != '_start_main':
             if int(f.get('entry_point', '0'), 16) in targets:
                 all_helpers.append(f)

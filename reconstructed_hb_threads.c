@@ -11,6 +11,44 @@ static uint64_t out(void *a0) {
   return svcOutputDebugString(p19, strlen(a0));
 }
 
+static void sub_1004f0(void *a0) {
+  uint32_t start;
+  uint32_t end;
+  uint32_t *buf_x0;
+  uint32_t *buf_x19;
+  uint64_t sum;
+
+  mutexLock((Mutex *)((uintptr_t)(0x117ea8)));
+  while (*(uint32_t *)(uintptr_t)(0x117eac) == 0) {
+    condvarWait((CondVar *)((uintptr_t)(0x117eb0)), (Mutex *)((uintptr_t)(0x117ea8)));
+  }
+  mutexUnlock((Mutex *)((uintptr_t)(0x117ea8)));
+
+  start = ((uint32_t *)a0)[0];
+  end = ((uint32_t *)a0)[1];
+  buf_x0 = (uint32_t *)(*(uintptr_t *)(uintptr_t)0x117eb8);
+  buf_x19 = (uint32_t *)(*(uintptr_t *)(uintptr_t)0x117ec0);
+
+  for (uint32_t frame = 1; frame <= 60; frame++) {
+    uint32_t boost = (frame == 30) ? 65 : 1;
+    for (uint32_t i = start; i < end; i++) {
+      uint32_t v1 = ((buf_x0[i] + boost) ^ (i >> 2)) & 0xffff;
+      buf_x0[i] = v1;
+      buf_x19[i] = (buf_x19[i] + (v1 << 1)) - (v1 >> 3);
+    }
+  }
+
+  sum = 0;
+  for (uint32_t i = start; i < end; i++) {
+    sum += buf_x19[i];
+  }
+
+  mutexLock((Mutex *)((uintptr_t)(0x117ea8)));
+  *(uint64_t *)(uintptr_t)(0x117ec8) += sum;
+  *(uint32_t *)(uintptr_t)(0x117ed0) += 1;
+  mutexUnlock((Mutex *)((uintptr_t)(0x117ea8)));
+}
+
 int main(void) {
   uint8_t *b19;
   uint8_t *b20;
@@ -54,7 +92,7 @@ int main(void) {
     w24 = (w0 + 25000);
     *(uint32_t *)((uint8_t *)b20) = w0;
     *(uint32_t *)((uint8_t *)b20 + 4) = ((w22 != 3) ? w24 : 100000);
-    if (threadCreate((Thread *)(b21), (ThreadFunc)((uintptr_t)(0x1004f0)), b20, 0, 65536, 44, 0xfffffffe) != 0) break;
+    if (threadCreate((Thread *)(b21), sub_1004f0, b20, 0, 65536, 44, 0xfffffffe) != 0) break;
     if (threadStart((Thread *)(b21)) != 0) break;
     w22 = (w22 + 1);
     w0 = w24;
@@ -79,11 +117,11 @@ int main(void) {
   x19 = armGetSystemTick();
   snprintf(sp_0x80, 96, "[+] Frames: %u\n", (unsigned int)(60));
   out(sp_0x80);
-  snprintf(sp_0x80, 96, "[+] Threads: %u\n", (unsigned int)(*(uint32_t *)(0x117ed0)));
+  snprintf(sp_0x80, 96, "[+] Threads: %u\n", (unsigned int)(*(uint32_t *)(uintptr_t)0x117ed0));
   out(sp_0x80);
-  snprintf(sp_0x80, 96, "[+] Checksum: %llu\n", (unsigned long long)(*(uint64_t *)(0x117ec8)));
+  snprintf(sp_0x80, 96, "[+] Checksum: %llu\n", (unsigned long long)(*(uint64_t *)(uintptr_t)0x117ec8));
   out(sp_0x80);
-  snprintf(sp_0x80, 96, "[+] Ultima particula: %u\n", (unsigned int)(*(uint32_t *)((uint8_t *)(*(uint64_t *)(0x117ec0) + 393216) + 6780)));
+  snprintf(sp_0x80, 96, "[+] Ultima particula: %u\n", (unsigned int)(*(uint32_t *)((uint8_t *)(*(uintptr_t *)(uintptr_t)0x117ec0) + 399996)));
   out(sp_0x80);
   snprintf(sp_0x80, 96, "[+] Tempo (60 frames): %.4f ms\n", ((double)(int64_t)(((uint64_t)(((unsigned __int128)(((x19 - x21) * 625)) * (0xaaaaaaaaaaaaaaab)) >> 64) >> 3)) / 1000000.0));
   out(sp_0x80);

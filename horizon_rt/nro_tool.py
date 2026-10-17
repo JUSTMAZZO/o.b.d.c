@@ -633,6 +633,35 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
     # 9. Inclusao transitiva de funcoes auxiliares chamadas pelo main
     visited_addrs = {main_addr}
     queue = list(main_fn['calls'].keys())
+    last_adrp = {}
+    for line in main_fn.get('assembly', []):
+        parts = line.split(': ', 1)
+        if len(parts) < 2:
+            continue
+        tokens = parts[1].strip().split(None, 1)
+        mn = tokens[0].lower()
+        ops = [o.strip() for o in tokens[1].split(',')] if len(tokens) > 1 else []
+        if mn == 'adr' and len(ops) >= 2 and ops[1].startswith('0x'):
+            queue.append(ops[1])
+        elif mn == 'adrp' and len(ops) >= 2:
+            reg = ops[0].lower()
+            try:
+                last_adrp[reg] = int(ops[1].lstrip('#'), 16)
+            except ValueError:
+                pass
+        elif mn == 'add' and len(ops) >= 3:
+            dst = ops[0].lower()
+            src = ops[1].lower()
+            if src in last_adrp and ops[2].startswith('#'):
+                try:
+                    queue.append(hex(last_adrp[src] + int(ops[2].lstrip('#'), 0)))
+                except ValueError:
+                    pass
+            last_adrp.pop(dst, None)
+        else:
+            if ops:
+                last_adrp.pop(ops[0].lower(), None)
+
     while queue:
         c_addr_str = queue.pop(0)
         try:
