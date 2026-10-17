@@ -205,7 +205,7 @@ class Render:
             return f"/* bits->double */ {self(a[0])}"
         if k == 'load':
             base, off, width = a
-            ctype = {8: 'uint8_t', 16: 'uint16_t', 32: 'uint32_t', 64: 'uint64_t', 128: 'unsigned __int128'}.get(width, 'uint64_t')
+            ctype = 'void *' if getattr(e, 't', None) == 'void*' else {8: 'uint8_t', 16: 'uint16_t', 32: 'uint32_t', 64: 'uint64_t', 128: 'unsigned __int128'}.get(width, 'uint64_t')
             if base.const() is not None and off.const() is not None:
                 tot = base.const() + off.const()
                 return f"*({ctype} *)({self(X('const', tot))})"
@@ -903,6 +903,7 @@ class Skeleton:
         self.stack_objs, self.syms = set(), set()
         self.emitted = set()
         self.stack_vars = {}
+        self.typed_stack = {}
         lo_addr, hi_addr = self.insns[0].addr, self.insns[-1].addr
         is_void = fn.get('decompiled_c', '').lstrip().startswith('void ')
         neon_spans = [(int(L['start'], 16), int(L['end'], 16)) for L in loops]
@@ -985,7 +986,15 @@ class Skeleton:
                 seen.add(id(v))
                 for U, r in v.uses:
                     if U.kind in ('call', 'tailcall'):
-                        self.ptr_params.add(id(w))
+                        is_ptr = True
+                        if hasattr(U, 'args') and r in U.args:
+                            arg_idx = U.args.index(r)
+                            if hasattr(U, 'convs') and arg_idx < len(U.convs) and U.convs[arg_idx] is not None:
+                                _, c = U.convs[arg_idx]
+                                if c in 'diouxX':
+                                    is_ptr = False
+                        if is_ptr:
+                            self.ptr_params.add(id(w))
                     elif U.kind == 'copy':
                         nxt = self.def_web.get((U.idx, U.defs[0]))
                         if nxt is not None:
@@ -1298,7 +1307,12 @@ class Skeleton:
                     w.ctype = 'AppletHookType'
                     w.name = 'hook'
                 else:
-                    w.t = 'void*' if id(w) in self.ptr_params else 'u64'
+                    if id(w) in self.ptr_params:
+                        w.t = 'void*'
+                    elif w.uses and all(getattr(U, 'width', 64) == 32 for U, _ in w.uses):
+                        w.t = 'u32'
+                    else:
+                        w.t = 'u64'
                     w.ctype = CTYPE[w.t]
                     w.name = f"a{w.reg[1:]}"
             else:
@@ -1512,7 +1526,8 @@ class Skeleton:
                 ctype = 'uint32_t' if sz == 4 else 'uint64_t'
                 if stack_base is not None:
                     delta = off - stack_base
-                    e = X('var', f"*({ctype} *)((uint8_t *)sp_{stack_base:#x} + {delta})", t=t)
+                    addr_prefix = f"&sp_{stack_base:#x}" if stack_base in getattr(self, 'typed_stack', {}) else f"sp_{stack_base:#x}"
+                    e = X('var', f"*({ctype} *)((uint8_t *){addr_prefix} + {delta})", t=t)
                 else:
                     e = X('var', f"sp_{off:#x}", t=t)
         elif k == 'call':
@@ -1646,6 +1661,34 @@ class Skeleton:
             unsigned = conv[1] in 'ouxX' and ctype in ('long long', 'long', 'int')
             cast = f"{'unsigned ' if unsigned else ''}{ctype}"
             return X('cast', cast, e, t=e.t)
+        if conv and conv[1] == 's':
+            if getattr(e, 't', None) in ('void*', 'ptr', 'u64'):
+                return X('cast', 'const char *', e, t='ptr')
+        if I.name == 'threadCreate':
+            if n == 0:
+                return X('cast', 'Thread *', e, t='ptr')
+            elif n == 1:
+                return X('cast', 'ThreadFunc', X('cast', 'uintptr_t', e, t='u64'), t='ptr')
+        elif I.name in ('threadStart', 'threadWaitForExit', 'threadClose'):
+            if n == 0:
+                return X('cast', 'Thread *', e, t='ptr')
+        elif I.name in ('mutexLock', 'mutexUnlock'):
+            if n == 0:
+                if e.const() is not None:
+                    return X('cast', 'Mutex *', X('cast', 'uintptr_t', e, t='u64'), t='ptr')
+                return X('cast', 'Mutex *', e, t='ptr')
+        elif I.name == 'svcSignalProcessWideKey':
+            if n == 0:
+                if e.const() is not None:
+                    return X('cast', 'u32 *', X('cast', 'uintptr_t', e, t='u64'), t='ptr')
+                return X('cast', 'u32 *', e, t='ptr')
+        elif I.name == 'free':
+            if n == 0:
+                if e.k == 'load':
+                    e.t = 'void*'
+                    return e
+                if getattr(e, 't', None) not in ('void*', 'ptr', 'bptr'):
+                    return X('cast', 'void *', e, t='ptr')
         return e
 
     def cond_flags(self, I, cc):
@@ -1733,7 +1776,18 @@ class Skeleton:
                 base_expr = self.use(I, reg(I.base)[0])
                 if base_expr.const() is not None and off_expr.const() is not None:
                     addr_str = self.render(X('const', base_expr.const() + off_expr.const()))
-                    out.append(f"*({ctype} *)({addr_str}) = {self.render(self.operand(I, src_op))};")
+                    src_val = self.operand(I, src_op)
+                    src_r, _ = reg(src_op)
+                    src_web = self.use_web.get((I.idx, src_r)) if src_r else None
+                    is_ptr_store = ((src_web and src_web.t in ('ptr', 'bptr', 'void*')) or
+                                    src_val.t in ('ptr', 'bptr', 'void*') or
+                                    (src_web and src_web.name and (src_web.name.startswith('buf_') or
+                                                                  src_web.name.startswith('p') or
+                                                                  src_web.name.startswith('b'))))
+                    if is_ptr_store:
+                        out.append(f"*(uintptr_t *)({addr_str}) = (uintptr_t){self.render(src_val)};")
+                    else:
+                        out.append(f"*({ctype} *)({addr_str}) = {self.render(src_val)};")
                 elif off_expr.const() == 0:
                     out.append(f"*({ctype} *)({self.render(base_expr)}) = {self.render(self.operand(I, src_op))};")
                 elif off_expr.const() is not None and off_expr.const() < 0:
@@ -1755,8 +1809,14 @@ class Skeleton:
                 if base_expr.const() is not None and off_expr.const() is not None:
                     addr0 = self.render(X('const', base_expr.const() + off_expr.const()))
                     addr1 = self.render(X('const', base_expr.const() + off_expr.const() + sz))
-                    out.append(f"*({ctype} *)({addr0}) = {self.render(src0)};")
-                    out.append(f"*({ctype} *)({addr1}) = {self.render(src1)};")
+                    r0, _ = reg(I.srcs[0])
+                    w0 = self.use_web.get((I.idx, r0)) if r0 else None
+                    is_ptr0 = (w0 and w0.t in ('ptr', 'bptr', 'void*')) or src0.t in ('ptr', 'bptr', 'void*') or (w0 and w0.name and (w0.name.startswith('buf_') or w0.name.startswith('p') or w0.name.startswith('b')))
+                    r1, _ = reg(I.srcs[1])
+                    w1 = self.use_web.get((I.idx, r1)) if r1 else None
+                    is_ptr1 = (w1 and w1.t in ('ptr', 'bptr', 'void*')) or src1.t in ('ptr', 'bptr', 'void*') or (w1 and w1.name and (w1.name.startswith('buf_') or w1.name.startswith('p') or w1.name.startswith('b')))
+                    out.append(f"*(uintptr_t *)({addr0}) = (uintptr_t){self.render(src0)};" if is_ptr0 else f"*({ctype} *)({addr0}) = {self.render(src0)};")
+                    out.append(f"*(uintptr_t *)({addr1}) = (uintptr_t){self.render(src1)};" if is_ptr1 else f"*({ctype} *)({addr1}) = {self.render(src1)};")
                 elif off_expr.const() == 0:
                     out.append(f"*({ctype} *)((uint8_t *){self.render(base_expr)}) = {self.render(src0)};")
                     out.append(f"*({ctype} *)((uint8_t *){self.render(base_expr)} + {sz}) = {self.render(src1)};")
@@ -2173,6 +2233,7 @@ class Skeleton:
         self.stack_objs, self.syms = set(), set()
         self.emitted = set()
         typed_stack = self.stack_types()
+        self.typed_stack = typed_stack
         self.R.addr_of = {f"sp_{off:#x}" for off in typed_stack} | {f"sp_{off:#x}" for off in self.stack_vars}
         # p0 = malloc(...); buf = p0; ... leituras via p0 + k  ->  leem buf[i].fN
         load_blocks = {I.block for I in self.insns if I.kind == 'load' and I.idx in self.live}
