@@ -7,7 +7,7 @@
 
 ![Endgame](https://img.shields.io/badge/Endgame-74%25-orange?style=for-the-badge) ![Fase atual](https://img.shields.io/badge/Fase%20atual-3%20%E2%80%93%20Em%20andamento-yellow?style=for-the-badge) ![ISA](https://img.shields.io/badge/ISA-AArch64%20%E2%86%92%20AArch64-informational?style=for-the-badge&logo=arm&logoColor=white) ![Alvo](https://img.shields.io/badge/Alvo-Galaxy%20A56%20%C2%B7%20Exynos%201580-1428A0?style=for-the-badge&logo=samsung&logoColor=white)
 
-![Validação](https://img.shields.io/badge/Valida%C3%A7%C3%A3o-75%2F75%20OK-brightgreen?style=for-the-badge) ![Benchmarks](https://img.shields.io/badge/Benchmarks-10%20no%20A56-teal?style=for-the-badge&logo=android&logoColor=white) ![Instruções](https://img.shields.io/badge/Instru%C3%A7%C3%B5es-24%20suportadas-blueviolet?style=for-the-badge) ![LLM](https://img.shields.io/badge/LLM-qwen2.5--coder%207b-black?style=for-the-badge&logo=ollama&logoColor=white) ![Atualizado](https://img.shields.io/badge/Atualizado-2026--10--16-lightgrey?style=for-the-badge) [![Licença](https://img.shields.io/badge/Licen%C3%A7a-MIT-green?style=for-the-badge)](LICENSE)
+![Validação](https://img.shields.io/badge/Valida%C3%A7%C3%A3o-75%2F75%20OK-brightgreen?style=for-the-badge) ![Benchmarks](https://img.shields.io/badge/Benchmarks-10%20no%20A56-teal?style=for-the-badge&logo=android&logoColor=white) ![Instruções](https://img.shields.io/badge/Instru%C3%A7%C3%B5es-25%20suportadas-blueviolet?style=for-the-badge) ![LLM](https://img.shields.io/badge/LLM-qwen2.5--coder%207b-black?style=for-the-badge&logo=ollama&logoColor=white) ![Atualizado](https://img.shields.io/badge/Atualizado-2026--10--16-lightgrey?style=for-the-badge) [![Licença](https://img.shields.io/badge/Licen%C3%A7a-MIT-green?style=for-the-badge)](LICENSE)
 
 </div>
 
@@ -37,7 +37,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | Módulo | Status | Progresso | O que faz hoje | Próximo |
 |---|---|---|---|---|
 | **Ghidra Extractor**<br>`ExtractMain.java` | ✅ Concluído | `████████░░ 80%` | C descompilado + ASM AArch64 + .rodata + isolamento de loops + nomes dos alvos de bl e strings carregadas (formatos de printf) + ponteiros de função referenciados por endereço (callbacks como o hook do applet, função criada no Ghidra se faltar) | Tipos de ponteiro/structs, objetos locais da pilha passados por endereço |
-| **NEON Symbolic Lifter**<br>`neon_lifter.py` | 🟡 Em andamento | `██████████ 96%` | Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG, com laços escalares deixados ao estruturador, 9 instruções escalares (umull, madd, msub, bic, mvn, ubfiz, ubfx, ldrb, ldrh), objetos locais da pilha passados por endereço e if/else dentro de laços (hb_fb.elf reconstruído) | Rodar o check_baseline.sh (5 JSONs de referência com os valores do aparelho) antes de toda mudança no estruturador e no lifter; ligar mrs tpidrro_el0 a SHIM_MRS_TPIDRRO no esqueleto; depois switch, ld3/ld4 com binário real |
+| **NEON Symbolic Lifter**<br>`neon_lifter.py` | 🟡 Em andamento | `██████████ 96%` | Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG, com laços escalares deixados ao estruturador, 9 instruções escalares (umull, madd, msub, bic, mvn, ubfiz, ubfx, ldrb, ldrh), objetos locais da pilha passados por endereço e if/else dentro de laços (hb_fb.elf reconstruído) | Rodar o check_baseline.sh (5 JSONs de referência com os valores do aparelho) antes de toda mudança no estruturador e no lifter; um homebrew real com mrs tpidrro_el0 no código reconstruído (hoje só testes unitários e prova de ponta a ponta); depois switch, ld3/ld4 com binário real |
 | **Local LLM Qwen 2.5 7B**<br>`qwen2.5-coder:7b (Ollama, CUDA parcial)` | 🟡 Em andamento | `████████░░ 80%` | Gera C a partir do resumo do lifter + esqueleto do CFG; checagem de estrutura e gate no host antes do ADB, com 1 nova tentativa guiada. Se o Qwen esgota as tentativas (ou o Ollama falha), o pipeline usa o C de referência determinístico e registra o motivo em <saida>.pipeline.json | Fazer o Qwen respeitar for (;;) com break do GCC e renomear variáveis de registrador |
 | **Android AArch64 Runner**<br>`Galaxy A56 via ADB` | 🟡 Em andamento | `████░░░░░░ 45%` | push + chmod + execução em /data/local/tmp, medições intercaladas (15×) | Script único de round-trip (compilar → push → rodar → comparar), afinidade de núcleo (taskset) |
 | **Switch HLE Shim**<br>`switch_hle_shim.h` | 🟡 Em andamento | `█████████░ 92%` | Primitivas libnx, 29 SVCs do kernel (24 implementados sobre Bionic/POSIX e 5 de IPC/memória compartilhada como dummies), transfer memory completa (svcCreateTransferMemory/svcMapTransferMemory/svcUnmapTransferMemory e tmemCreate/Map/Unmap/Close: origem protegida com a permissão pedida, alias real por memfd), API Thread/Mutex/RMutex/CondVar, time:u (timeGetCurrentTime sobre CLOCK_REALTIME, microssegundos, steady clock, calendário local), ciclo de vida do applet (hooks, foco, modo de operação, pedido de saída com appletLockExit, fila de mensagens entregue no appletMainLoop), framebuffer linear simulado (framebufferCreate/MakeLinear/Begin/End, RGBA8888/RGBX/BGRA/565/4444, checksum FNV-1a e PPM da tela), fs de alto nível (fsOpenSdCardFileSystem + fsFs/fsFile/fsDir sobre um diretório do host, portátil Bionic/Windows, caminhos normalizados contra ".."), dispositivos do stdio (fsdevMountSdmc/MountDevice/TranslatePath e romfsInit/MountSelf somente leitura, com fopen/opendir/stat/... roteados para sdmc:/ e romfs:/) e entrada desacoplada (roteiro por quadro + buffer ao vivo com seqlock, botões e analógicos, PadState compacta inalterada), com os tipos e resultados da libnx 2.10.0 | padRepeater, caminhos relativos a partir de sdmc:/; depois emular as respostas IPC (CMIF) de sm, hid e fs no buffer da TLS |
@@ -49,7 +49,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 |:---:|---|---|---|
 | **1** | Lifter NEON Aritmético | ✅ Concluído | `██████████ 100%` |
 | **2** | Memória, Arrays e Ponteiros | ✅ Concluído | `██████████ 100%` |
-| **3** | Loader ELF e Tradução de ABI / Syscalls | 🟡 Em andamento | `██████████ 95%` |
+| **3** | Loader ELF e Tradução de ABI / Syscalls | 🟡 Em andamento | `██████████ 98%` |
 | **4** | Subsistema de Áudio, Threads e Vulkan Mobile | ⚪ Planejado | `░░░░░░░░░░ 0%` |
 
 <details>
@@ -84,7 +84,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 </details>
 
 <details open>
-<summary><b>Fase 3 — Loader ELF e Tradução de ABI / Syscalls</b> (18/21)</summary>
+<summary><b>Fase 3 — Loader ELF e Tradução de ABI / Syscalls</b> (19/21)</summary>
 
 - [x] Shim HLE de primitivas libnx (console, applet, pad, timer) — switch_hle_shim.h
 - [x] Homebrew estilo libnx compilado do fonte e validado no A56 (switch_particle_bench)
@@ -105,7 +105,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 - [x] Transfer memory completa (0x15 / 0x51 / 0x52 + tmem*, alias por memfd) no shim; svc_shim_test 210/210 no A56 (15×); regressão de 12 binários idêntica
 - [x] Reconstrução C do hb_fb.elf (instruções escalares e if/else no estruturador): soma ponderada e FNV-1a iguais ao oráculo no A56 (15×, taskset 80)
 - [ ] Shim de libnx completo (fs, hid real, time, serviços IPC)
-- [ ] TLS (tpidrro_el0) / registrador x18 e convenções de ABI
+- [x] TLS (tpidrro_el0) / registrador x18 e convenções de ABI: shimGetTls no shim (219/219 no A56) e mrs tpidrro_el0 → SHIM_MRS_TPIDRRO no esqueleto (test_mrs_tls 4/4, ponta a ponta no A56), x18 intocado
 - [ ] Primeiro homebrew binário (NRO) traduzido rodando no A56
 
 </details>
@@ -428,7 +428,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 
 ## 🧮 Instruções ARM64/NEON no lifter
 
-**24 suportadas** · 10 grupos planejados
+**25 suportadas** · 9 grupos planejados
 
 | | Instrução | Tipo | Observação |
 |:---:|---|---|---|
@@ -456,6 +456,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | ✅ | `subs` | controle | contador de voltas / trip count |
 | ✅ | `cmp` | controle | limite em bytes (offset × passo) |
 | ✅ | `b.ne` | controle | aresta de retorno do loop |
+| ✅ | `mrs tpidrro_el0` | sistema | TLS do Horizon: vira SHIM_MRS_TPIDRRO(xN) = shimGetTls() da thread (x18 intocado) |
 | ⬜ | `ld3 / ld4 / st3 / st4` | memória | planejado — Fase 3 |
 | ⬜ | `orr, bic, mvn` | NEON/escalar | planejado — Fase 2 |
 | ⬜ | `sshr, ushl, sshl` | NEON | planejado — Fase 2 |
@@ -464,7 +465,6 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | ⬜ | `b.cond / cbz / cbnz / tbz` | controle | planejado — Fase 2 |
 | ⬜ | `bl / blr / ret` | controle | planejado — Fase 3 |
 | ⬜ | `svc #imm (Horizon OS)` | sistema | planejado — Fase 3 |
-| ⬜ | `mrs tpidrro_el0 (TLS)` | sistema | planejado — Fase 3 |
 | ⬜ | `ldxr / stxr / ldaxr / stlxr` | atômico | planejado — Fase 4 |
 
 ## 🔬 Ambiente de execução no A56 (sonda empírica)

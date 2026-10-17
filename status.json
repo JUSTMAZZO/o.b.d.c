@@ -65,7 +65,7 @@
       "status": "in_progress",
       "progress": 96,
       "summary": "Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG, com laços escalares deixados ao estruturador, 9 instruções escalares (umull, madd, msub, bic, mvn, ubfiz, ubfx, ldrb, ldrh), objetos locais da pilha passados por endereço e if/else dentro de laços (hb_fb.elf reconstruído)",
-      "next": "Rodar o check_baseline.sh (5 JSONs de referência com os valores do aparelho) antes de toda mudança no estruturador e no lifter; ligar mrs tpidrro_el0 a SHIM_MRS_TPIDRRO no esqueleto; depois switch, ld3/ld4 com binário real"
+      "next": "Rodar o check_baseline.sh (5 JSONs de referência com os valores do aparelho) antes de toda mudança no estruturador e no lifter; um homebrew real com mrs tpidrro_el0 no código reconstruído (hoje só testes unitários e prova de ponta a ponta); depois switch, ld3/ld4 com binário real"
     },
     {
       "name": "Local LLM Qwen 2.5 7B",
@@ -197,7 +197,7 @@
       "phase": 3,
       "title": "Loader ELF e Tradução de ABI / Syscalls",
       "status": "in_progress",
-      "progress": 95,
+      "progress": 98,
       "items": [
         {
           "name": "Shim HLE de primitivas libnx (console, applet, pad, timer) — switch_hle_shim.h",
@@ -276,8 +276,8 @@
           "done": false
         },
         {
-          "name": "TLS (tpidrro_el0) / registrador x18 e convenções de ABI",
-          "done": false
+          "name": "TLS (tpidrro_el0) / registrador x18 e convenções de ABI: shimGetTls no shim (219/219 no A56) e mrs tpidrro_el0 → SHIM_MRS_TPIDRRO no esqueleto (test_mrs_tls 4/4, ponta a ponta no A56), x18 intocado",
+          "done": true
         },
         {
           "name": "Primeiro homebrew binário (NRO) traduzido rodando no A56",
@@ -1345,6 +1345,11 @@
         "insn": "b.ne",
         "kind": "controle",
         "note": "aresta de retorno do loop"
+      },
+      {
+        "insn": "mrs tpidrro_el0",
+        "kind": "sistema",
+        "note": "TLS do Horizon: vira SHIM_MRS_TPIDRRO(xN) = shimGetTls() da thread (x18 intocado)"
       }
     ],
     "planned": [
@@ -1386,11 +1391,6 @@
       },
       {
         "insn": "svc #imm (Horizon OS)",
-        "kind": "sistema",
-        "phase": 3
-      },
-      {
-        "insn": "mrs tpidrro_el0 (TLS)",
         "kind": "sistema",
         "phase": 3
       },
