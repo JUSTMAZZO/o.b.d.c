@@ -885,7 +885,7 @@ def main():
     try:
         # funcoes do proprio programa chamadas pelo main e extraidas no JSON (ex.: auxiliares do homebrew)
         targets = {int(a, 16) for a in fn.get('calls', {})}
-        helpers = [f for f in data['functions'] if f is not fn and int(f['entry_point'], 16) in targets]
+        helpers = [f for f in data['functions'] if f is not fn and (int(f['entry_point'], 16) in targets or f.get('name') in ('out', 'on_applet'))]
         skel = cfg_skeleton.build(fn, data, loops, extra_fns=helpers)
     except cfg_skeleton.SkeletonError as e:
         sys.exit(f"[esqueleto] {e}")
