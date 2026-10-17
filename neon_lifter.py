@@ -3,7 +3,7 @@
 Uso:
   python neon_lifter.py ghidra_extraction_switch.json --expected 88196450180 --qwen reconstructed_switch.c
 """
-import argparse, glob, json, os, re, subprocess, sys, tempfile, urllib.error, urllib.request
+import argparse, glob, json, os, re, shutil, subprocess, sys, tempfile, urllib.error, urllib.request
 
 import cfg_skeleton
 from collections import Counter, defaultdict
@@ -706,12 +706,18 @@ TIMING = re.compile(r'^-?[\d.,]+\s*(ms|s|us|ns)$')
 
 
 def host_cc():
-    """Clang nativo do host: $OBDC_HOST_CC ou o llvm-mingw em ../tools/."""
+    """Clang nativo do host: $OBDC_HOST_CC, llvm-mingw em ../tools/, ou clang/gcc no PATH."""
     env = os.environ.get('OBDC_HOST_CC')
     if env:
         return env
     found = sorted(glob.glob(os.path.join(HERE, '..', 'tools', 'llvm-mingw-*', 'bin', 'clang.exe')))
-    return found[-1] if found else None
+    if found:
+        return found[-1]
+    for cand in ('clang', 'gcc', 'clang.exe', 'gcc.exe'):
+        w = shutil.which(cand)
+        if w:
+            return w
+    return None
 
 
 def host_run(c_path):

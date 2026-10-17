@@ -290,20 +290,37 @@ def elf_crosscheck(nro, sites, elf_path, objdump):
     return problems
 
 
+def load_svc_table():
+    """Carrega tabela de nomes de chamadas ao sistema Horizon a partir de svc_table.json."""
+    svc_map = {}
+    svc_path = os.path.join(os.path.dirname(__file__), 'svc_table.json')
+    if os.path.exists(svc_path):
+        try:
+            with open(svc_path, encoding='utf-8') as f:
+                for s in json.load(f).get('svcs', []):
+                    imm = int(s['id'], 16) if 'id' in s else s.get('svc')
+                    if imm is not None:
+                        svc_map[imm] = s['name']
+        except Exception:
+            pass
+    return svc_map
+
+
 def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
-    """Desmonta o NRO e gera a estrutura JSON de extracao compativel com o neon_lifter e cfg_skeleton."""
+    """Desmonta o NRO e gera a estrutura JSON de extracao compativel com o neon_lifter e cfg_skeleton.
+
+    Opera de forma autonoma em NROs stripped (sem ELF) utilizando fecho de desvios (Branch Target Closure)
+    e classificacao estatica de chamadas. Se um arquivo ELF for explicitamente fornecido via elf_path,
+    seus simbolos serao carregados e priorizados.
+    """
     objdump = find_default_objdump(objdump)
-    if elf_path is None:
-        cand = os.path.splitext(nro_path)[0] + '.elf'
-        if os.path.exists(cand):
-            elf_path = cand
 
     with open(nro_path, 'rb') as f:
         data = f.read()
     nro = parse_nro(data)
     seg = nro['segments']
 
-    # 1. Carrega simbolos do ELF (caso disponivel)
+    # 1. Carrega simbolos do ELF se explicitamente fornecido
     syms = {}          # addr -> (name, size, stype, sec)
     syms_by_name = {}  # name -> (addr, size, stype, sec)
     if elf_path and os.path.exists(elf_path):
@@ -343,6 +360,7 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
 
     insns = []
     insn_by_addr = {}
+    bl_targets = set()
     for line in dis.splitlines():
         m = re.match(r'^\s*([0-9a-fA-F]+):\s+([0-9a-fA-F]{8})\s+(\S+)(?:\s+(.*))?$', line)
         if m:
@@ -362,6 +380,11 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
                 if re.fullmatch(r'[0-9a-fA-F]+', tgt) and not tgt.startswith('0x'):
                     parts[-1] = f'0x{int(tgt, 16):08x}'
                     rest = ', '.join(parts)
+                if mnem == 'bl':
+                    try:
+                        bl_targets.add(int(parts[-1].strip(), 16))
+                    except ValueError:
+                        pass
 
             # Normaliza tipos de deslocamento (LSL, LSR, MSL) e qualificadores vetoriais
             rest = re.sub(r'\b(lsl|lsr|asr|ror|msl)\b', lambda m_sh: m_sh.group(1).upper(), rest)
@@ -380,7 +403,163 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
             insns.append(item)
             insn_by_addr[addr] = item
 
-    # 4. Extrator de funcao
+    # 4. Inferencia de simbolos e pontos de entrada conhecidos para binarios stripped
+    known_entries = set(bl_targets)
+    if base in insn_by_addr and insn_by_addr[base][1] == 'b':
+        try:
+            start_tgt = int(insn_by_addr[base][2].strip(), 16)
+            known_entries.add(start_tgt)
+        except ValueError:
+            pass
+
+    if not syms:
+        # 4a. Mapeia stubs de chamadas de sistema (svc #imm)
+        svc_map = load_svc_table()
+        for addr, mnem, rest, line in insns:
+            if mnem == 'svc':
+                imm_m = re.search(r'#0x([0-9a-fA-F]+)|#(\d+)', rest)
+                if imm_m:
+                    imm = int(imm_m.group(1), 16) if imm_m.group(1) else int(imm_m.group(2))
+                    name = svc_map.get(imm, f'svc_{imm:#x}')
+                    stub_start = addr
+                    prev = insn_by_addr.get(addr - 4)
+                    if prev and 'str' in prev[1] and 'sp' in prev[2]:
+                        stub_start = addr - 4
+                    syms[stub_start] = (name, 8, 'FUNC', '.text')
+                    syms_by_name[name] = (stub_start, 8, 'FUNC', '.text')
+                    known_entries.add(stub_start)
+
+        # 4b. Detecta strlen atraves das mascaras de Alan Mycroft (0x101010101010101 e 0x7f7f7f7f7f7f7f7f)
+        for addr, mnem, rest, line in insns:
+            if '101010101010101' in rest or '7f7f7f7f7f7f7f7f' in rest:
+                start = addr
+                while start > addr - 0x40 and start in insn_by_addr:
+                    if insn_by_addr[start][1] in ('bti', 'stp') or (
+                            start - 4 in insn_by_addr and insn_by_addr[start - 4][1] in ('ret', 'b')):
+                        break
+                    start -= 4
+                syms[start] = ('strlen', 0x100, 'FUNC', '.text')
+                syms_by_name['strlen'] = (start, 0x100, 'FUNC', '.text')
+                known_entries.add(start)
+                break
+
+    # 5. Deteccao dinamica do ponto de entrada do main
+    main_addr = None
+    if 'main' in syms_by_name:
+        main_addr = syms_by_name['main'][0]
+    else:
+        # Varre a crt0 (_start) ate o MOD0 em busca do salto para o main
+        for i, (addr, mnem, rest, line) in enumerate(insns):
+            if addr >= base + nro['mod0_offset']:
+                break
+            if mnem in ('b', 'bl'):
+                try:
+                    tgt = int(rest.strip(), 16)
+                    if tgt >= base + nro['mod0_offset']:
+                        prev = insns[i - 1] if i > 0 else None
+                        if prev and 'x30' in prev[2]:
+                            main_addr = tgt
+                except ValueError:
+                    pass
+        if not main_addr:
+            main_addr = base + 0x180
+    known_entries.add(main_addr)
+
+    # 6. Delimitador de funcoes por fecho transitivo de desvios (Branch Target Closure)
+    def delimit_func(start_addr):
+        cur = start_addr
+        max_target = start_addr
+        fn_ins = []
+        while cur in insn_by_addr:
+            item = insn_by_addr[cur]
+            addr, mnem, rest, line = item
+            fn_ins.append(item)
+
+            # Fecho de desvios condicionais internos (b.cond, cbz, cbnz, tbz, tbnz)
+            if mnem.startswith('b.') or mnem in ('cbz', 'cbnz', 'tbz', 'tbnz'):
+                try:
+                    tgt = int(rest.split(',')[-1].strip(), 16)
+                    if tgt > max_target:
+                        max_target = tgt
+                except ValueError:
+                    pass
+            elif mnem == 'b':
+                try:
+                    tgt = int(rest.strip(), 16)
+                    # Desvio incondicional para a frente pertence a mesma funcao se
+                    # alcancavel antes do proximo ponto de entrada conhecido
+                    if tgt > addr and (tgt <= max_target or tgt not in known_entries):
+                        max_target = max(max_target, tgt)
+                except ValueError:
+                    pass
+
+            # Termina a funcao apenas quando o fluxo incondicional encerra E
+            # nenhum salto interno alcanca enderecos posteriores
+            if addr >= max_target and mnem in ('ret', 'b', 'br'):
+                break
+            cur += 4
+        return fn_ins
+
+    main_ins = delimit_func(main_addr)
+    main_size = len(main_ins) * 4
+
+    # 7. Inferencia contextual de snprintf, malloc e free dentro do main para binarios stripped
+    if not syms_by_name.get('snprintf') or not syms_by_name.get('malloc'):
+        alloc_regs = {}
+        for i, (addr, mnem, rest, line) in enumerate(main_ins):
+            if mnem == 'bl':
+                try:
+                    tgt = int(rest.strip(), 16)
+                except ValueError:
+                    continue
+
+                # Inferencia de snprintf (buffer, tamanho, formato com '%')
+                if 'snprintf' not in syms_by_name:
+                    start_bb = i
+                    while start_bb > max(0, i - 15):
+                        prev_m = main_ins[start_bb - 1][1]
+                        if prev_m in ('bl', 'b', 'ret') or prev_m.startswith('b.'):
+                            break
+                        start_bb -= 1
+                    has_fmt, has_size, adrp_x2 = False, False, None
+                    for j in range(start_bb, i):
+                        a_j, m_j, r_j, _ = main_ins[j]
+                        if m_j == 'adrp' and r_j.startswith('x2,'):
+                            m_x2 = re.search(r'0x([0-9a-fA-F]+)', r_j)
+                            if m_x2:
+                                adrp_x2 = int(m_x2.group(1), 16)
+                        elif m_j == 'add' and r_j.startswith('x2, x2,') and adrp_x2:
+                            m_off = re.search(r'#(0x[0-9a-fA-F]+|\d+)', r_j)
+                            if m_off:
+                                off = int(m_off.group(1), 0)
+                                str_addr = hex(adrp_x2 + off)
+                                if '%' in strings.get(str_addr, ''):
+                                    has_fmt = True
+                        elif m_j == 'mov' and (r_j.startswith('w1,') or r_j.startswith('x1,')):
+                            has_size = True
+                    if has_fmt and has_size:
+                        syms[tgt] = ('snprintf', 0x100, 'FUNC', '.text')
+                        syms_by_name['snprintf'] = (tgt, 0x100, 'FUNC', '.text')
+                        known_entries.add(tgt)
+
+                # Inferencia de malloc e free (malloc retorna ponteiro guardado em reg; reg passado para free)
+                if 'malloc' not in syms_by_name or 'free' not in syms_by_name:
+                    if i > 0 and main_ins[i - 1][1].startswith('mov') and re.match(r'[wx]0,', main_ins[i - 1][2]):
+                        if i + 1 < len(main_ins) and main_ins[i + 1][1].startswith('mov') and re.match(r'[wx]\d+,\s*x0', main_ins[i + 1][2]):
+                            dest_reg = main_ins[i + 1][2].split(',')[0].strip()
+                            alloc_regs[dest_reg] = tgt
+                    if i > 0 and main_ins[i - 1][1].startswith('mov') and re.match(r'x0,\s*([wx]\d+)', main_ins[i - 1][2]):
+                        src_reg = re.match(r'x0,\s*([wx]\d+)', main_ins[i - 1][2]).group(1)
+                        if src_reg in alloc_regs:
+                            malloc_addr = alloc_regs[src_reg]
+                            syms[malloc_addr] = ('malloc', 0x40, 'FUNC', '.text')
+                            syms_by_name['malloc'] = (malloc_addr, 0x40, 'FUNC', '.text')
+                            syms[tgt] = ('free', 0x20, 'FUNC', '.text')
+                            syms_by_name['free'] = (tgt, 0x20, 'FUNC', '.text')
+                            known_entries.add(malloc_addr)
+                            known_entries.add(tgt)
+
+    # 8. Extrator de funcao
     def extract_func(fn_name, start_addr, size):
         fn_insns = [i for i in insns if start_addr <= i[0] < start_addr + size]
         asm_lines = [i[3] for i in fn_insns]
@@ -447,43 +626,36 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
             'loops': fn_loops
         }
 
-    # Determina o ponto de entrada do main
-    main_addr = 0x100180
-    main_size = 544
-    if 'main' in syms_by_name:
-        main_addr = syms_by_name['main'][0]
-        main_size = syms_by_name['main'][1]
-    else:
-        # Detecta ramo de entrada da crt0 no endereco 0x1000dc
-        crt0_br = insn_by_addr.get(base + 0xdc)
-        if crt0_br and crt0_br[1] == 'b' and crt0_br[2].startswith('0x'):
-            main_addr = int(crt0_br[2], 16)
-        # Calcula tamanho do main varrendo ate ret + epilogo
-        for idx, (a, mn, r, l) in enumerate(insns):
-            if a >= main_addr:
-                if mn == 'ret':
-                    # Epilogo pode conter bloco frio adicional; busca proximo prologue
-                    cand_end = a + 4
-                    while cand_end < len(insns) * 4 + base:
-                        next_i = insn_by_addr.get(cand_end)
-                        if not next_i or next_i[1] in ('stp', '.inst', 'udf', 'nop') and 'sp' in next_i[2]:
-                            break
-                        cand_end += 4
-                    main_size = max(544, cand_end - main_addr)
-                    break
-
     functions = []
     main_fn = extract_func('main', main_addr, main_size)
     functions.append(main_fn)
 
-    # Adiciona funcoes auxiliares chamadas pelo main (ex.: out, on_applet, envGetMainThreadHandle)
-    for c_addr_str, c_name in main_fn['calls'].items():
-        c_addr = int(c_addr_str, 16)
-        if c_name in syms_by_name and c_name in ('out', 'on_applet', 'envGetMainThreadHandle'):
-            h_addr, h_sz = syms_by_name[c_name][0], syms_by_name[c_name][1]
-            functions.append(extract_func(c_name, h_addr, h_sz))
-        elif c_name == 'sub_100430' or (c_addr == base + 0x430 and 'out' not in [f['name'] for f in functions]):
-            functions.append(extract_func('out', base + 0x430, 40))
+    # 9. Inclusao transitiva de funcoes auxiliares chamadas pelo main
+    visited_addrs = {main_addr}
+    queue = list(main_fn['calls'].keys())
+    while queue:
+        c_addr_str = queue.pop(0)
+        try:
+            c_addr = int(c_addr_str, 16)
+        except ValueError:
+            continue
+        if c_addr in visited_addrs:
+            continue
+        visited_addrs.add(c_addr)
+
+        c_name = syms[c_addr][0] if c_addr in syms else f'sub_{c_addr:x}'
+        # Funcoes da libc/shim (strlen, malloc, free, svc*, etc.) nao necessitam de extracao de corpo
+        if c_name in ('strlen', 'memcpy', 'memset', 'memmove', 'strcmp', 'strcpy', 'strncpy',
+                      'malloc', 'free', 'calloc', 'realloc', 'snprintf', 'printf', 'puts') or c_name.startswith('svc'):
+            continue
+
+        if base <= c_addr < base + seg['text']['size']:
+            h_ins = delimit_func(c_addr)
+            if h_ins:
+                h_fn = extract_func(c_name, c_addr, len(h_ins) * 4)
+                functions.append(h_fn)
+                for next_call in h_fn['calls']:
+                    queue.append(next_call)
 
     aset_clean = {}
     if nro['aset']['has_aset']:

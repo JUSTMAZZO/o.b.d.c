@@ -41,7 +41,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | **Local LLM Qwen 2.5 7B**<br>`qwen2.5-coder:7b (Ollama, CUDA parcial)` | 🟡 Em andamento | `████████░░ 80%` | Gera C a partir do resumo do lifter + esqueleto do CFG; checagem de estrutura e gate no host antes do ADB, com 1 nova tentativa guiada. Se o Qwen esgota as tentativas (ou o Ollama falha), o pipeline usa o C de referência determinístico e registra o motivo em <saida>.pipeline.json | Fazer o Qwen respeitar for (;;) com break do GCC e renomear variáveis de registrador |
 | **Android AArch64 Runner**<br>`Galaxy A56 via ADB` | 🟡 Em andamento | `████░░░░░░ 45%` | push + chmod + execução em /data/local/tmp, medições intercaladas (15×) | Script único de round-trip (compilar → push → rodar → comparar), afinidade de núcleo (taskset) |
 | **Switch HLE Shim**<br>`switch_hle_shim.h` | 🟡 Em andamento | `██████████ 95%` | Primitivas libnx, 29 SVCs do kernel (24 implementados sobre Bionic/POSIX e 5 de IPC/memória compartilhada como dummies), IPC CMIF (9c818ca): svcConnectToNamedPort/svcSendSyncRequest leem a mensagem SFCI no buffer da TLS (shimGetTls, direta ou dentro de HIPC em +0x10) e respondem SFCO para sm: (Initialize, GetService com handle novo), time (cmd 0: timestamp), set (cmd 0: en-US) e stubs; TLS do Horizon (shimGetTls, ThreadVars), transfer memory completa (svcCreateTransferMemory/svcMapTransferMemory/svcUnmapTransferMemory e tmemCreate/Map/Unmap/Close: origem protegida com a permissão pedida, alias real por memfd), API Thread/Mutex/RMutex/CondVar, time:u (timeGetCurrentTime sobre CLOCK_REALTIME, microssegundos, steady clock, calendário local), ciclo de vida do applet (hooks, foco, modo de operação, pedido de saída com appletLockExit, fila de mensagens entregue no appletMainLoop), framebuffer linear simulado (framebufferCreate/MakeLinear/Begin/End, RGBA8888/RGBX/BGRA/565/4444, checksum FNV-1a e PPM da tela), fs de alto nível (fsOpenSdCardFileSystem + fsFs/fsFile/fsDir sobre um diretório do host, portátil Bionic/Windows, caminhos normalizados contra ".."), dispositivos do stdio (fsdevMountSdmc/MountDevice/TranslatePath e romfsInit/MountSelf somente leitura, com fopen/opendir/stat/... roteados para sdmc:/ e romfs:/) e entrada desacoplada (roteiro por quadro + buffer ao vivo com seqlock, botões e analógicos, PadState compacta inalterada), com os tipos e resultados da libnx 2.10.0 | CMIF fiel por serviço: time:u cmd 0 devolve a sessão ISystemClock (hoje o timestamp vem direto), comandos de hid e fsp-srv, e erro para comando desconhecido (hoje o stub devolve sucesso); atualizar 0x1F/0x21 no svc_table.json; padRepeater e caminhos relativos a partir de sdmc:/ |
-| **Horizon Static Analysis**<br>`horizon_rt/ (nro_tool.py, probe/)` | 🟡 Em andamento | `████████░░ 85%` | Leitor de NRO (NRO0, MOD0, segmentos, .dynamic, relocations, ASET com ícone/NACP/RomFS) com inventário de svc/mrs conferido contra o ELF em 3 homebrews (hb_compute: 21 sítios, hb_threads: 36, hb_services: 110); quem chama cada SVC de IPC, porta sm: e nomes de serviço no binário; pipeline direto NRO → neon_lifter (desmonta o .text do NRO, usa os símbolos do .elf ao lado) validado no A56 com hb_compute.nro | NRO stripped: descobrir limites de função por análise de branch / fecho do CFG, sem constantes fixas por binário (hoje main 0x100180/544 e sub_100430 = out); fixtures portáteis para o test_nro_pipeline.py em clone limpo |
+| **Horizon Static Analysis**<br>`horizon_rt/ (nro_tool.py, probe/)` | ✅ Concluído | `██████████ 100%` | Leitor de NRO (NRO0, MOD0, segmentos, .dynamic, relocations, ASET com ícone/NACP/RomFS) com inventário de svc/mrs conferido contra o ELF em 3 homebrews (hb_compute: 21 sítios, hb_threads: 36, hb_services: 110); pipeline direto NRO stripped puro desacoplado do ELF: limites de função por Branch Target Closure sem constantes fixas, inferência automática de chamadas e SVCs; test_nro_pipeline 7/7 | Suporte a parsing de pacotes NSO/PFS0 para binários comerciais e homebrews empacotados |
 
 ## 🗺️ Roadmap de subsistemas
 
@@ -49,7 +49,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 |:---:|---|---|---|
 | **1** | Lifter NEON Aritmético | ✅ Concluído | `██████████ 100%` |
 | **2** | Memória, Arrays e Ponteiros | ✅ Concluído | `██████████ 100%` |
-| **3** | Loader ELF e Tradução de ABI / Syscalls | 🟡 Em andamento | `██████████ 99%` |
+| **3** | Loader ELF e Tradução de ABI / Syscalls | ✅ Concluído | `██████████ 100%` |
 | **4** | Subsistema de Áudio, Threads e Vulkan Mobile | ⚪ Planejado | `░░░░░░░░░░ 0%` |
 
 <details>
@@ -106,7 +106,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 - [x] Reconstrução C do hb_fb.elf (instruções escalares e if/else no estruturador): soma ponderada e FNV-1a iguais ao oráculo no A56 (15×, taskset 80)
 - [x] Shim de libnx completo (fs, hid real, time, serviços IPC): fs/hid/time/applet na API de alto nível + dispatcher CMIF (SFCI/SFCO) no buffer da TLS para sm: (Initialize, GetService), time, set e stubs; cmif_test 35/35 no host e no A56
 - [x] TLS (tpidrro_el0) / registrador x18 e convenções de ABI: shimGetTls no shim (219/219 no A56) e mrs tpidrro_el0 → SHIM_MRS_TPIDRRO no esqueleto (test_mrs_tls 4/4, ponta a ponta no A56), x18 intocado
-- [ ] Primeiro homebrew binário (NRO) traduzido rodando no A56 — Pipeline NRO com símbolos ELF: validado no Galaxy A56 (hb_compute.nro → neon_lifter → NDK r28 sem warnings, 15/15 execuções, checksum 88196450180). Pendente para 100%: desacoplamento do ELF (descoberta de limites de função por análise de branch / fecho do CFG em NRO stripped, sem constantes fixas por binário) e fixtures portáteis para clone limpo
+- [x] Primeiro homebrew binário (NRO) traduzido rodando no A56 — Pipeline NRO stripped puro desacoplado do ELF: limites de função delimitados por Branch Target Closure sem constantes fixas, chamadas e SVCs inferidos automaticamente; test_nro_pipeline 7/7 no host e validado no A56 (checksum 88196450180)
 
 </details>
 
@@ -313,8 +313,8 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | Fallback determinístico: C final idêntico ao de referência, gate no host e A56 (15×) | `60 / 88196450180 / 1734747` | ✅ |
 | C de referência regerado pelo pipeline atual no host (regressão de 0867da6 corrigida em a712dcc; check_baseline.sh) | `60 / 88196450180 / 1734747` | ✅ |
 | Pipeline NRO com símbolos ELF: hb_compute.nro → neon_lifter (7e2e2c0) → NDK r28 (0 warnings) → A56 (15×, taskset 80); test_nro_pipeline.py 6/6 | `60 / 88196450180 / 1734747, 15/15` | ✅ |
-| NRO stripped (sem o .elf ao lado): limites de função sem símbolos | `pendente: o esqueleto para em desvio para fora da função (main cortado pela heurística; constantes fixas do hb_compute em nro_tool.py)` | ⏳ |
-| test_nro_pipeline.py em clone limpo | `pendente: depende de hb_compute.nro/.elf ignorados pelo git e de OBDC_HOST_CC no gate (fixtures portáteis)` | ⏳ |
+| NRO stripped (sem o .elf ao lado): limites de função sem símbolos | `delimitado por Branch Target Closure (sem corte prematuro no ret e sem constantes fixas)` | ✅ |
+| test_nro_pipeline.py em clone limpo | `7/7 OK (NRO isolado sem .elf e fallback portátil para compilador do host)` | ✅ |
 
 ### `hb_threads` — Homebrew libnx multi-thread: 4 threads × 25.000 partículas × 60 frames, Mutex + CondVar + sleep
 

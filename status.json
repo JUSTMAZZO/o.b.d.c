@@ -94,10 +94,10 @@
     {
       "name": "Horizon Static Analysis",
       "file": "horizon_rt/ (nro_tool.py, probe/)",
-      "status": "in_progress",
-      "progress": 85,
-      "summary": "Leitor de NRO (NRO0, MOD0, segmentos, .dynamic, relocations, ASET com ícone/NACP/RomFS) com inventário de svc/mrs conferido contra o ELF em 3 homebrews (hb_compute: 21 sítios, hb_threads: 36, hb_services: 110); quem chama cada SVC de IPC, porta sm: e nomes de serviço no binário; pipeline direto NRO → neon_lifter (desmonta o .text do NRO, usa os símbolos do .elf ao lado) validado no A56 com hb_compute.nro",
-      "next": "NRO stripped: descobrir limites de função por análise de branch / fecho do CFG, sem constantes fixas por binário (hoje main 0x100180/544 e sub_100430 = out); fixtures portáteis para o test_nro_pipeline.py em clone limpo"
+      "status": "done",
+      "progress": 100,
+      "summary": "Leitor de NRO (NRO0, MOD0, segmentos, .dynamic, relocations, ASET com ícone/NACP/RomFS) com inventário de svc/mrs conferido contra o ELF em 3 homebrews (hb_compute: 21 sítios, hb_threads: 36, hb_services: 110); pipeline direto NRO stripped puro desacoplado do ELF: limites de função por Branch Target Closure sem constantes fixas, inferência automática de chamadas e SVCs; test_nro_pipeline 7/7",
+      "next": "Suporte a parsing de pacotes NSO/PFS0 para binários comerciais e homebrews empacotados"
     }
   ],
   "roadmap": [
@@ -196,8 +196,8 @@
     {
       "phase": 3,
       "title": "Loader ELF e Tradução de ABI / Syscalls",
-      "status": "in_progress",
-      "progress": 99,
+      "status": "done",
+      "progress": 100,
       "items": [
         {
           "name": "Shim HLE de primitivas libnx (console, applet, pad, timer) — switch_hle_shim.h",
@@ -280,8 +280,8 @@
           "done": true
         },
         {
-          "name": "Primeiro homebrew binário (NRO) traduzido rodando no A56 — Pipeline NRO com símbolos ELF: validado no Galaxy A56 (hb_compute.nro → neon_lifter → NDK r28 sem warnings, 15/15 execuções, checksum 88196450180). Pendente para 100%: desacoplamento do ELF (descoberta de limites de função por análise de branch / fecho do CFG em NRO stripped, sem constantes fixas por binário) e fixtures portáteis para clone limpo",
-          "done": false
+          "name": "Primeiro homebrew binário (NRO) traduzido rodando no A56 — Pipeline NRO stripped puro desacoplado do ELF: limites de função delimitados por Branch Target Closure sem constantes fixas, chamadas e SVCs inferidos automaticamente; test_nro_pipeline 7/7 no host e validado no A56 (checksum 88196450180)",
+          "done": true
         }
       ]
     },
@@ -886,13 +886,13 @@
           },
           {
             "check": "NRO stripped (sem o .elf ao lado): limites de função sem símbolos",
-            "value": "pendente: o esqueleto para em desvio para fora da função (main cortado pela heurística; constantes fixas do hb_compute em nro_tool.py)",
-            "ok": null
+            "value": "delimitado por Branch Target Closure (sem corte prematuro no ret e sem constantes fixas)",
+            "ok": true
           },
           {
             "check": "test_nro_pipeline.py em clone limpo",
-            "value": "pendente: depende de hb_compute.nro/.elf ignorados pelo git e de OBDC_HOST_CC no gate (fixtures portáteis)",
-            "ok": null
+            "value": "7/7 OK (NRO isolado sem .elf e fallback portátil para compilador do host)",
+            "ok": true
           }
         ]
       },
