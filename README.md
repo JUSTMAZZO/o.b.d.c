@@ -5,9 +5,9 @@
 
 ### Recompilação estática AArch64 → AArch64: binários de Nintendo Switch rodando nativamente no Android
 
-![Endgame](https://img.shields.io/badge/Endgame-75%25-orange?style=for-the-badge) ![Fase atual](https://img.shields.io/badge/Fase%20atual-3%20%E2%80%93%20Em%20andamento-yellow?style=for-the-badge) ![ISA](https://img.shields.io/badge/ISA-AArch64%20%E2%86%92%20AArch64-informational?style=for-the-badge&logo=arm&logoColor=white) ![Alvo](https://img.shields.io/badge/Alvo-Galaxy%20A56%20%C2%B7%20Exynos%201580-1428A0?style=for-the-badge&logo=samsung&logoColor=white)
+![Endgame](https://img.shields.io/badge/Endgame-75%25-orange?style=for-the-badge) ![Fase atual](https://img.shields.io/badge/Fase%20atual-1%20%E2%80%93%20Conclu%C3%ADdo-brightgreen?style=for-the-badge) ![ISA](https://img.shields.io/badge/ISA-AArch64%20%E2%86%92%20AArch64-informational?style=for-the-badge&logo=arm&logoColor=white) ![Alvo](https://img.shields.io/badge/Alvo-Galaxy%20A56%20%C2%B7%20Exynos%201580-1428A0?style=for-the-badge&logo=samsung&logoColor=white)
 
-![Validação](https://img.shields.io/badge/Valida%C3%A7%C3%A3o-76%2F78%20OK-yellow?style=for-the-badge) ![Benchmarks](https://img.shields.io/badge/Benchmarks-10%20no%20A56-teal?style=for-the-badge&logo=android&logoColor=white) ![Instruções](https://img.shields.io/badge/Instru%C3%A7%C3%B5es-25%20suportadas-blueviolet?style=for-the-badge) ![LLM](https://img.shields.io/badge/LLM-qwen2.5--coder%207b-black?style=for-the-badge&logo=ollama&logoColor=white) ![Atualizado](https://img.shields.io/badge/Atualizado-2026--10--16-lightgrey?style=for-the-badge) [![Licença](https://img.shields.io/badge/Licen%C3%A7a-MIT-green?style=for-the-badge)](LICENSE)
+![Validação](https://img.shields.io/badge/Valida%C3%A7%C3%A3o-78%2F80%20OK-yellow?style=for-the-badge) ![Benchmarks](https://img.shields.io/badge/Benchmarks-10%20no%20A56-teal?style=for-the-badge&logo=android&logoColor=white) ![Instruções](https://img.shields.io/badge/Instru%C3%A7%C3%B5es-25%20suportadas-blueviolet?style=for-the-badge) ![LLM](https://img.shields.io/badge/LLM-qwen2.5--coder%207b-black?style=for-the-badge&logo=ollama&logoColor=white) ![Atualizado](https://img.shields.io/badge/Atualizado-2026--10--16-lightgrey?style=for-the-badge) [![Licença](https://img.shields.io/badge/Licen%C3%A7a-MIT-green?style=for-the-badge)](LICENSE)
 
 </div>
 
@@ -37,11 +37,11 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | Módulo | Status | Progresso | O que faz hoje | Próximo |
 |---|---|---|---|---|
 | **Ghidra Extractor**<br>`ExtractMain.java` | ✅ Concluído | `████████░░ 80%` | C descompilado + ASM AArch64 + .rodata + isolamento de loops + nomes dos alvos de bl e strings carregadas (formatos de printf) + ponteiros de função referenciados por endereço (callbacks como o hook do applet, função criada no Ghidra se faltar) | Tipos de ponteiro/structs, objetos locais da pilha passados por endereço |
-| **NEON Symbolic Lifter**<br>`neon_lifter.py` | 🟡 Em andamento | `██████████ 96%` | Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG, com laços escalares deixados ao estruturador, 9 instruções escalares (umull, madd, msub, bic, mvn, ubfiz, ubfx, ldrb, ldrh), objetos locais da pilha passados por endereço e if/else dentro de laços (hb_fb.elf reconstruído) | Rodar o check_baseline.sh (5 JSONs de referência com os valores do aparelho) antes de toda mudança no estruturador e no lifter; um homebrew real com mrs tpidrro_el0 no código reconstruído (hoje só testes unitários e prova de ponta a ponta); depois switch, ld3/ld4 com binário real |
+| **NEON Symbolic Lifter**<br>`neon_lifter.py` | 🟡 Em andamento | `██████████ 96%` | Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG, com laços escalares deixados ao estruturador, 9 instruções escalares (umull, madd, msub, bic, mvn, ubfiz, ubfx, ldrb, ldrh), objetos locais da pilha passados por endereço e if/else dentro de laços (hb_fb.elf reconstruído) | Levar os outros NROs do projeto pelo pipeline: hb_threads (lifter: str q com base + índice em registrador, str q28,[x0, x1]) e hb_services (esqueleto: bics); tirar a lista fixa de auxiliares ('out', 'on_applet') do neon_lifter.py; rodar o check_baseline.sh antes de toda mudança; um homebrew real com mrs tpidrro_el0 no código reconstruído; depois switch, ld3/ld4 com binário real |
 | **Local LLM Qwen 2.5 7B**<br>`qwen2.5-coder:7b (Ollama, CUDA parcial)` | 🟡 Em andamento | `████████░░ 80%` | Gera C a partir do resumo do lifter + esqueleto do CFG; checagem de estrutura e gate no host antes do ADB, com 1 nova tentativa guiada. Se o Qwen esgota as tentativas (ou o Ollama falha), o pipeline usa o C de referência determinístico e registra o motivo em <saida>.pipeline.json | Fazer o Qwen respeitar for (;;) com break do GCC e renomear variáveis de registrador |
 | **Android AArch64 Runner**<br>`Galaxy A56 via ADB` | 🟡 Em andamento | `████░░░░░░ 45%` | push + chmod + execução em /data/local/tmp, medições intercaladas (15×) | Script único de round-trip (compilar → push → rodar → comparar), afinidade de núcleo (taskset) |
 | **Switch HLE Shim**<br>`switch_hle_shim.h` | 🟡 Em andamento | `██████████ 95%` | Primitivas libnx, 29 SVCs do kernel (24 implementados sobre Bionic/POSIX e 5 de IPC/memória compartilhada como dummies), IPC CMIF (9c818ca): svcConnectToNamedPort/svcSendSyncRequest leem a mensagem SFCI no buffer da TLS (shimGetTls, direta ou dentro de HIPC em +0x10) e respondem SFCO para sm: (Initialize, GetService com handle novo), time (cmd 0: timestamp), set (cmd 0: en-US) e stubs; TLS do Horizon (shimGetTls, ThreadVars), transfer memory completa (svcCreateTransferMemory/svcMapTransferMemory/svcUnmapTransferMemory e tmemCreate/Map/Unmap/Close: origem protegida com a permissão pedida, alias real por memfd), API Thread/Mutex/RMutex/CondVar, time:u (timeGetCurrentTime sobre CLOCK_REALTIME, microssegundos, steady clock, calendário local), ciclo de vida do applet (hooks, foco, modo de operação, pedido de saída com appletLockExit, fila de mensagens entregue no appletMainLoop), framebuffer linear simulado (framebufferCreate/MakeLinear/Begin/End, RGBA8888/RGBX/BGRA/565/4444, checksum FNV-1a e PPM da tela), fs de alto nível (fsOpenSdCardFileSystem + fsFs/fsFile/fsDir sobre um diretório do host, portátil Bionic/Windows, caminhos normalizados contra ".."), dispositivos do stdio (fsdevMountSdmc/MountDevice/TranslatePath e romfsInit/MountSelf somente leitura, com fopen/opendir/stat/... roteados para sdmc:/ e romfs:/) e entrada desacoplada (roteiro por quadro + buffer ao vivo com seqlock, botões e analógicos, PadState compacta inalterada), com os tipos e resultados da libnx 2.10.0 | CMIF fiel por serviço: time:u cmd 0 devolve a sessão ISystemClock (hoje o timestamp vem direto), comandos de hid e fsp-srv, e erro para comando desconhecido (hoje o stub devolve sucesso); atualizar 0x1F/0x21 no svc_table.json; padRepeater e caminhos relativos a partir de sdmc:/ |
-| **Horizon Static Analysis**<br>`horizon_rt/ (nro_tool.py, probe/)` | ✅ Concluído | `██████████ 100%` | Leitor de NRO (NRO0, MOD0, segmentos, .dynamic, relocations, ASET com ícone/NACP/RomFS) com inventário de svc/mrs conferido contra o ELF em 3 homebrews (hb_compute: 21 sítios, hb_threads: 36, hb_services: 110); pipeline direto NRO stripped puro desacoplado do ELF: limites de função por Branch Target Closure sem constantes fixas, inferência automática de chamadas e SVCs; test_nro_pipeline 7/7 | Suporte a parsing de pacotes NSO/PFS0 para binários comerciais e homebrews empacotados |
+| **Horizon Static Analysis**<br>`horizon_rt/ (nro_tool.py, probe/)` | ✅ Concluído | `██████████ 100%` | Leitor de NRO (NRO0, MOD0, segmentos, .dynamic, relocations, ASET com ícone/NACP/RomFS) com inventário de svc/mrs conferido contra o ELF em 3 homebrews (hb_compute: 21 sítios, hb_threads: 36, hb_services: 110); pipeline direto NRO stripped puro desacoplado do ELF: limites de função por Branch Target Closure sem constantes fixas, inferência automática de chamadas e SVCs; test_nro_pipeline 7/7 | Homebrews empacotados (NSO/PFS0) próprios ou de código aberto; fixtures versionadas (NRO pequeno de teste) para o test_nro_pipeline.py rodar em clone limpo |
 
 ## 🗺️ Roadmap de subsistemas
 
@@ -83,8 +83,8 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 
 </details>
 
-<details open>
-<summary><b>Fase 3 — Loader ELF e Tradução de ABI / Syscalls</b> (20/21)</summary>
+<details>
+<summary><b>Fase 3 — Loader ELF e Tradução de ABI / Syscalls</b> (21/21)</summary>
 
 - [x] Shim HLE de primitivas libnx (console, applet, pad, timer) — switch_hle_shim.h
 - [x] Homebrew estilo libnx compilado do fonte e validado no A56 (switch_particle_bench)
@@ -106,7 +106,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 - [x] Reconstrução C do hb_fb.elf (instruções escalares e if/else no estruturador): soma ponderada e FNV-1a iguais ao oráculo no A56 (15×, taskset 80)
 - [x] Shim de libnx completo (fs, hid real, time, serviços IPC): fs/hid/time/applet na API de alto nível + dispatcher CMIF (SFCI/SFCO) no buffer da TLS para sm: (Initialize, GetService), time, set e stubs; cmif_test 35/35 no host e no A56
 - [x] TLS (tpidrro_el0) / registrador x18 e convenções de ABI: shimGetTls no shim (219/219 no A56) e mrs tpidrro_el0 → SHIM_MRS_TPIDRRO no esqueleto (test_mrs_tls 4/4, ponta a ponta no A56), x18 intocado
-- [x] Primeiro homebrew binário (NRO) traduzido rodando no A56 — Pipeline NRO stripped puro desacoplado do ELF: limites de função delimitados por Branch Target Closure sem constantes fixas, chamadas e SVCs inferidos automaticamente; test_nro_pipeline 7/7 no host e validado no A56 (checksum 88196450180)
+- [x] Primeiro homebrew binário (NRO) traduzido rodando no A56 — Pipeline NRO stripped puro desacoplado do ELF: limites de função delimitados por Branch Target Closure sem constantes fixas, chamadas e SVCs inferidos automaticamente; hb_compute.nro sozinho (sem .elf) → neon_lifter → NDK r28 sem warnings → A56: 60 frames, checksum 88196450180, última partícula 1734747 em 15/15 execuções (taskset 80)
 
 </details>
 
@@ -297,6 +297,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | hb_ref (intercalado A/B, cpu7) | 20 | 0.0052 s | 0.0044 s | `88196450180` ✅ |
 | reconstructed_hb_compute_bin (fallback determinístico, taskset cpu7) | 15 | 0.0066 s | 0.0063 s | `88196450180` ✅ |
 | C traduzido do hb_compute.nro (neon_lifter app.nro, símbolos do .elf ao lado; NDK r28, taskset cpu7) | 15 | 0.0044 s | 0.0043 s | `88196450180` ✅ |
+| C traduzido do hb_compute.nro stripped (sem .elf, Branch Target Closure; NDK r28, taskset cpu7) | 15 | 0.0044 s | 0.0043 s | `88196450180` ✅ |
 
 **Validação**
 
@@ -313,8 +314,10 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | Fallback determinístico: C final idêntico ao de referência, gate no host e A56 (15×) | `60 / 88196450180 / 1734747` | ✅ |
 | C de referência regerado pelo pipeline atual no host (regressão de 0867da6 corrigida em a712dcc; check_baseline.sh) | `60 / 88196450180 / 1734747` | ✅ |
 | Pipeline NRO com símbolos ELF: hb_compute.nro → neon_lifter (7e2e2c0) → NDK r28 (0 warnings) → A56 (15×, taskset 80); test_nro_pipeline.py 6/6 | `60 / 88196450180 / 1734747, 15/15` | ✅ |
-| NRO stripped (sem o .elf ao lado): limites de função sem símbolos | `delimitado por Branch Target Closure (sem corte prematuro no ret e sem constantes fixas)` | ✅ |
-| test_nro_pipeline.py em clone limpo | `7/7 OK (NRO isolado sem .elf e fallback portátil para compilador do host)` | ✅ |
+| NRO stripped (sem o .elf ao lado): limites de função por Branch Target Closure, sem constantes fixas (88e6955) → NDK r28 (0 warnings) → A56 (15×, taskset 80) | `60 / 88196450180 / 1734747, 15/15` | ✅ |
+| test_nro_pipeline.py 7/7 com hb_compute.nro presente e compilador do host (OBDC_HOST_CC ou ../tools) | `7/7` | ✅ |
+| test_nro_pipeline.py em clone limpo | `pendente: hb_compute.nro é ignorado pelo git (7 erros sem ele); fora do checkout principal os testes 06/07 precisam de OBDC_HOST_CC` | ⏳ |
+| Outros NROs do projeto pelo mesmo pipeline (com ou sem .elf) | `pendente: hb_threads para no lifter (str q28,[x0, x1]); hb_services no esqueleto (bics xzr, x1, x2)` | ⏳ |
 
 ### `hb_threads` — Homebrew libnx multi-thread: 4 threads × 25.000 partículas × 60 frames, Mutex + CondVar + sleep
 

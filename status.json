@@ -65,7 +65,7 @@
       "status": "in_progress",
       "progress": 96,
       "summary": "Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG, com laços escalares deixados ao estruturador, 9 instruções escalares (umull, madd, msub, bic, mvn, ubfiz, ubfx, ldrb, ldrh), objetos locais da pilha passados por endereço e if/else dentro de laços (hb_fb.elf reconstruído)",
-      "next": "Rodar o check_baseline.sh (5 JSONs de referência com os valores do aparelho) antes de toda mudança no estruturador e no lifter; um homebrew real com mrs tpidrro_el0 no código reconstruído (hoje só testes unitários e prova de ponta a ponta); depois switch, ld3/ld4 com binário real"
+      "next": "Levar os outros NROs do projeto pelo pipeline: hb_threads (lifter: str q com base + índice em registrador, str q28,[x0, x1]) e hb_services (esqueleto: bics); tirar a lista fixa de auxiliares ('out', 'on_applet') do neon_lifter.py; rodar o check_baseline.sh antes de toda mudança; um homebrew real com mrs tpidrro_el0 no código reconstruído; depois switch, ld3/ld4 com binário real"
     },
     {
       "name": "Local LLM Qwen 2.5 7B",
@@ -97,7 +97,7 @@
       "status": "done",
       "progress": 100,
       "summary": "Leitor de NRO (NRO0, MOD0, segmentos, .dynamic, relocations, ASET com ícone/NACP/RomFS) com inventário de svc/mrs conferido contra o ELF em 3 homebrews (hb_compute: 21 sítios, hb_threads: 36, hb_services: 110); pipeline direto NRO stripped puro desacoplado do ELF: limites de função por Branch Target Closure sem constantes fixas, inferência automática de chamadas e SVCs; test_nro_pipeline 7/7",
-      "next": "Suporte a parsing de pacotes NSO/PFS0 para binários comerciais e homebrews empacotados"
+      "next": "Homebrews empacotados (NSO/PFS0) próprios ou de código aberto; fixtures versionadas (NRO pequeno de teste) para o test_nro_pipeline.py rodar em clone limpo"
     }
   ],
   "roadmap": [
@@ -280,7 +280,7 @@
           "done": true
         },
         {
-          "name": "Primeiro homebrew binário (NRO) traduzido rodando no A56 — Pipeline NRO stripped puro desacoplado do ELF: limites de função delimitados por Branch Target Closure sem constantes fixas, chamadas e SVCs inferidos automaticamente; test_nro_pipeline 7/7 no host e validado no A56 (checksum 88196450180)",
+          "name": "Primeiro homebrew binário (NRO) traduzido rodando no A56 — Pipeline NRO stripped puro desacoplado do ELF: limites de função delimitados por Branch Target Closure sem constantes fixas, chamadas e SVCs inferidos automaticamente; hb_compute.nro sozinho (sem .elf) → neon_lifter → NDK r28 sem warnings → A56: 60 frames, checksum 88196450180, última partícula 1734747 em 15/15 execuções (taskset 80)",
           "done": true
         }
       ]
@@ -826,6 +826,13 @@
             "median_s": 0.004438,
             "min_s": 0.0043331,
             "result": "88196450180"
+          },
+          {
+            "binary": "C traduzido do hb_compute.nro stripped (sem .elf, Branch Target Closure; NDK r28, taskset cpu7)",
+            "runs": 15,
+            "median_s": 0.0044088,
+            "min_s": 0.0042858,
+            "result": "88196450180"
           }
         ],
         "validation": [
@@ -885,14 +892,24 @@
             "ok": true
           },
           {
-            "check": "NRO stripped (sem o .elf ao lado): limites de função sem símbolos",
-            "value": "delimitado por Branch Target Closure (sem corte prematuro no ret e sem constantes fixas)",
+            "check": "NRO stripped (sem o .elf ao lado): limites de função por Branch Target Closure, sem constantes fixas (88e6955) → NDK r28 (0 warnings) → A56 (15×, taskset 80)",
+            "value": "60 / 88196450180 / 1734747, 15/15",
+            "ok": true
+          },
+          {
+            "check": "test_nro_pipeline.py 7/7 com hb_compute.nro presente e compilador do host (OBDC_HOST_CC ou ../tools)",
+            "value": "7/7",
             "ok": true
           },
           {
             "check": "test_nro_pipeline.py em clone limpo",
-            "value": "7/7 OK (NRO isolado sem .elf e fallback portátil para compilador do host)",
-            "ok": true
+            "value": "pendente: hb_compute.nro é ignorado pelo git (7 erros sem ele); fora do checkout principal os testes 06/07 precisam de OBDC_HOST_CC",
+            "ok": null
+          },
+          {
+            "check": "Outros NROs do projeto pelo mesmo pipeline (com ou sem .elf)",
+            "value": "pendente: hb_threads para no lifter (str q28,[x0, x1]); hb_services no esqueleto (bics xzr, x1, x2)",
+            "ok": null
           }
         ]
       },
