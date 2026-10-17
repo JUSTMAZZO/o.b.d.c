@@ -7,6 +7,8 @@ qwen_main
 switch_particle_bench
 reconstructed_switch_bin
 switch_aos_bench
+hb_services_aarch64
+hb_threads_aarch64
 *.o
 *.so
 
