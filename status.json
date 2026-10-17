@@ -63,9 +63,9 @@
       "name": "NEON Symbolic Lifter",
       "file": "neon_lifter.py",
       "status": "in_progress",
-      "progress": 88,
-      "summary": "Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG",
-      "next": "Reconstrução do hb_fb.elf: instruções escalares (umull, madd, msub, ubfiz, ubfx, bic, mvn, ldrb, ldrh), objetos locais da pilha, laços escalares deixados ao estruturador e if/else dentro de laços; depois switch, ld3/ld4 com binário real"
+      "progress": 92,
+      "summary": "Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG, com laços escalares deixados ao estruturador, 9 instruções escalares (umull, madd, msub, bic, mvn, ubfiz, ubfx, ldrb, ldrh), objetos locais da pilha passados por endereço e if/else dentro de laços (hb_fb.elf reconstruído)",
+      "next": "Corrigir no reconstructed_hb_fb.c: ldr de registrador callee-saved a partir de objeto da pilha (ldr x20,[sp,#0x68]) tratado como restauração de quadro, else perdidos no if/else aninhado do relógio e o warning de cast do callback; depois switch, ld3/ld4 com binário real"
     },
     {
       "name": "Local LLM Qwen 2.5 7B",
@@ -197,7 +197,7 @@
       "phase": 3,
       "title": "Loader ELF e Tradução de ABI / Syscalls",
       "status": "in_progress",
-      "progress": 92,
+      "progress": 95,
       "items": [
         {
           "name": "Shim HLE de primitivas libnx (console, applet, pad, timer) — switch_hle_shim.h",
@@ -268,8 +268,8 @@
           "done": true
         },
         {
-          "name": "Reconstrução C do hb_fb.elf (instruções escalares e if/else no estruturador)",
-          "done": false
+          "name": "Reconstrução C do hb_fb.elf (instruções escalares e if/else no estruturador): soma ponderada e FNV-1a iguais ao oráculo no A56 (15×, taskset 80)",
+          "done": true
         },
         {
           "name": "Shim de libnx completo (fs, hid real, time, serviços IPC)",
@@ -1108,9 +1108,9 @@
         "neon_median_s": 0.002824,
         "scalar_median_s": null,
         "reconstructed": {
-          "binary": "hb_fb_oracle",
-          "status": "hle_port",
-          "note": "Barras de cor rolando, degradê animado e quadrado em movimento; a animação depende só do número do quadro (o tick do sistema só mede o tempo de render), por isso o checksum é determinístico. O mesmo hb_fb.c compila com a libnx 2.10.0 real (devkitA64, 0 warnings) e como oráculo pelo shim, no qual o sistema pede a saída depois do quadro 60 (appletLockExit + hook OnExitRequest, appletMainLoop devolve false). A tela apresentada pelo shim é conferida com o FNV-1a calculado pelo app e gravada em PPM, idêntico byte a byte à referência numpy (ref_hb_fb.py) no host e no A56. Render por software no A56: mediana 2,82 ms/frame (2,79–2,91, 15×, cpu7). O hb_fb.nro real usa svcCreateTransferMemory (0x15), agora tratado pelo shim. Reconstrução do hb_fb.elf pelo pipeline pendente: o Ghidra extrai main, out e o callback on_applet (ghidra_extraction_hb_fb.json), mas o lifter e o esqueleto ainda não tratam 9 instruções escalares, objetos locais da pilha e if/else dentro dos laços de pixel."
+          "binary": "reconstructed_hb_fb.c",
+          "status": "verified",
+          "note": "Barras de cor rolando, degradê animado e quadrado em movimento; a animação depende só do número do quadro (o tick do sistema só mede o tempo de render), por isso o checksum é determinístico. O mesmo hb_fb.c compila com a libnx 2.10.0 real (devkitA64, 0 warnings) e como oráculo pelo shim, no qual o sistema pede a saída depois do quadro 60 (appletLockExit + hook OnExitRequest, appletMainLoop devolve false). A tela apresentada pelo shim é conferida com o FNV-1a calculado pelo app e gravada em PPM, idêntico byte a byte à referência numpy (ref_hb_fb.py) no host e no A56. Render por software no A56: mediana 2,82 ms/frame (2,79–2,91, 15×, cpu7). O hb_fb.nro real usa svcCreateTransferMemory (0x15), agora tratado pelo shim. Reconstrução do hb_fb.elf pelo pipeline (Ghidra: main + out + on_applet → cfg_skeleton/neon_lifter → reconstructed_hb_fb.c, sem LLM): com OBDC_INPUT=none, 60 frames, saída pelo pedido do sistema, soma ponderada e FNV-1a iguais ao oráculo no host e no A56 (15×, taskset 80), render 3,46 ms/frame. Defeito conhecido: a checagem do relógio lê uma variável não inicializada (x20 em vez do objeto da pilha sp+0x68) e imprime INCOERENTE onde o oráculo imprime coerente com time()."
         },
         "attempts": [],
         "device_runs": [
@@ -1119,6 +1119,13 @@
             "runs": 15,
             "median_s": 0.002824,
             "min_s": 0.002788,
+            "result": "0x2a45a5f1c5fad331"
+          },
+          {
+            "binary": "reconstructed_hb_fb (C reconstruído do ELF, NDK r28 -O2, taskset cpu7, OBDC_INPUT=none)",
+            "runs": 15,
+            "median_s": 0.003455,
+            "min_s": 0.003396,
             "result": "0x2a45a5f1c5fad331"
           }
         ],
@@ -1155,8 +1162,18 @@
           },
           {
             "check": "Pipeline no hb_fb.elf: Ghidra (main + out + on_applet) → cfg_skeleton/neon_lifter → reconstructed_hb_fb.c → A56 (FNV 0x2a45a5f1c5fad331)",
-            "value": "pendente: para em ldrb w6,[sp,#0x63] (escalares e if/else)",
-            "ok": null
+            "value": "60 frames / 0x1b5c804513888ea0 / 0x2a45a5f1c5fad331 / OnExitRequest x1, 15/15 (host também)",
+            "ok": true
+          },
+          {
+            "check": "C reconstruído: linha do relógio (time:u) igual ao oráculo",
+            "value": "INCOERENTE × coerente com time() (x20 não inicializado)",
+            "ok": false
+          },
+          {
+            "check": "C reconstruído: -Wall -Wextra (llvm-mingw / NDK r28)",
+            "value": "4 / 1 warnings (uso de x4/x20 não inicializados, cast do callback)",
+            "ok": false
           },
           {
             "check": "svc_shim_test: time, applet e framebuffer portáveis no host (llvm-mingw)",
