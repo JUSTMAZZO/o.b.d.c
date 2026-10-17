@@ -1354,9 +1354,19 @@ class Skeleton:
             elif t == 'u32':
                 a, b = [X('cast', 'uint32_t', v, t='u32') if v.t == 'u64' and v.const() is None else v for v in (a, b)]
             e = X('flags', 'ccmp', prev, a, b, I.nzcv)
+        elif k == 'cset':
+            c = self.cond_flags(I, I.cc)
+            val_true = mask(I.width) if getattr(I, 'mn', '') == 'csetm' else 1
+            e = X('ternary', c, X('const', val_true), X('const', 0), t=t)
         elif k == 'csel':
             cond = self.cond_flags(I, I.cc)
             n, m = self.operand(I, I.srcs[0]), self.operand(I, I.srcs[1])
+            if I.mn == 'csinc':
+                m = X('const', (m.const() + 1) & mask(I.width), t=t) if m.const() is not None else X('bin', '+', m, X('const', 1), t=t)
+            elif I.mn == 'csneg':
+                m = X('const', (-m.const()) & mask(I.width), t=t) if m.const() is not None else X('bin', '-', X('const', 0), m, t=t)
+            elif I.mn == 'csinv':
+                m = X('const', (~m.const()) & mask(I.width), t=t) if m.const() is not None else X('bin', '^', m, X('const', mask(I.width)), t=t)
             if t == 'u64':
                 n, m = [X('cast', 'uint64_t', v, t='u64') if v.t == 'u32' and v.const() is None else v for v in (n, m)]
             elif t == 'u32':
@@ -1627,7 +1637,7 @@ class Skeleton:
                 inner, start = self.loop_head(b, body)
                 lines.append(inner)
                 is_leaf = not any(other in body for other in self.nat if other is not b)
-                has_internal = any(x.term and x.term.kind in COND_BRANCH and any(s in body for s in x.succ) for x in body if x is not b)
+                has_internal = any(x.term and x.term.kind in COND_BRANCH and any(s in body and s is not b for s in x.succ) for x in body if x is not b)
                 if is_leaf and has_internal:
                     lines += ['  ' + s for s in self.emit_loop_path(b, (b, body))]
                     self.emitted.update(body)
@@ -1693,7 +1703,7 @@ class Skeleton:
                     inner, start = self.loop_head(T, body)
                     lines.append(inner)
                     is_leaf = not any(other in body for other in self.nat if other is not T)
-                    has_internal = any(x.term and x.term.kind in COND_BRANCH and any(s in body for s in x.succ) for x in body if x is not T)
+                    has_internal = any(x.term and x.term.kind in COND_BRANCH and any(s in body and s is not T for s in x.succ) for x in body if x is not T)
                     if is_leaf and has_internal:
                         lines += ['  ' + s for s in self.emit_loop_path(T, (T, body))]
                         self.emitted.update(body)
