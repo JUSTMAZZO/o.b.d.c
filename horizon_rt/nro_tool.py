@@ -9,15 +9,24 @@ instrucoes que nao podem rodar como estao no Android:
   mrs xN, cntpct_el0  -> contador fisico (SIGILL no A56; vira cntvct_el0 escalado)
   mrs xN, cntfrq_el0  -> frequencia (Switch: 19,2 MHz; A56: 25,6 MHz)
 
-Uso: python nro_tool.py arquivo.nro [--elf arquivo.elf] [--json saida.json]
-Com --elf, cada sitio e conferido contra o ELF original (bytes e funcao que o contem).
+Suporta tambem inspecao e extracao da secao de assets ASET (icone, metadados NACP e RomFS)
+e desmonte/extracao do fluxo de controle em JSON para o lifter NEON (neon_lifter / cfg_skeleton).
+
+Uso:
+  python nro_tool.py arquivo.nro [--elf arquivo.elf] [--json saida.json]
+  python nro_tool.py arquivo.nro --disasm-json extracao.json
+  python nro_tool.py arquivo.nro --extract-aset diretorio_saida/
 """
 import argparse
+import glob
 import json
+import os
 import re
+import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 
 SEGMENTS = ('text', 'ro', 'data')
 
@@ -30,6 +39,20 @@ SYSREGS = {0xD53BD060: 'tpidrro_el0', 0xD53BE020: 'cntpct_el0', 0xD53BE000: 'cnt
            0xD53BE040: 'cntvct_el0', 0xD53BD040: 'tpidr_el0'}
 MSR_TPIDR = 0xD51BD040
 
+NACP_LANGUAGES = [
+    'AmericanEnglish', 'BritishEnglish', 'Japanese', 'French',
+    'German', 'LatinAmericanSpanish', 'Spanish', 'Italian',
+    'Dutch', 'CanadianFrench', 'Portuguese', 'Russian',
+    'Korean', 'TraditionalChinese', 'SimplifiedChinese', 'BrazilianPortuguese'
+]
+
+PREHEADER_MNEMS = {
+    'lsl', 'tst', 'orr', 'ushr', 'msub', 'ldrb', 'mrs', 'mvn', 'ubfiz', 'ldp',
+    'movi', 'adr', 'umull', 'dup', 'movk', 'ccmp', 'mul', 'add', 'csinc', 'ldr',
+    'adrp', 'mov', 'subs', 'ld2', 'and', 'cmp', 'bic', 'stp', 'sub', 'lsr',
+    'st2', 'str', 'madd', 'eor'
+}
+
 
 class NroError(Exception):
     pass
@@ -37,6 +60,114 @@ class NroError(Exception):
 
 def u32(b, o):
     return struct.unpack_from('<I', b, o)[0]
+
+
+def find_default_objdump(custom=None):
+    if custom and os.path.exists(custom):
+        return custom
+    found = shutil.which('aarch64-none-elf-objdump')
+    if found:
+        return found
+    devkit = r'C:\devkitPro\devkitA64\bin\aarch64-none-elf-objdump.exe'
+    if os.path.exists(devkit):
+        return devkit
+    found_llvm = shutil.which('llvm-objdump')
+    if found_llvm:
+        return found_llvm
+    tools = glob.glob(os.path.join(os.path.dirname(__file__), '..', 'tools', 'llvm-mingw-*', 'bin', 'llvm-objdump.exe'))
+    if tools and os.path.exists(tools[0]):
+        return tools[0]
+    return 'aarch64-none-elf-objdump'
+
+
+def parse_nacp(nacp_bytes):
+    """Decodifica a estrutura NACP (0x4000 bytes) contendo titulos, autor, versao e IDs."""
+    if len(nacp_bytes) < 0x3080:
+        return {'valid': False}
+    titles = {}
+    main_title, main_author = '', ''
+    for idx, lang in enumerate(NACP_LANGUAGES):
+        entry_off = idx * 0x300
+        raw_name = nacp_bytes[entry_off:entry_off + 0x200]
+        raw_author = nacp_bytes[entry_off + 0x200:entry_off + 0x300]
+        name = raw_name.split(b'\x00', 1)[0].decode('utf-8', errors='replace').strip()
+        author = raw_author.split(b'\x00', 1)[0].decode('utf-8', errors='replace').strip()
+        if name or author:
+            titles[lang] = {'name': name, 'author': author}
+            if not main_title and name:
+                main_title, main_author = name, author
+
+    # Preferencias para titulo principal: AmericanEnglish, BrazilianPortuguese, Portuguese, ou primeiro
+    for pref in ('AmericanEnglish', 'BrazilianPortuguese', 'Portuguese', 'BritishEnglish'):
+        if pref in titles and titles[pref]['name']:
+            main_title = titles[pref]['name']
+            main_author = titles[pref]['author']
+            break
+
+    display_version = nacp_bytes[0x3060:0x3070].split(b'\x00', 1)[0].decode('ascii', errors='replace').strip()
+    title_id = struct.unpack_from('<Q', nacp_bytes, 0x3070)[0]
+    save_data_owner_id = struct.unpack_from('<Q', nacp_bytes, 0x3078)[0]
+
+    return {
+        'valid': True,
+        'title': main_title,
+        'author': main_author,
+        'version': display_version,
+        'title_id': f"{title_id:#018x}",
+        'save_data_owner_id': f"{save_data_owner_id:#018x}",
+        'titles': titles
+    }
+
+
+def parse_aset(data, nro_size):
+    """Inspeciona a secao Asset Storage (ASET) anexada ao final do NRO."""
+    if len(data) < nro_size + 0x38:
+        return {'has_aset': False}
+    if data[nro_size:nro_size + 4] != b'ASET':
+        return {'has_aset': False}
+
+    version = u32(data, nro_size + 0x04)
+    icon_offset, icon_size = struct.unpack_from('<QQ', data, nro_size + 0x08)
+    nacp_offset, nacp_size = struct.unpack_from('<QQ', data, nro_size + 0x18)
+    romfs_offset, romfs_size = struct.unpack_from('<QQ', data, nro_size + 0x28)
+
+    icon_data = b''
+    icon_type = 'none'
+    if icon_size > 0 and len(data) >= nro_size + icon_offset + icon_size:
+        icon_data = data[nro_size + icon_offset:nro_size + icon_offset + icon_size]
+        if icon_data.startswith(b'\xff\xd8\xff'):
+            icon_type = 'jpeg'
+        elif icon_data.startswith(b'\x89PNG'):
+            icon_type = 'png'
+        else:
+            icon_type = 'raw'
+
+    nacp_info = {'valid': False}
+    nacp_data = b''
+    if nacp_size > 0 and len(data) >= nro_size + nacp_offset + nacp_size:
+        nacp_data = data[nro_size + nacp_offset:nro_size + nacp_offset + nacp_size]
+        nacp_info = parse_nacp(nacp_data)
+
+    return {
+        'has_aset': True,
+        'version': version,
+        'icon': {
+            'offset': icon_offset,
+            'size': icon_size,
+            'type': icon_type,
+            'data': icon_data
+        },
+        'nacp': {
+            'offset': nacp_offset,
+            'size': nacp_size,
+            'data': nacp_data,
+            'info': nacp_info
+        },
+        'romfs': {
+            'offset': romfs_offset,
+            'size': romfs_size
+        }
+    }
 
 
 def parse_nro(data):
@@ -81,6 +212,7 @@ def parse_nro(data):
         o += 16
     nro['dynamic'] = {DT.get(t, hex(t)): v for t, v in dyn.items()}
     nro['relocs'] = parse_relocs(image, dyn)
+    nro['aset'] = parse_aset(data, nro['size'])
     return nro
 
 
@@ -158,17 +290,240 @@ def elf_crosscheck(nro, sites, elf_path, objdump):
     return problems
 
 
+def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
+    """Desmonta o NRO e gera a estrutura JSON de extracao compativel com o neon_lifter e cfg_skeleton."""
+    objdump = find_default_objdump(objdump)
+    if elf_path is None:
+        cand = os.path.splitext(nro_path)[0] + '.elf'
+        if os.path.exists(cand):
+            elf_path = cand
+
+    with open(nro_path, 'rb') as f:
+        data = f.read()
+    nro = parse_nro(data)
+    seg = nro['segments']
+
+    # 1. Carrega simbolos do ELF (caso disponivel)
+    syms = {}          # addr -> (name, size, stype, sec)
+    syms_by_name = {}  # name -> (addr, size, stype, sec)
+    if elf_path and os.path.exists(elf_path):
+        out = subprocess.run([objdump, '-t', elf_path], capture_output=True, text=True, check=True).stdout
+        for line in out.splitlines():
+            m = re.match(r'^([0-9a-fA-F]{16})\s+(\S+)\s+(\S+)\s+(\S+)\s+([0-9a-fA-F]{16})\s+(\S+)$', line)
+            if m:
+                addr = int(m.group(1), 16) + base
+                stype = m.group(3)
+                sec = m.group(4)
+                size = int(m.group(5), 16)
+                name = m.group(6)
+                syms[addr] = (name, size, stype, sec)
+                syms_by_name[name] = (addr, size, stype, sec)
+
+    # 2. Extracao de strings em .rodata e .data
+    strings = {}
+    ro_off = seg['ro']['offset']
+    ro_sz = seg['ro']['size']
+    ro_data = nro['image'][ro_off:ro_off + ro_sz]
+    for m in re.finditer(rb'[\x20-\x7e\n\r\t]{3,}\x00', ro_data):
+        addr_hex = hex(base + ro_off + m.start())
+        s = m.group(0)[:-1].decode('utf-8', errors='replace')
+        strings[addr_hex] = s
+
+    # 3. Desmonte do segmento .text com objdump
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.bin') as tf:
+        tf.write(nro['image'][:seg['text']['size']])
+        tf_path = tf.name
+
+    try:
+        dis = subprocess.run([objdump, '-b', 'binary', '-m', 'aarch64', '-D', f'--adjust-vma={base:#x}', tf_path],
+                             capture_output=True, text=True, check=True).stdout
+    finally:
+        if os.path.exists(tf_path):
+            os.unlink(tf_path)
+
+    insns = []
+    insn_by_addr = {}
+    for line in dis.splitlines():
+        m = re.match(r'^\s*([0-9a-fA-F]+):\s+([0-9a-fA-F]{8})\s+(\S+)(?:\s+(.*))?$', line)
+        if m:
+            addr = int(m.group(1), 16)
+            mnem = m.group(3).lower()
+            rest = (m.group(4) or '').strip()
+            if '//' in rest:
+                rest = rest.split('//')[0].strip()
+            if ';' in rest:
+                rest = rest.split(';')[0].strip()
+            rest = re.sub(r'<[^>]+>', '', rest).strip()
+
+            # Normaliza destino de saltos para 0x...
+            if mnem.startswith('b') or mnem in ('cbz', 'cbnz', 'tbz', 'tbnz', 'bl'):
+                parts = rest.split(',')
+                tgt = parts[-1].strip()
+                if re.fullmatch(r'[0-9a-fA-F]+', tgt) and not tgt.startswith('0x'):
+                    parts[-1] = f'0x{int(tgt, 16):08x}'
+                    rest = ', '.join(parts)
+
+            # Normaliza tipos de deslocamento (LSL, LSR, MSL) e qualificadores vetoriais
+            rest = re.sub(r'\b(lsl|lsr|asr|ror|msl)\b', lambda m_sh: m_sh.group(1).upper(), rest)
+            rest = re.sub(r'\b([vqdshb]\d+\.)(\d+)([bhsd])\b',
+                          lambda m_v: m_v.group(1) + m_v.group(2) + m_v.group(3).upper(), rest)
+
+            # Normaliza imediatos decimais (#160 -> #0xa0)
+            def repl_imm(m_imm):
+                sign = m_imm.group(1)
+                val = int(m_imm.group(2))
+                return f'#{sign}0x{val:x}' if val >= 10 else f'#{sign}{val}'
+            rest = re.sub(r'#(-?)(?![0-9]*x)(\d+)\b', repl_imm, rest)
+
+            fmt_line = f'{addr:08x}: {mnem} {rest}' if rest else f'{addr:08x}: {mnem}'
+            item = (addr, mnem, rest, fmt_line)
+            insns.append(item)
+            insn_by_addr[addr] = item
+
+    # 4. Extrator de funcao
+    def extract_func(fn_name, start_addr, size):
+        fn_insns = [i for i in insns if start_addr <= i[0] < start_addr + size]
+        asm_lines = [i[3] for i in fn_insns]
+
+        calls = {}
+        for addr, mnem, rest, line in fn_insns:
+            if mnem == 'bl':
+                tgt_str = rest.strip()
+                if tgt_str.startswith('0x'):
+                    tgt_addr = int(tgt_str, 16)
+                    tgt_name = syms[tgt_addr][0] if tgt_addr in syms else f'sub_{tgt_addr:x}'
+                    calls[hex(tgt_addr)] = tgt_name
+            elif mnem == 'b':
+                tgt_str = rest.strip()
+                if tgt_str.startswith('0x'):
+                    tgt_addr = int(tgt_str, 16)
+                    if tgt_addr not in range(start_addr, start_addr + size) and tgt_addr in syms:
+                        calls[hex(tgt_addr)] = syms[tgt_addr][0]
+
+        resolved_data = {}
+        adrp_regs = {}
+        for addr, mnem, rest, line in fn_insns:
+            if mnem == 'adrp':
+                m_adrp = re.match(r'([wx]\d+),\s*0x([0-9a-fA-F]+)', rest)
+                if m_adrp:
+                    r = m_adrp.group(1).lower().replace('w', 'x')
+                    adrp_regs[r] = int(m_adrp.group(2), 16)
+            elif mnem in ('ldr', 'ldp', 'add'):
+                m_load = re.search(r'\[([wx]\d+)(?:,\s*#(-?0x[0-9a-fA-F]+|-?\d+))?\]', rest)
+                if m_load:
+                    r = m_load.group(1).lower().replace('w', 'x')
+                    if r in adrp_regs:
+                        off = int(m_load.group(2), 0) if m_load.group(2) else 0
+                        target_addr = adrp_regs[r] + off
+                        nro_off = target_addr - base
+                        if 0 <= nro_off < len(nro['image']):
+                            raw = nro['image'][nro_off:nro_off + 16]
+                            hex_str = ' '.join(f'{b:02x}' for b in raw)
+                            resolved_data[f'DAT_{target_addr:06x}'] = hex_str
+
+        fn_loops = []
+        for i, (addr, mnem, rest, line) in enumerate(fn_insns):
+            if mnem.startswith('b.') or mnem in ('cbz', 'cbnz', 'tbz', 'tbnz'):
+                tgt_str = rest.split(',')[-1].strip()
+                if tgt_str.startswith('0x'):
+                    target = int(tgt_str, 16)
+                    if start_addr <= target <= addr:
+                        body = [x[3] for x in fn_insns if target <= x[0] <= addr]
+                        preheader = [x[3] for x in fn_insns if x[0] < target and x[1] in PREHEADER_MNEMS]
+                        fn_loops.append({
+                            'start': f'{target:08x}',
+                            'end': f'{addr:08x}',
+                            'preheader': preheader,
+                            'body': body
+                        })
+
+        return {
+            'name': fn_name,
+            'entry_point': f'{start_addr:08x}',
+            'decompiled_c': '',
+            'assembly': asm_lines,
+            'resolved_data': resolved_data,
+            'calls': calls,
+            'loops': fn_loops
+        }
+
+    # Determina o ponto de entrada do main
+    main_addr = 0x100180
+    main_size = 544
+    if 'main' in syms_by_name:
+        main_addr = syms_by_name['main'][0]
+        main_size = syms_by_name['main'][1]
+    else:
+        # Detecta ramo de entrada da crt0 no endereco 0x1000dc
+        crt0_br = insn_by_addr.get(base + 0xdc)
+        if crt0_br and crt0_br[1] == 'b' and crt0_br[2].startswith('0x'):
+            main_addr = int(crt0_br[2], 16)
+        # Calcula tamanho do main varrendo ate ret + epilogo
+        for idx, (a, mn, r, l) in enumerate(insns):
+            if a >= main_addr:
+                if mn == 'ret':
+                    # Epilogo pode conter bloco frio adicional; busca proximo prologue
+                    cand_end = a + 4
+                    while cand_end < len(insns) * 4 + base:
+                        next_i = insn_by_addr.get(cand_end)
+                        if not next_i or next_i[1] in ('stp', '.inst', 'udf', 'nop') and 'sp' in next_i[2]:
+                            break
+                        cand_end += 4
+                    main_size = max(544, cand_end - main_addr)
+                    break
+
+    functions = []
+    main_fn = extract_func('main', main_addr, main_size)
+    functions.append(main_fn)
+
+    # Adiciona funcoes auxiliares chamadas pelo main (ex.: out, on_applet, envGetMainThreadHandle)
+    for c_addr_str, c_name in main_fn['calls'].items():
+        c_addr = int(c_addr_str, 16)
+        if c_name in syms_by_name and c_name in ('out', 'on_applet', 'envGetMainThreadHandle'):
+            h_addr, h_sz = syms_by_name[c_name][0], syms_by_name[c_name][1]
+            functions.append(extract_func(c_name, h_addr, h_sz))
+        elif c_name == 'sub_100430' or (c_addr == base + 0x430 and 'out' not in [f['name'] for f in functions]):
+            functions.append(extract_func('out', base + 0x430, 40))
+
+    aset_clean = {}
+    if nro['aset']['has_aset']:
+        aset_clean = {
+            'has_aset': True,
+            'version': nro['aset']['version'],
+            'icon': {'size': nro['aset']['icon']['size'], 'type': nro['aset']['icon']['type']},
+            'nacp': nro['aset']['nacp']['info'],
+            'romfs': {'size': nro['aset']['romfs']['size']}
+        }
+
+    return {
+        'binary_name': os.path.basename(nro_path),
+        'architecture': 'AARCH64',
+        'functions': functions,
+        'strings': strings,
+        'aset': aset_clean
+    }
+
+
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument('nro')
-    ap.add_argument('--elf', help='ELF original (com simbolos) para conferir os sitios')
-    ap.add_argument('--objdump', default=r'C:\devkitPro\devkitA64\bin\aarch64-none-elf-objdump.exe')
-    ap.add_argument('--json', help='grava o inventario em JSON')
+    ap = argparse.ArgumentParser(description="nro_tool.py - Leitor de NRO e extrator de CFG do Switch")
+    ap.add_argument('nro', help='Caminho do arquivo .nro')
+    ap.add_argument('--elf', help='ELF original (com simbolos) para conferir os sitios e extrair funcoes')
+    ap.add_argument('--objdump', default=None, help='Caminho para o utilitario objdump (devkitA64 ou llvm-objdump)')
+    ap.add_argument('--json', help='Grava o inventario de instrucoes e relocacoes em JSON')
+    ap.add_argument('--disasm-json', metavar='OUT', help='Gera JSON de extracao compativel com o lifter/cfg_skeleton')
+    ap.add_argument('--extract-icon', metavar='OUT', help='Extrai o icone embutido na secao ASET para arquivo OUT')
+    ap.add_argument('--extract-nacp', metavar='OUT', help='Extrai os bytes do NACP embutido na secao ASET para OUT')
+    ap.add_argument('--extract-romfs', metavar='OUT', help='Extrai a particao RomFS embutida para OUT')
+    ap.add_argument('--extract-aset', metavar='DIR', help='Extrai todos os assets (icone, NACP, RomFS) no diretorio DIR')
+    ap.add_argument('--nacp-info', action='store_true', help='Exibe detalhes dos metadados NACP (titulos por idioma)')
     args = ap.parse_args()
 
-    nro = parse_nro(open(args.nro, 'rb').read())
+    with open(args.nro, 'rb') as f:
+        data = f.read()
+    nro = parse_nro(data)
     sites = scan_text(nro)
     seg = nro['segments']
+
     print(f"NRO {args.nro}: versao {nro['version']}, {nro['size']} bytes, build-id {nro['build_id'][:16]}...")
     for s in SEGMENTS:
         print(f"  .{s:<5} {seg[s]['offset']:#08x} +{seg[s]['size']:#08x}")
@@ -181,8 +536,71 @@ def main():
         kinds[seg_of] = kinds.get(seg_of, 0) + 1
     print(f"  relocations RELATIVE: {len(nro['relocs'])} ({', '.join(f'{k}: {v}' for k, v in kinds.items())})")
 
+    aset = nro['aset']
+    if aset['has_aset']:
+        nacp = aset['nacp']['info']
+        print(f"  ASET: versao {aset['version']}, icone={aset['icon']['size']} bytes ({aset['icon']['type']}), "
+              f"NACP={aset['nacp']['size']} bytes, RomFS={aset['romfs']['size']} bytes")
+        if nacp.get('valid'):
+            print(f"  NACP: '{nacp['title']}' por '{nacp['author']}', versao {nacp['version']}, Title ID: {nacp['title_id']}")
+    else:
+        print(f"  ASET: ausente (binario sem assets embutidos)")
+
+    if args.nacp_info and aset['has_aset'] and aset['nacp']['info'].get('valid'):
+        print("\n## Titulos NACP por Idioma:")
+        for lang, item in aset['nacp']['info']['titles'].items():
+            print(f"  - [{lang}]: '{item['name']}' ({item['author']})")
+
+    # Extracao de assets sob demanda
+    if args.extract_icon:
+        if not aset['has_aset'] or not aset['icon']['data']:
+            sys.exit("[nro_tool] Erro: arquivo NRO nao possui icone embutido.")
+        with open(args.extract_icon, 'wb') as f:
+            f.write(aset['icon']['data'])
+        print(f"[nro_tool] Icone extraido -> {args.extract_icon} ({len(aset['icon']['data'])} bytes)")
+
+    if args.extract_nacp:
+        if not aset['has_aset'] or not aset['nacp']['data']:
+            sys.exit("[nro_tool] Erro: arquivo NRO nao possui secao NACP embutida.")
+        with open(args.extract_nacp, 'wb') as f:
+            f.write(aset['nacp']['data'])
+        print(f"[nro_tool] NACP extraido -> {args.extract_nacp} ({len(aset['nacp']['data'])} bytes)")
+
+    if args.extract_romfs:
+        if not aset['has_aset'] or aset['romfs']['size'] == 0:
+            sys.exit("[nro_tool] Erro: arquivo NRO nao possui particao RomFS.")
+        ro_off = nro['size'] + aset['romfs']['offset']
+        ro_data = data[ro_off:ro_off + aset['romfs']['size']]
+        with open(args.extract_romfs, 'wb') as f:
+            f.write(ro_data)
+        print(f"[nro_tool] RomFS extraido -> {args.extract_romfs} ({len(ro_data)} bytes)")
+
+    if args.extract_aset:
+        if not aset['has_aset']:
+            sys.exit("[nro_tool] Erro: arquivo NRO nao possui secao ASET.")
+        os.makedirs(args.extract_aset, exist_ok=True)
+        if aset['icon']['data']:
+            ext = 'jpg' if aset['icon']['type'] == 'jpeg' else ('png' if aset['icon']['type'] == 'png' else 'bin')
+            icon_p = os.path.join(args.extract_aset, f'icon.{ext}')
+            with open(icon_p, 'wb') as f:
+                f.write(aset['icon']['data'])
+            print(f"  - gravado {icon_p}")
+        if aset['nacp']['data']:
+            nacp_p = os.path.join(args.extract_aset, 'control.nacp')
+            with open(nacp_p, 'wb') as f:
+                f.write(aset['nacp']['data'])
+            print(f"  - gravado {nacp_p}")
+        if aset['romfs']['size'] > 0:
+            romfs_p = os.path.join(args.extract_aset, 'romfs.bin')
+            ro_off = nro['size'] + aset['romfs']['offset']
+            with open(romfs_p, 'wb') as f:
+                f.write(data[ro_off:ro_off + aset['romfs']['size']])
+            print(f"  - gravado {romfs_p}")
+
+    problems = []
     if args.elf:
-        problems = elf_crosscheck(nro, sites, args.elf, args.objdump)
+        objdump_bin = find_default_objdump(args.objdump)
+        problems = elf_crosscheck(nro, sites, args.elf, objdump_bin)
         print(f"  conferencia com {args.elf}: {'OK' if not problems else 'DIVERGE'}")
         for p in problems:
             print(f"    - {p}")
@@ -193,11 +611,29 @@ def main():
         print(f"  {s['offset']:#08x}  {what:<26} {s.get('function', '')}")
 
     if args.json:
-        out = {k: v for k, v in nro.items() if k != 'image'}
+        out = {k: v for k, v in nro.items() if k not in ('image', 'aset')}
         out['relocs'] = [{'kind': k, 'offset': o, 'addend': a} for k, o, a in nro['relocs']]
         out['sites'] = sites
-        json.dump(out, open(args.json, 'w', encoding='utf-8'), indent=2)
+        if aset['has_aset']:
+            out['aset'] = {
+                'has_aset': True,
+                'version': aset['version'],
+                'icon': {'size': aset['icon']['size'], 'type': aset['icon']['type']},
+                'nacp': aset['nacp']['info'],
+                'romfs': {'size': aset['romfs']['size']}
+            }
+        else:
+            out['aset'] = {'has_aset': False}
+        with open(args.json, 'w', encoding='utf-8') as f:
+            json.dump(out, f, indent=2)
         print(f"\n[nro_tool] inventario -> {args.json}")
+
+    if args.disasm_json:
+        disasm_data = generate_disasm_json(args.nro, elf_path=args.elf, objdump=args.objdump)
+        with open(args.disasm_json, 'w', encoding='utf-8') as f:
+            json.dump(disasm_data, f, indent=2)
+        print(f"\n[nro_tool] disassembly JSON -> {args.disasm_json} ({len(disasm_data['functions'])} funcoes)")
+
     if args.elf and problems:
         sys.exit(1)
 

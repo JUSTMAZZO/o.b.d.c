@@ -853,8 +853,15 @@ def main():
     ap.add_argument('--emit-c', metavar='OUT', help='grava o C de referencia: esqueleto do CFG + loops do lifter, sem LLM')
     args = ap.parse_args()
 
-    with open(args.json, encoding='utf-8') as f:
-        data = json.load(f)
+    if args.json.lower().endswith('.nro'):
+        try:
+            from horizon_rt import nro_tool
+        except ImportError:
+            import nro_tool
+        data = nro_tool.generate_disasm_json(args.json)
+    else:
+        with open(args.json, encoding='utf-8') as f:
+            data = json.load(f)
     fn = next(x for x in data['functions'] if x['name'] == 'main')
 
     # Filtra apenas loops folha NEON (ignora loops de controle que contem chamadas 'bl ')
