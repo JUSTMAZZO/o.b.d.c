@@ -63,9 +63,9 @@
       "name": "NEON Symbolic Lifter",
       "file": "neon_lifter.py",
       "status": "in_progress",
-      "progress": 96,
-      "summary": "Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG, com laços escalares deixados ao estruturador, 9 instruções escalares (umull, madd, msub, bic, mvn, ubfiz, ubfx, ldrb, ldrh), objetos locais da pilha passados por endereço e if/else dentro de laços (hb_fb.elf reconstruído)",
-      "next": "Levar os outros NROs do projeto pelo pipeline: hb_threads (lifter: str q com base + índice em registrador, str q28,[x0, x1]) e hb_services (esqueleto: bics); tirar a lista fixa de auxiliares ('out', 'on_applet') do neon_lifter.py; rodar o check_baseline.sh antes de toda mudança; um homebrew real com mrs tpidrro_el0 no código reconstruído; depois switch, ld3/ld4 com binário real"
+      "progress": 98,
+      "summary": "Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG, com laços escalares deixados ao estruturador, 9 instruções escalares (umull, madd, msub, bic, mvn, ubfiz, ubfx, ldrb, ldrh), objetos locais da pilha passados por endereço e if/else dentro de laços (hb_fb.elf reconstruído); str q com base + índice, bics/cinc/cinv/cneg/neg, atômicos exclusivos e loads/stores de 128 bits, worker de threads com BSS do guest, auxiliares descobertos dinamicamente (hb_threads.nro e hb_services.nro reconstruídos, com e sem .elf); 27 testes unitários",
+      "next": "Tirar do cfg_skeleton.py a assinatura escrita pelo nome da função on_applet (inferir o tipo do callback pelo appletHook); testes unitários que não deixem .o na raiz; rodar o check_baseline.sh antes de toda mudança; um homebrew real com mrs tpidrro_el0 no código reconstruído; depois switch, ld3/ld4 com binário real"
     },
     {
       "name": "Local LLM Qwen 2.5 7B",
@@ -908,8 +908,8 @@
           },
           {
             "check": "Outros NROs do projeto pelo mesmo pipeline (com ou sem .elf)",
-            "value": "pendente: hb_threads para no lifter (str q28,[x0, x1]); hb_services no esqueleto (bics xzr, x1, x2)",
-            "ok": null
+            "value": "hb_threads e hb_services reconstruídos (7190249), 15/15 no A56 nos dois modos",
+            "ok": true
           }
         ]
       },
@@ -925,12 +925,26 @@
         "neon_median_s": 0.0060866,
         "scalar_median_s": null,
         "reconstructed": {
-          "binary": "hb_threads_oracle",
-          "status": "hle_port",
-          "note": "Mesmo hb_threads.c do NRO do devkitA64 (21 SVCs, 36 sítios conferidos pelo nro_tool.py), compilado para Android com -DOBDC_ORACLE: as threads da libnx viram pthreads e a sincronização usa futex. Mesmo checksum em 1 núcleo (taskset 80) e em 4 (taskset f0)."
+          "binary": "reconstructed_hb_threads.c",
+          "status": "verified",
+          "note": "Mesmo hb_threads.c do NRO do devkitA64 (21 SVCs, 36 sítios conferidos pelo nro_tool.py), compilado para Android com -DOBDC_ORACLE: as threads da libnx viram pthreads e a sincronização usa futex. Mesmo checksum em 1 núcleo (taskset 80) e em 4 (taskset f0). Reconstruído do próprio NRO pelo pipeline (neon_lifter app.nro, worker de threads com acumulação atômica, BSS do guest mapeado pelo shim): reconstructed_hb_threads.c é a saída do pipeline com e sem o .elf ao lado, compila no NDK r28 sem warnings e é idêntico ao oráculo no A56."
         },
         "attempts": [],
         "device_runs": [
+          {
+            "binary": "C reconstruído do hb_threads.nro stripped (sem .elf; NDK r28, taskset 80)",
+            "runs": 15,
+            "median_s": null,
+            "min_s": null,
+            "result": "88196450180"
+          },
+          {
+            "binary": "C reconstruído do hb_threads.nro com o .elf ao lado (NDK r28, taskset 80)",
+            "runs": 15,
+            "median_s": null,
+            "min_s": null,
+            "result": "88196450180"
+          },
           {
             "binary": "hb_threads_oracle (taskset 80, 1 núcleo)",
             "runs": 15,
@@ -966,6 +980,11 @@
             "check": "svc_shim_test no A56 (27 SVCs + Thread/Mutex/RMutex/CondVar + IPC dummy)",
             "value": "54/54",
             "ok": true
+          },
+          {
+            "check": "Pipeline no hb_threads.nro stripped e com .elf → reconstructed_hb_threads.c (idêntico à saída do pipeline) → NDK r28 (0 warnings) → A56 = oráculo (15×, taskset 80)",
+            "value": "60 / 4 / 88196450180 / 1734747, 15/15 nos dois modos",
+            "ok": true
           }
         ]
       },
@@ -981,12 +1000,26 @@
         "neon_median_s": null,
         "scalar_median_s": null,
         "reconstructed": {
-          "binary": "hb_services_oracle",
-          "status": "hle_port",
-          "note": "Inventário do NRO (devkitA64): 21 SVCs, 6 novos de IPC/memória compartilhada (0x13, 0x14, 0x17, 0x1F, 0x21, 0x52), porta sm: e 80 leituras de tpidrro_el0 (buffer de IPC da TLS). O oráculo roda pelos dummies do shim: o pad determinístico dá A no frame 30 e Plus no 60."
+          "binary": "reconstructed_hb_services.c",
+          "status": "verified",
+          "note": "Inventário do NRO (devkitA64): 21 SVCs, 6 novos de IPC/memória compartilhada (0x13, 0x14, 0x17, 0x1F, 0x21, 0x52), porta sm: e 80 leituras de tpidrro_el0 (buffer de IPC da TLS). O oráculo roda pelos dummies do shim: o pad determinístico dá A no frame 30 e Plus no 60. Reconstruído do próprio NRO pelo pipeline: reconstructed_hb_services.c é a saída do pipeline com e sem o .elf ao lado (3a66759 corrigiu o laço de 30 frames, sem a chamada duplicada a appletMainLoop), compila no NDK r28 sem warnings e é idêntico ao oráculo no A56."
         },
         "attempts": [],
         "device_runs": [
+          {
+            "binary": "C reconstruído do hb_services.nro stripped (sem .elf; NDK r28, taskset 80)",
+            "runs": 15,
+            "median_s": null,
+            "min_s": null,
+            "result": "4 / 60 / 2"
+          },
+          {
+            "binary": "C reconstruído do hb_services.nro com o .elf ao lado (NDK r28, taskset 80)",
+            "runs": 15,
+            "median_s": null,
+            "min_s": null,
+            "result": "4 / 60 / 2"
+          },
           {
             "binary": "hb_services_oracle (taskset cpu7)",
             "runs": 1,
@@ -1009,6 +1042,11 @@
           {
             "check": "svc_shim_test no A56 com os SVCs de IPC dummy",
             "value": "54/54",
+            "ok": true
+          },
+          {
+            "check": "Pipeline no hb_services.nro stripped e com .elf → reconstructed_hb_services.c (idêntico à saída do pipeline) → NDK r28 (0 warnings) → A56 = oráculo (15×, taskset 80)",
+            "value": "4 serviços / 60 frames / 2 botões, 15/15 nos dois modos",
             "ok": true
           }
         ]
