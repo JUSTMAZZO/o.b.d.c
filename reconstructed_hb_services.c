@@ -45,7 +45,6 @@ int main(void) {
   padConfigureInput(1, 31);
   padInitializeWithMask(&sp_0x38, 0x100000001);
   while (appletMainLoop()) {
-    if (!appletMainLoop()) break;
     if (w19 == 60) break;
     w19 = (w19 + 1);
     padUpdate(&sp_0x38);

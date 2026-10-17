@@ -323,6 +323,7 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
     # 1. Carrega simbolos do ELF se explicitamente fornecido
     syms = {}          # addr -> (name, size, stype, sec)
     syms_by_name = {}  # name -> (addr, size, stype, sec)
+    has_elf_syms = False
     if elf_path and os.path.exists(elf_path):
         out = subprocess.run([objdump, '-t', elf_path], capture_output=True, text=True, check=True).stdout
         for line in out.splitlines():
@@ -335,6 +336,7 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
                 name = m.group(6)
                 syms[addr] = (name, size, stype, sec)
                 syms_by_name[name] = (addr, size, stype, sec)
+        has_elf_syms = bool(syms)
 
     # 2. Extracao de strings em .rodata e .data
     strings = {}
@@ -412,7 +414,7 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
         except ValueError:
             pass
 
-    if not syms:
+    if not has_elf_syms:
         # 4a. Mapeia stubs de chamadas de sistema (svc #imm)
         svc_map = load_svc_table()
         for addr, mnem, rest, line in insns:
@@ -471,6 +473,8 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
         max_target = start_addr
         fn_ins = []
         while cur in insn_by_addr:
+            if cur != start_addr and cur in known_entries:
+                break
             item = insn_by_addr[cur]
             addr, mnem, rest, line = item
             fn_ins.append(item)
@@ -479,7 +483,7 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
             if mnem.startswith('b.') or mnem in ('cbz', 'cbnz', 'tbz', 'tbnz'):
                 try:
                     tgt = int(rest.split(',')[-1].strip(), 16)
-                    if tgt > max_target:
+                    if tgt > max_target and tgt not in known_entries:
                         max_target = tgt
                 except ValueError:
                     pass
@@ -503,61 +507,185 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
     main_ins = delimit_func(main_addr)
     main_size = len(main_ins) * 4
 
-    # 7. Inferencia contextual de snprintf, malloc e free dentro do main para binarios stripped
-    if not syms_by_name.get('snprintf') or not syms_by_name.get('malloc'):
-        alloc_regs = {}
+    # Carrega lista de primitivas conhecidas do switch_hle_shim.h se disponivel
+    shim_fns = set()
+    for sp in [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'switch_hle_shim.h'),
+        'switch_hle_shim.h',
+        os.path.join(os.getcwd(), 'switch_hle_shim.h'),
+    ]:
+        if os.path.exists(sp):
+            try:
+                with open(sp, encoding='utf-8') as f:
+                    shim_fns = set(re.findall(r'SHIM_API\s+[\w\s\*]+?\b(\w+)\s*\(', f.read()))
+            except Exception:
+                pass
+            break
+
+    # 7. Inferencia contextual de simbolos de biblioteca e shim para binarios stripped
+    if not has_elf_syms:
+        def register_sym(s_addr, s_name, s_size=0x40):
+            syms[s_addr] = (s_name, s_size, 'FUNC', '.text')
+            syms_by_name[s_name] = (s_addr, s_size, 'FUNC', '.text')
+            known_entries.add(s_addr)
+
+        last_bl = None
         for i, (addr, mnem, rest, line) in enumerate(main_ins):
-            if mnem == 'bl':
-                try:
-                    tgt = int(rest.strip(), 16)
-                except ValueError:
-                    continue
+            if mnem != 'bl':
+                continue
+            try:
+                tgt = int(rest.strip(), 16)
+            except ValueError:
+                continue
 
-                # Inferencia de snprintf (buffer, tamanho, formato com '%')
-                if 'snprintf' not in syms_by_name:
-                    start_bb = i
-                    while start_bb > max(0, i - 15):
-                        prev_m = main_ins[start_bb - 1][1]
-                        if prev_m in ('bl', 'b', 'ret') or prev_m.startswith('b.'):
+            start_bb = i
+            while start_bb > 0:
+                prev_m = main_ins[start_bb - 1][1]
+                if prev_m in ('bl', 'b', 'ret', 'br') or prev_m.startswith('b.') or prev_m in ('cbz', 'cbnz', 'tbz', 'tbnz'):
+                    break
+                start_bb -= 1
+
+            window = main_ins[start_bb:i]
+            reg_val = {}
+            reg_str = {}
+            for w_addr, w_mn, w_ops, _ in window:
+                toks = [o.strip() for o in w_ops.split(',')] if w_ops else []
+                if w_mn == 'adrp':
+                    try:
+                        reg_val[toks[0].lower()] = int(toks[1].lstrip('#'), 16)
+                    except ValueError:
+                        pass
+                elif w_mn == 'add' and len(toks) >= 3:
+                    dst, src = toks[0].lower(), toks[1].lower()
+                    if src in reg_val and toks[2].startswith('#'):
+                        try:
+                            off = int(toks[2].lstrip('#'), 0)
+                            ptr = reg_val[src] + off
+                            reg_val[dst] = ptr
+                            if hex(ptr) in strings:
+                                reg_str[dst] = strings[hex(ptr)]
+                        except ValueError:
+                            pass
+                elif w_mn == 'mov':
+                    dst = toks[0].lower()
+                    if toks[1].startswith('#'):
+                        try:
+                            reg_val[dst] = int(toks[1].lstrip('#'), 0)
+                        except ValueError:
+                            pass
+                    elif toks[1].lower() in reg_str:
+                        reg_str[dst] = reg_str[toks[1].lower()]
+                    elif toks[1].lower() in reg_val:
+                        reg_val[dst] = reg_val[toks[1].lower()]
+                elif w_mn == 'movk':
+                    dst = toks[0].lower()
+                    if dst in reg_val and len(toks) >= 2 and toks[1].startswith('#'):
+                        try:
+                            imm = int(toks[1].lstrip('#'), 0)
+                            sh = int(toks[2].split('#')[1], 0) if len(toks) >= 3 and 'LSL' in toks[2] else 0
+                            reg_val[dst] |= (imm << sh)
+                        except ValueError:
+                            pass
+
+            s0 = reg_str.get('x0', '')
+            s2 = reg_str.get('x2', '')
+            w0 = reg_val.get('w0', reg_val.get('x0'))
+            w1 = reg_val.get('w1', reg_val.get('x1'))
+            w5 = reg_val.get('w5')
+            w6 = reg_val.get('w6')
+
+            if s0.startswith('[+] ') and s0.endswith('\n') and 'out' not in syms_by_name:
+                register_sym(tgt, 'out', 0x20)
+
+            if s0 in ('smInitialize', 'appletInitialize', 'hidInitialize', 'fsInitialize'):
+                register_sym(tgt, 'open_service', 0x40)
+                if last_bl:
+                    register_sym(last_bl, s0, 0x100)
+
+            if (w1 == 0x1f or w1 == 31) and w0 == 1:
+                register_sym(tgt, 'padConfigureInput', 0x40)
+
+            if w1 == 0x100000001:
+                register_sym(tgt, 'padInitializeWithMask', 0x40)
+
+            if ('%' in s2 or ('%' in strings.get(hex(reg_val.get('x2', 0)), ''))) and (w1 is not None and w1 > 0):
+                register_sym(tgt, 'snprintf', 0x100)
+
+            if w0 is not None and w0 in (400000, 100000, 0x61a80, 200000) and 'malloc' not in syms_by_name:
+                register_sym(tgt, 'malloc', 0x40)
+                if tgt + 0x40 in insn_by_addr:
+                    register_sym(tgt + 0x40, 'free', 0x20)
+
+            if w5 == 0x2c and w6 in (0xfffffffe, -2, 4294967294):
+                register_sym(tgt, 'threadCreate', 0x40)
+                w_worker = reg_val.get('x1')
+                if w_worker and w_worker in insn_by_addr:
+                    register_sym(w_worker, 'sub_1004f0', 0x200)
+
+            last_bl = tgt
+
+        if 'threadCreate' in syms_by_name:
+            tc_addr = syms_by_name['threadCreate'][0]
+            tc_idx = next(i for i, ins in enumerate(main_ins) if ins[1] == 'bl' and int(ins[2], 16) == tc_addr)
+            for j in range(tc_idx + 1, min(tc_idx + 6, len(main_ins))):
+                if main_ins[j][1] == 'bl':
+                    register_sym(int(main_ins[j][2], 16), 'threadStart', 0x40)
+                    break
+
+            if 'svcSignalProcessWideKey' in syms_by_name:
+                sig_addr = syms_by_name['svcSignalProcessWideKey'][0]
+                sig_idx = next((i for i, ins in enumerate(main_ins) if ins[1] == 'bl' and int(ins[2], 16) == sig_addr), None)
+                if sig_idx is not None:
+                    for j in range(sig_idx - 1, max(0, sig_idx - 10), -1):
+                        if main_ins[j][1] == 'bl':
+                            register_sym(int(main_ins[j][2], 16), 'mutexLock', 0x40)
                             break
-                        start_bb -= 1
-                    has_fmt, has_size, adrp_x2 = False, False, None
-                    for j in range(start_bb, i):
-                        a_j, m_j, r_j, _ = main_ins[j]
-                        if m_j == 'adrp' and r_j.startswith('x2,'):
-                            m_x2 = re.search(r'0x([0-9a-fA-F]+)', r_j)
-                            if m_x2:
-                                adrp_x2 = int(m_x2.group(1), 16)
-                        elif m_j == 'add' and r_j.startswith('x2, x2,') and adrp_x2:
-                            m_off = re.search(r'#(0x[0-9a-fA-F]+|\d+)', r_j)
-                            if m_off:
-                                off = int(m_off.group(1), 0)
-                                str_addr = hex(adrp_x2 + off)
-                                if '%' in strings.get(str_addr, ''):
-                                    has_fmt = True
-                        elif m_j == 'mov' and (r_j.startswith('w1,') or r_j.startswith('x1,')):
-                            has_size = True
-                    if has_fmt and has_size:
-                        syms[tgt] = ('snprintf', 0x100, 'FUNC', '.text')
-                        syms_by_name['snprintf'] = (tgt, 0x100, 'FUNC', '.text')
-                        known_entries.add(tgt)
+                    for j in range(sig_idx + 1, min(sig_idx + 10, len(main_ins))):
+                        if main_ins[j][1] == 'bl':
+                            register_sym(int(main_ins[j][2], 16), 'mutexUnlock', 0x40)
+                            break
 
-                # Inferencia de malloc e free (malloc retorna ponteiro guardado em reg; reg passado para free)
-                if 'malloc' not in syms_by_name or 'free' not in syms_by_name:
-                    if i > 0 and main_ins[i - 1][1].startswith('mov') and re.match(r'[wx]0,', main_ins[i - 1][2]):
-                        if i + 1 < len(main_ins) and main_ins[i + 1][1].startswith('mov') and re.match(r'[wx]\d+,\s*x0', main_ins[i + 1][2]):
-                            dest_reg = main_ins[i + 1][2].split(',')[0].strip()
-                            alloc_regs[dest_reg] = tgt
-                    if i > 0 and main_ins[i - 1][1].startswith('mov') and re.match(r'x0,\s*([wx]\d+)', main_ins[i - 1][2]):
-                        src_reg = re.match(r'x0,\s*([wx]\d+)', main_ins[i - 1][2]).group(1)
-                        if src_reg in alloc_regs:
-                            malloc_addr = alloc_regs[src_reg]
-                            syms[malloc_addr] = ('malloc', 0x40, 'FUNC', '.text')
-                            syms_by_name['malloc'] = (malloc_addr, 0x40, 'FUNC', '.text')
-                            syms[tgt] = ('free', 0x20, 'FUNC', '.text')
-                            syms_by_name['free'] = (tgt, 0x20, 'FUNC', '.text')
-                            known_entries.add(malloc_addr)
-                            known_entries.add(tgt)
+            if 'mutexUnlock' in syms_by_name:
+                mu_addr = syms_by_name['mutexUnlock'][0]
+                mu_idx = next(i for i, ins in enumerate(main_ins) if ins[1] == 'bl' and int(ins[2], 16) == mu_addr)
+                join_bls = [int(main_ins[j][2], 16) for j in range(mu_idx + 1, len(main_ins)) if main_ins[j][1] == 'bl' and int(main_ins[j][2], 16) not in syms]
+                if len(join_bls) >= 2:
+                    register_sym(join_bls[0], 'threadWaitForExit', 0x40)
+                    register_sym(join_bls[1], 'threadClose', 0x40)
+
+        if 'smInitialize' in syms_by_name:
+            if 'padInitializeWithMask' in syms_by_name:
+                pinit_addr = syms_by_name['padInitializeWithMask'][0]
+                pinit_idx = next(i for i, ins in enumerate(main_ins) if ins[1] == 'bl' and int(ins[2], 16) == pinit_addr)
+                loop_branch_tgt = None
+                for j in range(pinit_idx + 1, len(main_ins)):
+                    if main_ins[j][1] == 'b':
+                        try:
+                            loop_branch_tgt = int(main_ins[j][2], 16)
+                            break
+                        except ValueError:
+                            pass
+                for j in range(pinit_idx + 1, len(main_ins)):
+                    if main_ins[j][0] == loop_branch_tgt and main_ins[j][1] == 'bl':
+                        try:
+                            register_sym(int(main_ins[j][2], 16), 'appletMainLoop', 0x40)
+                        except ValueError:
+                            pass
+                    elif loop_branch_tgt and main_ins[j][0] < loop_branch_tgt and main_ins[j][1] == 'bl':
+                        try:
+                            register_sym(int(main_ins[j][2], 16), 'padUpdate', 0x40)
+                        except ValueError:
+                            pass
+
+            ret_indices = [i for i, ins in enumerate(main_ins) if ins[1] == 'ret']
+            if ret_indices:
+                last_ret = ret_indices[-1]
+                trailing_bls = [int(main_ins[j][2], 16) for j in range(max(0, last_ret - 10), last_ret) if main_ins[j][1] == 'bl']
+                if len(trailing_bls) >= 4:
+                    register_sym(trailing_bls[-4], 'fsExit', 0x20)
+                    register_sym(trailing_bls[-3], 'hidExit', 0x20)
+                    register_sym(trailing_bls[-2], 'appletExit', 0x20)
+                    register_sym(trailing_bls[-1], 'smExit', 0x20)
 
     # 8. Extrator de funcao
     def extract_func(fn_name, start_addr, size):
@@ -674,7 +802,7 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
 
         c_name = syms[c_addr][0] if c_addr in syms else f'sub_{c_addr:x}'
         # Funcoes da libc/shim (strlen, malloc, free, svc*, etc.) nao necessitam de extracao de corpo
-        if c_name in ('strlen', 'memcpy', 'memset', 'memmove', 'strcmp', 'strcpy', 'strncpy',
+        if c_name in shim_fns or c_name in ('strlen', 'memcpy', 'memset', 'memmove', 'strcmp', 'strcpy', 'strncpy',
                       'malloc', 'free', 'calloc', 'realloc', 'snprintf', 'printf', 'puts') or c_name.startswith('svc'):
             continue
 

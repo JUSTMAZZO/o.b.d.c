@@ -2144,7 +2144,12 @@ class Skeleton:
                 is_leaf = not any(other in body for other in self.nat if other is not b)
                 has_internal = any(x.term and x.term.kind in COND_BRANCH and any(s in body and s is not b for s in x.succ) for x in body if x is not b)
                 if is_leaf and has_internal:
-                    lines += ['  ' + s for s in self.emit_loop_path(b, (b, body))]
+                    if inner.startswith('while ('):
+                        entry_b = next((s for s in b.succ if s in body), b)
+                        self.emitted.add(b)
+                        lines += ['  ' + s for s in self.emit_loop_path(entry_b, (b, body), visited={b})]
+                    else:
+                        lines += ['  ' + s for s in self.emit_loop_path(b, (b, body))]
                     self.emitted.update(body)
                     i += 1
                 else:
@@ -2201,7 +2206,7 @@ class Skeleton:
                         lines.append("}")
                     i = M.idx
                     continue
-                elif i + 1 < T.idx <= hi:
+                elif i + 1 < T.idx and (loop is None or T in loop[1]):
                     lines.append(f"if ({self.cond(neg(c))}) {{")
                     lines += ['  ' + s for s in self.emit_range(i + 1, T.idx, loop)]
                     lines.append('}')
@@ -2218,7 +2223,12 @@ class Skeleton:
                     is_leaf = not any(other in body for other in self.nat if other is not T)
                     has_internal = any(x.term and x.term.kind in COND_BRANCH and any(s in body and s is not T for s in x.succ) for x in body if x is not T)
                     if is_leaf and has_internal:
-                        lines += ['  ' + s for s in self.emit_loop_path(T, (T, body))]
+                        if inner.startswith('while ('):
+                            entry_T = next((s for s in T.succ if s in body), T)
+                            self.emitted.add(T)
+                            lines += ['  ' + s for s in self.emit_loop_path(entry_T, (T, body), visited={T})]
+                        else:
+                            lines += ['  ' + s for s in self.emit_loop_path(T, (T, body))]
                         self.emitted.update(body)
                     else:
                         lines += ['  ' + s for s in self.emit_range(start, self.loop_end(T, body), (T, body))]
