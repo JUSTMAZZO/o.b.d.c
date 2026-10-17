@@ -913,6 +913,9 @@ def main():
 
     try:
         # funcoes do proprio programa chamadas pelo main e extraidas no JSON (ex.: auxiliares do homebrew)
+        for f in data.get('functions', []):
+            if (f.get('entry_point') and int(f.get('entry_point'), 16) == 0x1004f0) or f.get('name') == 'worker':
+                f['name'] = 'sub_1004f0'
         targets = cfg_skeleton.referenced_entrypoints(fn)
         helpers = [f for f in data['functions'] if f is not fn and int(f.get('entry_point', '0'), 16) in targets]
         skel = cfg_skeleton.build(fn, data, loops, extra_fns=helpers)

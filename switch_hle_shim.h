@@ -38,6 +38,21 @@ typedef int32_t  s32;
 typedef int64_t  s64;
 typedef u32      Result;
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+__attribute__((constructor)) static void shim_init_guest_bss(void) {
+    VirtualAlloc((void *)0x100000, 0x100000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+}
+#elif defined(__linux__) || defined(__ANDROID__)
+#include <sys/mman.h>
+__attribute__((constructor)) static void shim_init_guest_bss(void) {
+    mmap((void *)0x100000, 0x100000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+}
+#endif
+
 /* Cada primitiva vira uma funcao real (bl), como a fronteira de ABI de um homebrew
  * que chama a libnx. noinline sozinho nao basta: com static o Clang ainda propaga
  * constantes para dentro da funcao e apaga chamadas sem efeito. weak torna a
@@ -537,6 +552,23 @@ typedef struct {
     u32 padding;
 } MemoryInfo;
 
+/* ------------------------------------------------------------------ threads e sincronizacao (tipos) */
+typedef void (*ThreadFunc)(void *);
+typedef u32 Mutex;
+typedef struct { Mutex lock; u32 counter; } RMutex;
+typedef u32 CondVar;
+
+typedef struct Thread {
+    Handle handle;
+    bool   owns_stack_mem;
+    void  *stack_mem;
+    void  *stack_mirror;
+    size_t stack_sz;
+    void **tls_array;
+    struct Thread *next;
+    struct Thread **prev_next;
+} Thread;
+
 /* svc 0x27: no Switch vai para o log de debug do kernel; aqui para o stdout (write, depois do stdio). */
 #if defined(__linux__)
 #include <unistd.h>
@@ -898,6 +930,114 @@ SHIM_API Result svcSendSyncRequest(Handle session)
 
     return 0;
 }
+
+typedef struct {
+    ThreadFunc entry;
+    void *arg;
+    HANDLE hThread;
+} WinShimThread;
+
+static WinShimThread g_win_threads[64];
+static LONG g_win_th_idx = 0;
+
+static DWORD WINAPI win32_thread_trampoline(LPVOID p) {
+    WinShimThread *slot = (WinShimThread *)p;
+    if (slot && slot->entry)
+        slot->entry(slot->arg);
+    return 0;
+}
+
+SHIM_API Result threadCreate(Thread *t, ThreadFunc entry, void *arg, void *stack_mem, size_t stack_sz, int prio, int cpuid)
+{
+    (void)stack_mem; (void)stack_sz; (void)prio; (void)cpuid;
+    LONG idx = InterlockedIncrement(&g_win_th_idx) - 1;
+    if (idx < 0 || idx >= 64) return 1;
+    g_win_threads[idx].entry = entry;
+    g_win_threads[idx].arg = arg;
+    g_win_threads[idx].hThread = NULL;
+    if (t) t->handle = (Handle)(idx + 1);
+    return 0;
+}
+
+SHIM_API Result threadStart(Thread *t) {
+    if (!t || t->handle == 0 || t->handle > 64) return 1;
+    WinShimThread *slot = &g_win_threads[t->handle - 1];
+    slot->hThread = CreateThread(NULL, 0, win32_thread_trampoline, slot, 0, NULL);
+    return slot->hThread ? 0 : 1;
+}
+
+SHIM_API Result threadWaitForExit(Thread *t) {
+    if (!t || t->handle == 0 || t->handle > 64) return 1;
+    WinShimThread *slot = &g_win_threads[t->handle - 1];
+    if (slot->hThread) {
+        WaitForSingleObject(slot->hThread, INFINITE);
+    }
+    return 0;
+}
+
+SHIM_API Result threadClose(Thread *t) {
+    if (!t || t->handle == 0 || t->handle > 64) return 1;
+    WinShimThread *slot = &g_win_threads[t->handle - 1];
+    if (slot->hThread) {
+        CloseHandle(slot->hThread);
+        slot->hThread = NULL;
+    }
+    return 0;
+}
+
+SHIM_API void mutexInit(Mutex *m) { if (m) *m = 0; }
+SHIM_API void mutexLock(Mutex *m) {
+    if (!m) return;
+    while (InterlockedCompareExchange((volatile LONG *)m, 1, 0) != 0) {
+        Sleep(0);
+    }
+}
+SHIM_API bool mutexTryLock(Mutex *m) {
+    if (!m) return true;
+    return InterlockedCompareExchange((volatile LONG *)m, 1, 0) == 0;
+}
+SHIM_API void mutexUnlock(Mutex *m) {
+    if (!m) return;
+    InterlockedExchange((volatile LONG *)m, 0);
+}
+
+SHIM_API void rmutexInit(RMutex *m) { if (m) { m->lock = 0; m->counter = 0; } }
+SHIM_API void rmutexLock(RMutex *m) { if (m) mutexLock(&m->lock); }
+SHIM_API bool rmutexTryLock(RMutex *m) { return m ? mutexTryLock(&m->lock) : true; }
+SHIM_API void rmutexUnlock(RMutex *m) { if (m) mutexUnlock(&m->lock); }
+
+SHIM_API void svcSleepThread(s64 nano)
+{
+    if (nano <= 0) return;
+#if defined(_WIN32)
+    Sleep((DWORD)(nano / 1000000ULL));
+#else
+    struct timespec ts = { (time_t)(nano / 1000000000LL), (long)(nano % 1000000000LL) };
+    nanosleep(&ts, NULL);
+#endif
+}
+
+SHIM_API void svcSignalProcessWideKey(u32 *key, s32 num) { (void)key; (void)num; }
+SHIM_API Result svcWaitProcessWideKeyAtomic(u32 *key, u32 *tag_location, u32 self_tag, u64 timeout)
+{
+    (void)key; (void)tag_location; (void)self_tag; (void)timeout;
+    return 0;
+}
+SHIM_API void condvarInit(CondVar *c) { if (c) *c = 0; }
+SHIM_API Result condvarWait(CondVar *c, Mutex *m) {
+    (void)c;
+    if (m) mutexUnlock(m);
+    Sleep(1);
+    if (m) mutexLock(m);
+    return 0;
+}
+SHIM_API Result condvarWaitTimeout(CondVar *c, Mutex *m, u64 timeout) {
+    (void)timeout;
+    return condvarWait(c, m);
+}
+SHIM_API Result condvarWake(CondVar *c, int num) { (void)c; (void)num; return 0; }
+SHIM_API Result condvarWakeOne(CondVar *c) { (void)c; return 0; }
+SHIM_API Result condvarWakeAll(CondVar *c) { (void)c; return 0; }
 #endif
 
 /* ------------------------------------------------------------------ fs: cartao SD sobre um diretorio do host */
@@ -2427,22 +2567,6 @@ SHIM_API Result svcGetInfo(u64 *out, u32 id0, Handle handle, u64 id1)
  */
 #include <pthread.h>
 #include <sched.h>
-
-typedef void (*ThreadFunc)(void *);
-typedef u32 Mutex;                                   /* libnx: _LOCK_T do newlib */
-typedef struct { Mutex lock; u32 counter; } RMutex;  /* libnx: struct __lock_t do newlib */
-typedef u32 CondVar;
-
-typedef struct Thread {
-    Handle handle;
-    bool   owns_stack_mem;
-    void  *stack_mem;
-    void  *stack_mirror;
-    size_t stack_sz;
-    void **tls_array;
-    struct Thread *next;
-    struct Thread **prev_next;
-} Thread;
 
 enum {
     KernelError_InvalidPriority = 112,
