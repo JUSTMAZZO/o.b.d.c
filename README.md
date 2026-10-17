@@ -7,7 +7,7 @@
 
 ![Endgame](https://img.shields.io/badge/Endgame-74%25-orange?style=for-the-badge) ![Fase atual](https://img.shields.io/badge/Fase%20atual-3%20%E2%80%93%20Em%20andamento-yellow?style=for-the-badge) ![ISA](https://img.shields.io/badge/ISA-AArch64%20%E2%86%92%20AArch64-informational?style=for-the-badge&logo=arm&logoColor=white) ![Alvo](https://img.shields.io/badge/Alvo-Galaxy%20A56%20%C2%B7%20Exynos%201580-1428A0?style=for-the-badge&logo=samsung&logoColor=white)
 
-![Validação](https://img.shields.io/badge/Valida%C3%A7%C3%A3o-68%2F70%20OK-red?style=for-the-badge) ![Benchmarks](https://img.shields.io/badge/Benchmarks-10%20no%20A56-teal?style=for-the-badge&logo=android&logoColor=white) ![Instruções](https://img.shields.io/badge/Instru%C3%A7%C3%B5es-24%20suportadas-blueviolet?style=for-the-badge) ![LLM](https://img.shields.io/badge/LLM-qwen2.5--coder%207b-black?style=for-the-badge&logo=ollama&logoColor=white) ![Atualizado](https://img.shields.io/badge/Atualizado-2026--10--16-lightgrey?style=for-the-badge) [![Licença](https://img.shields.io/badge/Licen%C3%A7a-MIT-green?style=for-the-badge)](LICENSE)
+![Validação](https://img.shields.io/badge/Valida%C3%A7%C3%A3o-72%2F75%20OK-red?style=for-the-badge) ![Benchmarks](https://img.shields.io/badge/Benchmarks-10%20no%20A56-teal?style=for-the-badge&logo=android&logoColor=white) ![Instruções](https://img.shields.io/badge/Instru%C3%A7%C3%B5es-24%20suportadas-blueviolet?style=for-the-badge) ![LLM](https://img.shields.io/badge/LLM-qwen2.5--coder%207b-black?style=for-the-badge&logo=ollama&logoColor=white) ![Atualizado](https://img.shields.io/badge/Atualizado-2026--10--16-lightgrey?style=for-the-badge) [![Licença](https://img.shields.io/badge/Licen%C3%A7a-MIT-green?style=for-the-badge)](LICENSE)
 
 </div>
 
@@ -37,7 +37,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | Módulo | Status | Progresso | O que faz hoje | Próximo |
 |---|---|---|---|---|
 | **Ghidra Extractor**<br>`ExtractMain.java` | ✅ Concluído | `████████░░ 80%` | C descompilado + ASM AArch64 + .rodata + isolamento de loops + nomes dos alvos de bl e strings carregadas (formatos de printf) + ponteiros de função referenciados por endereço (callbacks como o hook do applet, função criada no Ghidra se faltar) | Tipos de ponteiro/structs, objetos locais da pilha passados por endereço |
-| **NEON Symbolic Lifter**<br>`neon_lifter.py` | 🟡 Em andamento | `█████████░ 92%` | Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG, com laços escalares deixados ao estruturador, 9 instruções escalares (umull, madd, msub, bic, mvn, ubfiz, ubfx, ldrb, ldrh), objetos locais da pilha passados por endereço e if/else dentro de laços (hb_fb.elf reconstruído) | Corrigir no reconstructed_hb_fb.c: ldr de registrador callee-saved a partir de objeto da pilha (ldr x20,[sp,#0x68]) tratado como restauração de quadro, else perdidos no if/else aninhado do relógio e o warning de cast do callback; depois switch, ld3/ld4 com binário real |
+| **NEON Symbolic Lifter**<br>`neon_lifter.py` | 🟡 Em andamento | `█████████░ 92%` | Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG, com laços escalares deixados ao estruturador, 9 instruções escalares (umull, madd, msub, bic, mvn, ubfiz, ubfx, ldrb, ldrh), objetos locais da pilha passados por endereço e if/else dentro de laços (hb_fb.elf reconstruído) | Regressão desde 0867da6: o C de referência regerado de switch, aos e hb_compute diverge do aparelho (switch/aos: laço de frames para em 30, checksum 50613278640; hb_compute: impulso base 1 vira 0, checksum 87504230500); array e hybrid seguem certos. Corrigir e voltar a exigir a linha de base dos JSONs antigos antes de mudar o estruturador; depois switch, ld3/ld4 com binário real |
 | **Local LLM Qwen 2.5 7B**<br>`qwen2.5-coder:7b (Ollama, CUDA parcial)` | 🟡 Em andamento | `████████░░ 80%` | Gera C a partir do resumo do lifter + esqueleto do CFG; checagem de estrutura e gate no host antes do ADB, com 1 nova tentativa guiada. Se o Qwen esgota as tentativas (ou o Ollama falha), o pipeline usa o C de referência determinístico e registra o motivo em <saida>.pipeline.json | Fazer o Qwen respeitar for (;;) com break do GCC e renomear variáveis de registrador |
 | **Android AArch64 Runner**<br>`Galaxy A56 via ADB` | 🟡 Em andamento | `████░░░░░░ 45%` | push + chmod + execução em /data/local/tmp, medições intercaladas (15×) | Script único de round-trip (compilar → push → rodar → comparar), afinidade de núcleo (taskset) |
 | **Switch HLE Shim**<br>`switch_hle_shim.h` | 🟡 Em andamento | `█████████░ 92%` | Primitivas libnx, 29 SVCs do kernel (24 implementados sobre Bionic/POSIX e 5 de IPC/memória compartilhada como dummies), transfer memory completa (svcCreateTransferMemory/svcMapTransferMemory/svcUnmapTransferMemory e tmemCreate/Map/Unmap/Close: origem protegida com a permissão pedida, alias real por memfd), API Thread/Mutex/RMutex/CondVar, time:u (timeGetCurrentTime sobre CLOCK_REALTIME, microssegundos, steady clock, calendário local), ciclo de vida do applet (hooks, foco, modo de operação, pedido de saída com appletLockExit, fila de mensagens entregue no appletMainLoop), framebuffer linear simulado (framebufferCreate/MakeLinear/Begin/End, RGBA8888/RGBX/BGRA/565/4444, checksum FNV-1a e PPM da tela), fs de alto nível (fsOpenSdCardFileSystem + fsFs/fsFile/fsDir sobre um diretório do host, portátil Bionic/Windows, caminhos normalizados contra ".."), dispositivos do stdio (fsdevMountSdmc/MountDevice/TranslatePath e romfsInit/MountSelf somente leitura, com fopen/opendir/stat/... roteados para sdmc:/ e romfs:/) e entrada desacoplada (roteiro por quadro + buffer ao vivo com seqlock, botões e analógicos, PadState compacta inalterada), com os tipos e resultados da libnx 2.10.0 | padRepeater, caminhos relativos a partir de sdmc:/; depois emular as respostas IPC (CMIF) de sm, hid e fs no buffer da TLS |
@@ -243,6 +243,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | C de referência sem LLM (esqueleto do CFG + lifter, ref_switch) no A56, 3× | `60 / 88196450180 / 1734747` | ✅ |
 | Desempenho do C reconstruído vs original (20 pares intercalados, razão B/A mediana) | `1,011×` | ✅ |
 | Gate no host: reconstructed_switch.c do Qwen = C de referência (e conferido no A56, 3×) | `60 / 88196450180 / 1734747` | ✅ |
+| C de referência regerado pelo pipeline atual (desde 0867da6) no host | `30 / 50613278640 / 1005657 (regressão do estruturador)` | ❌ |
 
 ### `switch_aos_bench` — Homebrew libnx: 100.000 partículas como array of structs {x, vx} × 60 frames
 
@@ -271,6 +272,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | Lifter: ld2/st2 concreto × fórmulas simbólicas (memória dos 2 campos + acumulador) | `3/3 loops` | ✅ |
 | C de referência sem LLM no host (llvm-mingw, sem flags permissivas) | `60 / 88196450180 / 1734747` | ✅ |
 | Gate no host: reconstructed_aos.c do Qwen = C de referência (e conferido no A56, 3×) | `60 / 88196450180 / 1734747` | ✅ |
+| C de referência regerado pelo pipeline atual (desde 0867da6) no host | `30 / 50613278640 / 1005657 (regressão do estruturador)` | ❌ |
 
 ### `hb_compute` — Homebrew mínimo libnx (sem serviços): 100.000 partículas × 60 frames, saída por svcOutputDebugString
 
@@ -308,6 +310,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | C reconstruído do ELF no A56 (15×, taskset 80) | `60 / 88196450180 / 1734747` | ✅ |
 | Desempenho do C reconstruído vs fonte via shim (20 pares intercalados, razão mediana) | `1,051×` | ✅ |
 | Fallback determinístico: C final idêntico ao de referência, gate no host e A56 (15×) | `60 / 88196450180 / 1734747` | ✅ |
+| C de referência regerado pelo pipeline atual (desde 0867da6) no host | `60 / 87504230500 / 1710416 (impulso base 1 vira 0: regressão do estruturador)` | ❌ |
 
 ### `hb_threads` — Homebrew libnx multi-thread: 4 threads × 25.000 partículas × 60 frames, Mutex + CondVar + sleep
 
@@ -394,14 +397,14 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 
 ### `hb_fb` — Homebrew libnx com framebuffer linear: 60 frames 1280x720 RGBA8888 por software + relógio + ciclo de vida do applet
 
-> 📱 Barras de cor rolando, degradê animado e quadrado em movimento; a animação depende só do número do quadro (o tick do sistema só mede o tempo de render), por isso o checksum é determinístico. O mesmo hb_fb.c compila com a libnx 2.10.0 real (devkitA64, 0 warnings) e como oráculo pelo shim, no qual o sistema pede a saída depois do quadro 60 (appletLockExit + hook OnExitRequest, appletMainLoop devolve false). A tela apresentada pelo shim é conferida com o FNV-1a calculado pelo app e gravada em PPM, idêntico byte a byte à referência numpy (ref_hb_fb.py) no host e no A56. Render por software no A56: mediana 2,82 ms/frame (2,79–2,91, 15×, cpu7). O hb_fb.nro real usa svcCreateTransferMemory (0x15), agora tratado pelo shim. Reconstrução do hb_fb.elf pelo pipeline (Ghidra: main + out + on_applet → cfg_skeleton/neon_lifter → reconstructed_hb_fb.c, sem LLM): com OBDC_INPUT=none, 60 frames, saída pelo pedido do sistema, soma ponderada e FNV-1a iguais ao oráculo no host e no A56 (15×, taskset 80), render 3,46 ms/frame. Defeito conhecido: a checagem do relógio lê uma variável não inicializada (x20 em vez do objeto da pilha sp+0x68) e imprime INCOERENTE onde o oráculo imprime coerente com time().
+> 📱 Barras de cor rolando, degradê animado e quadrado em movimento; a animação depende só do número do quadro (o tick do sistema só mede o tempo de render), por isso o checksum é determinístico. O mesmo hb_fb.c compila com a libnx 2.10.0 real (devkitA64, 0 warnings) e como oráculo pelo shim, no qual o sistema pede a saída depois do quadro 60 (appletLockExit + hook OnExitRequest, appletMainLoop devolve false). A tela apresentada pelo shim é conferida com o FNV-1a calculado pelo app e gravada em PPM, idêntico byte a byte à referência numpy (ref_hb_fb.py) no host e no A56. Render por software no A56: mediana 2,82 ms/frame (2,79–2,91, 15×, cpu7). O hb_fb.nro real usa svcCreateTransferMemory (0x15), agora tratado pelo shim. Reconstrução do hb_fb.elf pelo pipeline (Ghidra: main + out + on_applet → cfg_skeleton/neon_lifter → reconstructed_hb_fb.c, sem LLM): com OBDC_INPUT=none, 60 frames, saída pelo pedido do sistema, soma ponderada e FNV-1a iguais ao oráculo no host e no A56 (15×, taskset 80), render 3,56 ms/frame. Com 0036de1 a checagem do relógio também confere (load de x20 do objeto da pilha sp+0x68 preservado, if/else aninhado completo, assinatura do on_applet corrigida): saída inteira igual ao oráculo e 0 warnings.
 
 **Execução no aparelho**
 
 | Binário | Execuções | Mediana | Mínimo | Resultado |
 |---|:---:|---:|---:|---|
 | hb_fb_oracle (taskset cpu7, tempo de render por frame) | 15 | 0.0028 s | 0.0028 s | `0x2a45a5f1c5fad331` ✅ |
-| reconstructed_hb_fb (C reconstruído do ELF, NDK r28 -O2, taskset cpu7, OBDC_INPUT=none) | 15 | 0.0035 s | 0.0034 s | `0x2a45a5f1c5fad331` ✅ |
+| reconstructed_hb_fb (C reconstruído do ELF, NDK r28 -O2, taskset cpu7, OBDC_INPUT=none) | 15 | 0.0036 s | 0.0035 s | `0x2a45a5f1c5fad331` ✅ |
 
 **Validação**
 
@@ -414,8 +417,10 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | svc_shim_test no A56 com transfer memory (0x15/0x51/0x52), 10× taskset 80 + 5× taskset f0 | `210/210` | ✅ |
 | Regressão: 12 binários (suíte + hb_fb) com transfer memory, fim dos 60 quadros como pedido de saída e OBDC_INPUT, × shim anterior no A56 e no host; main() igual | `12/12` | ✅ |
 | Pipeline no hb_fb.elf: Ghidra (main + out + on_applet) → cfg_skeleton/neon_lifter → reconstructed_hb_fb.c → A56 (FNV 0x2a45a5f1c5fad331) | `60 frames / 0x1b5c804513888ea0 / 0x2a45a5f1c5fad331 / OnExitRequest x1, 15/15 (host também)` | ✅ |
-| C reconstruído: linha do relógio (time:u) igual ao oráculo | `INCOERENTE × coerente com time() (x20 não inicializado)` | ❌ |
-| C reconstruído: -Wall -Wextra (llvm-mingw / NDK r28) | `4 / 1 warnings (uso de x4/x20 não inicializados, cast do callback)` | ❌ |
+| C reconstruído: linha do relógio (time:u) igual ao oráculo | `coerente com time() (0036de1: load de x20 da pilha preservado, if/else aninhado completo), 15/15 no A56` | ✅ |
+| C reconstruído: -Wall -Wextra (llvm-mingw / NDK r28) | `0 / 0 warnings` | ✅ |
+| C reconstruído = saída do pipeline (neon_lifter --emit-c sobre ghidra_extraction_hb_fb.json) | `idêntico` | ✅ |
+| svc_shim_test no A56 com TLS do Horizon (shimGetTls, 8 pthreads paralelas, x18 preservado), 10× taskset 80 + 5× taskset f0 | `219/219 (host: 145/145)` | ✅ |
 | svc_shim_test: time, applet e framebuffer portáveis no host (llvm-mingw) | `138/138` | ✅ |
 | svc_shim_test no A56 (10× taskset 80 + 5× taskset f0) | `192/192` | ✅ |
 | Regressão: 11 binários da suíte com o shim novo × anterior no A56 (15× taskset 80; hb_threads também f0) e no host; main() igual instrução a instrução | `11/11` | ✅ |
