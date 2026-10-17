@@ -27,7 +27,7 @@ KNOWN_ARITY = {'strlen': 1, 'malloc': 1, 'free': 1, 'puts': 1, 'calloc': 2, 'rea
                'memset': 3, 'memmove': 3, 'strcmp': 2, 'strcpy': 2, 'strncpy': 3, 'clock': 0, 'abort': 0,
                'exit': 1}
 CTYPE = {'u32': 'uint32_t', 'u64': 'uint64_t', 'f64': 'double', 'ptr': 'uint32_t *', 'void*': 'void *',
-         'bptr': 'uint8_t *', 'str': 'const char *'}
+         'bptr': 'uint8_t *', 'str': 'const char *', 'u128': 'unsigned __int128'}
 CMP_NEG = {'==': '!=', '!=': '==', '<': '>=', '>=': '<', '>': '<=', '<=': '>'}
 CC_OP = {'eq': '==', 'ne': '!=', 'hi': '>', 'hs': '>=', 'cs': '>=', 'lo': '<', 'cc': '<', 'ls': '<=',
          'gt': '>', 'ge': '>=', 'lt': '<', 'le': '<='}
@@ -68,9 +68,15 @@ def reg(op):
     m = re.fullmatch(r'([qdshb])(\d+)', op)
     if m:
         return f'v{m.group(2)}', {'q': 128, 'd': 64, 's': 32, 'h': 16, 'b': 8}[m.group(1)]
-    m = re.fullmatch(r'v(\d+)\.\w+', op)
+    m = re.fullmatch(r'v(\d+)\.([qdshb])\w*\[(\d+)\]', op)
     if m:
-        return f'v{m.group(1)}', 128
+        w = {'q': 128, 'd': 64, 's': 32, 'h': 16, 'b': 8}[m.group(2)]
+        return f'v{m.group(1)}', w
+    m = re.fullmatch(r'v(\d+)\.(\w+)', op)
+    if m:
+        arr = m.group(2).lower()
+        w = 64 if arr in ('8b', '4h', '2s', '1d') else 128
+        return f'v{m.group(1)}', w
     return None, None
 
 
@@ -199,7 +205,7 @@ class Render:
             return f"/* bits->double */ {self(a[0])}"
         if k == 'load':
             base, off, width = a
-            ctype = {8: 'uint8_t', 16: 'uint16_t', 32: 'uint32_t', 64: 'uint64_t'}.get(width, 'uint64_t')
+            ctype = {8: 'uint8_t', 16: 'uint16_t', 32: 'uint32_t', 64: 'uint64_t', 128: 'unsigned __int128'}.get(width, 'uint64_t')
             if base.const() is not None and off.const() is not None:
                 tot = base.const() + off.const()
                 return f"*({ctype} *)({self(X('const', tot))})"
@@ -214,6 +220,8 @@ class Render:
                     return f"{root.a[0]}[{idx}]" + (f".f{rem}" if nf > 1 else "")
             if off.const() == 0:
                 return f"*({ctype} *)({self(base)})"
+            if off.const() is not None and off.const() < 0:
+                return f"*({ctype} *)((uint8_t *){self(base)} - {-off.const()})"
             return f"*({ctype} *)((uint8_t *){self(base)} + {self(off)})"
         raise SkeletonError(f"expressao sem renderizacao: {k}")
 
@@ -234,12 +242,12 @@ def is_frame(I, all_insns=None, idx=None):
     mn, ops = I.mn, I.ops
     if mn in ('sub', 'add') and len(ops) >= 2 and ops[1] == 'sp' and ops[0] in ('sp', 'x29'):
         return True
-    if mn in ('stp', 'str'):
+    if mn in ('stp', 'str', 'stur'):
         m = next((o for o in ops if o.startswith('[')), None)
         if m and mem(m)[0] == 'sp':
             regs = [reg(o)[0] for o in ops if not o.startswith('[') and not o.startswith('#')]
             return all(r in CALLEE_SAVED for r in regs)
-    if mn in ('ldp', 'ldr'):
+    if mn in ('ldp', 'ldr', 'ldur'):
         m = next((o for o in ops if o.startswith('[')), None)
         if m and mem(m)[0] == 'sp':
             regs = [reg(o)[0] for o in ops if not o.startswith('[') and not o.startswith('#')]
@@ -276,24 +284,54 @@ def classify(I, calls, all_insns=None, idx=None):
     elif is_frame(I, all_insns, idx):
         I.kind = 'frame'
     elif mn in ('mov', 'movz'):
-        d = R(ops[0])
-        if d.startswith('v'):
-            I.kind, I.defs, I.uses = 'vec', [d], [R(ops[1])]
+        if '.' in ops[0] and '[' in ops[0]:
+            # insercao em elemento de vetor: mov v31.s[1], w0
+            m = re.search(r'v(\d+)\.([shb])\[(\d+)\]', ops[0].lower())
+            if m:
+                I.kind = 'lane_insert'
+                I.v_reg = f'v{m.group(1)}'
+                I.elem_size = {'b': 8, 'h': 16, 's': 32}[m.group(2)]
+                I.lane = int(m.group(3))
+                I.defs = [I.v_reg]
+                I.src = ops[1]
+                I.uses = [I.v_reg] + ([R(ops[1])] if R(ops[1]) and R(ops[1]) != 'zr' else [])
+        elif len(ops) > 1 and '.' in ops[1] and '[' in ops[1]:
+            # extracao de elemento de vetor: mov w0, v31.s[1]
+            m = re.search(r'v(\d+)\.([dshb])\[(\d+)\]', ops[1].lower())
+            if m:
+                I.kind = 'lane_extract'
+                I.v_reg = f'v{m.group(1)}'
+                I.elem_size = {'b': 8, 'h': 16, 's': 32, 'd': 64}[m.group(2)]
+                I.lane = int(m.group(3))
+                I.width = W(ops[0])
+                I.defs = [R(ops[0])]
+                I.uses = [I.v_reg]
         else:
-            I.width, I.defs = W(ops[0]), [d]
-            s = R(ops[1])
-            if s == 'zr':
-                I.kind, I.val = 'const', 0
-            elif s:
-                I.kind, I.uses = 'copy', [s]
+            d = R(ops[0])
+            if d.startswith('v'):
+                I.kind, I.defs, I.uses = 'vec', [d], [R(ops[1])]
             else:
-                I.kind, I.val = 'const', imm(ops[1]) & mask(I.width)
+                I.width, I.defs = W(ops[0]), [d]
+                s = R(ops[1])
+                if s == 'zr':
+                    I.kind, I.val = 'const', 0
+                elif s:
+                    I.kind, I.uses = 'copy', [s]
+                else:
+                    I.kind, I.val = 'const', imm(ops[1]) & mask(I.width)
     elif mn == 'movk':
         I.kind, I.width, I.defs, I.uses = 'movk', W(ops[0]), [R(ops[0])], [R(ops[0])]
         I.val = imm(ops[1])
         I.sh = int(re.search(r'LSL #(\w+)', ops[2]).group(1), 0) if len(ops) > 2 else 0
     elif mn in ('adr', 'adrp'):
         I.kind, I.defs, I.val = 'const', [R(ops[0])], int(ops[1].lstrip('#'), 16)
+    elif mn in ('and', 'orr', 'eor', 'bic') and (ops[0].lower().startswith('v') or ops[0].lower().startswith('q') or ops[0].lower().startswith('d')):
+        w = W(ops[0]) or 128
+        I.kind, I.width = 'bin', w
+        I.op = {'orr': '|', 'and': '&', 'eor': '^', 'bic': 'bic'}[mn]
+        I.defs = [R(ops[0])]
+        I.srcs = ops[1:3]
+        I.uses = [R(o) for o in ops[1:3] if R(o) and R(o) != 'zr']
     elif mn in ('add', 'sub', 'mul', 'and', 'orr', 'eor', 'lsl', 'lsr', 'udiv', 'sdiv') and ops[0].startswith('v'):
         I.kind, I.defs, I.uses = 'vec', [R(ops[0])], [R(o) for o in ops[1:] if R(o)]
     elif mn in ('add', 'sub') and ops[1] in ('sp', 'wsp'):
@@ -356,43 +394,110 @@ def classify(I, calls, all_insns=None, idx=None):
         I.defs = [R(ops[0]), R(base)]
         I.uses = [R(base)]
         I.post = imm(ops[2])
-    elif mn in ('ldr', 'ldrb', 'ldrh') and R(ops[0]).startswith('x'):
+    elif mn in ('ldxr', 'ldaxr', 'ldxrb', 'ldxrh', 'ldaxrb', 'ldaxrh', 'ldar', 'ldarb', 'ldarh'):
         base, off = mem(ops[1])
-        if base == 'sp':
-            I.kind = 'stack_load'
-            I.off_val = imm(off)
-            I.width = 8 if mn == 'ldrb' else (16 if mn == 'ldrh' else W(ops[0]))
-            I.defs = [R(ops[0])]
-            I.uses = []
-        else:
-            if len(ops) > 2 or ops[1].endswith('!'):
-                raise SkeletonError(f"ldr com writeback fora de loop NEON: {I.line}")
-            I.kind = 'load'
-            I.width = 8 if mn == 'ldrb' else (16 if mn == 'ldrh' else W(ops[0]))
-            I.defs = [R(ops[0])]
-            I.base, I.off = base, off
-            parts = [p.strip() for p in ops[1].strip('[]').split(',')]
-            if len(parts) > 2 and 'LSL' in parts[2].upper():
-                I.off_shift = int(re.search(r'LSL\s+#?(\w+)', parts[2], re.I).group(1), 0)
-            I.uses = [r for r in (R(base), R(off)) if r and r not in ('sp', 'zr')]
-    elif mn == 'ldp' and R(ops[0]).startswith('x'):
+        I.kind = 'atomic_load'
+        I.width = 8 if mn.endswith('b') else (16 if mn.endswith('h') else W(ops[0]))
+        I.defs = [R(ops[0])]
+        I.base, I.off = base, off
+        I.order = '__ATOMIC_ACQUIRE' if ('a' in mn) else '__ATOMIC_RELAXED'
+        I.uses = [r for r in (R(base), R(off)) if r and r not in ('sp', 'zr')]
+    elif mn in ('stxr', 'stlxr', 'stxrb', 'stxrh', 'stlxrb', 'stlxrh'):
+        base, off = mem(ops[2])
+        I.kind = 'atomic_store'
+        I.width = 8 if mn.endswith('b') else (16 if mn.endswith('h') else W(ops[1]))
+        I.status_reg = R(ops[0])
+        I.src = ops[1]
+        I.base, I.off = base, off
+        I.order = '__ATOMIC_RELEASE' if ('l' in mn) else '__ATOMIC_RELAXED'
+        I.defs = [R(ops[0])]
+        I.uses = [r for r in (R(ops[1]), R(base), R(off)) if r and r not in ('sp', 'zr')]
+    elif mn in ('stlr', 'stlrb', 'stlrh'):
+        base, off = mem(ops[1])
+        I.kind = 'atomic_store_simple'
+        I.width = 8 if mn.endswith('b') else (16 if mn.endswith('h') else W(ops[0]))
+        I.src = ops[0]
+        I.base, I.off = base, off
+        I.order = '__ATOMIC_RELEASE'
+        I.defs = []
+        I.uses = [r for r in (R(ops[0]), R(base), R(off)) if r and r not in ('sp', 'zr')]
+    elif mn == 'clrex':
+        I.kind = 'clrex'
+        I.defs = []
+        I.uses = []
+    elif mn in ('clz', 'rbit'):
+        I.kind, I.width = mn, W(ops[0])
+        I.defs = [R(ops[0])]
+        I.srcs = [ops[1]]
+        I.uses = [R(ops[1])] if R(ops[1]) and R(ops[1]) != 'zr' else []
+    elif mn == 'udf':
+        I.kind = 'udf'
+        I.defs = []
+        I.uses = []
+    elif mn == 'sxtw':
+        I.kind, I.width = 'sxtw', 64
+        I.defs = [R(ops[0])]
+        I.srcs = [ops[1]]
+        I.uses = [R(ops[1])] if R(ops[1]) and R(ops[1]) != 'zr' else []
+    elif mn == 'umaddl':
+        I.kind, I.width = 'umaddl', 64
+        I.defs = [R(ops[0])]
+        I.srcs = ops[1:4]
+        I.uses = [R(o) for o in I.srcs if R(o) and R(o) != 'zr']
+    elif mn == 'ldrsw':
+        base, off = mem(ops[1])
+        I.kind = 'ldrsw'
+        I.width = 32
+        I.defs = [R(ops[0])]
+        I.base, I.off = base, off
+        I.uses = [r for r in (R(base), R(off)) if r and r not in ('sp', 'zr')]
+    elif mn in ('ldr', 'ldrb', 'ldrh', 'ldur', 'ldurb', 'ldurh') and (R(ops[0]).startswith(('x', 'v'))):
         m_op = next(o for o in ops if o.startswith('['))
         base, off = mem(m_op)
         if base == 'sp':
+            I.kind = 'stack_load'
+            I.off_val = imm(off)
+            I.width = 8 if 'b' in mn else (16 if 'h' in mn else W(ops[0]))
+            I.defs = [R(ops[0])]
+            I.uses = []
+        else:
+            I.kind = 'load'
+            I.width = 8 if 'b' in mn else (16 if 'h' in mn else W(ops[0]))
+            I.defs = [R(ops[0])]
+            I.base, I.off = base, off
+            parts = [p.strip() for p in m_op.strip('[]').split(',')]
+            if len(parts) > 2 and 'LSL' in parts[2].upper():
+                I.off_shift = int(re.search(r'LSL\s+#?(\w+)', parts[2], re.I).group(1), 0)
+            I.uses = [r for r in (R(base), R(off)) if r and r not in ('sp', 'zr')]
+            if m_op.endswith('!') or any(o.endswith('!') for o in ops):
+                I.writeback = True
+                I.defs.append(R(base))
+    elif mn == 'ldp':
+        m_op = next(o for o in ops if o.startswith('['))
+        base, off = mem(m_op)
+        if base == 'sp' and R(ops[0]).startswith('x'):
             I.kind = 'stack_ldp'
             I.off_val = imm(off)
             I.defs = [R(ops[0]), R(ops[1])]
             I.uses = []
         else:
-            raise SkeletonError(f"ldp nao suportado fora da pilha: {I.line}")
-    elif mn in ('str', 'strb', 'strh', 'stur', 'stp'):
-        base, off = mem(next(o for o in ops if o.startswith('[')))
+            I.kind = 'ldp_load'
+            I.width = W(ops[0])
+            I.base, I.off = base, off
+            I.defs = [R(ops[0]), R(ops[1])]
+            I.uses = [r for r in (R(base), R(off)) if r and r not in ('sp', 'zr')]
+            if m_op.endswith('!') or any(o.endswith('!') for o in ops):
+                I.writeback = True
+                I.defs.append(R(base))
+    elif mn in ('str', 'strb', 'strh', 'stur', 'sturb', 'sturh', 'stp'):
+        m_op = next(o for o in ops if o.startswith('['))
+        base, off = mem(m_op)
         if base == 'sp':
             off_v = imm(off)
-            if mn in ('strb', 'strh') or (mn == 'str' and R(ops[0]).startswith('x') and ops[0].startswith('w')):
+            if 'b' in mn or 'h' in mn or (mn == 'str' and R(ops[0]).startswith('x') and ops[0].startswith('w')):
                 I.kind = 'stack_store'
                 I.off_val = off_v
-                I.width = 8 if mn == 'strb' else (16 if mn == 'strh' else W(ops[0]))
+                I.width = 8 if 'b' in mn else (16 if 'h' in mn else W(ops[0]))
                 I.src = ops[0]
                 I.uses = [R(ops[0])] if R(ops[0]) and R(ops[0]) != 'zr' else []
             else:
@@ -403,15 +508,21 @@ def classify(I, calls, all_insns=None, idx=None):
             I.base, I.off = base, off
             I.srcs = ops[:2]
             I.uses = [r for r in (R(ops[0]), R(ops[1]), R(base), R(off)) if r and r not in ('sp', 'zr')]
-        elif (R(ops[0]).startswith('x') or R(ops[0]) == 'zr'):
+            if m_op.endswith('!') or any(o.endswith('!') for o in ops):
+                I.writeback = True
+                I.defs.append(R(base))
+        elif (R(ops[0]).startswith(('x', 'v')) or R(ops[0]) == 'zr'):
             I.kind = 'store'
-            I.width = 8 if mn == 'strb' else (16 if mn == 'strh' else W(ops[0]))
+            I.width = 8 if 'b' in mn else (16 if 'h' in mn else W(ops[0]))
             I.base, I.off = base, off
             I.src = ops[0]
-            parts = [p.strip() for p in ops[1].strip('[]').split(',')]
+            parts = [p.strip() for p in m_op.strip('[]').split(',')]
             if len(parts) > 2 and 'LSL' in parts[2].upper():
                 I.off_shift = int(re.search(r'LSL\s+#?(\w+)', parts[2], re.I).group(1), 0)
             I.uses = [r for r in (R(ops[0]), R(base), R(off)) if r and r not in ('sp', 'zr')]
+            if m_op.endswith('!') or any(o.endswith('!') for o in ops):
+                I.writeback = True
+                I.defs.append(R(base))
         else:
             raise SkeletonError(f"store nao suportado fora de loop NEON: {I.line}")
     elif mn in ('ccmp', 'ccmn'):
@@ -445,13 +556,12 @@ def classify(I, calls, all_insns=None, idx=None):
         I.uses = [R(o) for o in ops[1:3] if R(o) != 'zr'] + ['nzcv']
     elif mn in ('cset', 'csetm'):
         I.kind, I.width, I.defs, I.uses, I.cc = 'cset', W(ops[0]), [R(ops[0])], ['nzcv'], ops[1].lower()
-    elif mn in ('ldr', 'ldur', 'ldp') and R(ops[0]).startswith('v'):
-        base = mem(next(o for o in ops if o.startswith('[')))[0]
-        I.kind, I.defs = 'vec', [R(o) for o in ops if not o.startswith(('[', '#')) and R(o)]
-        I.uses = [R(base)] if R(base) not in ('sp', None) else []
     elif mn == 'movi':
-        if ops[0].startswith('d') and ops[1] in ('#0', '#0x0'):
-            I.kind, I.defs, I.val = 'fconst', [R(ops[0])], 0.0
+        if ops[1] in ('#0', '#0x0'):
+            if ops[0].startswith('d'):
+                I.kind, I.defs, I.val = 'fconst', [R(ops[0])], 0.0
+            else:
+                I.kind, I.defs, I.val, I.width = 'const', [R(ops[0])], 0, 128
         else:
             I.kind, I.defs = 'vec', [R(ops[0])]
     elif mn == 'dup':
@@ -807,9 +917,10 @@ class Skeleton:
                 classify(I, self.calls, self.insns, idx)
                 if is_void and I.kind == 'ret':
                     I.uses = []
-                # `b` para fora da funcao com alvo conhecido = chamada de cauda (return f(...))
-                if I.kind == 'br' and not lo_addr <= I.target <= hi_addr and hex(I.target) in self.calls:
-                    I.kind, I.name, I.ret = 'tailcall', self.calls[hex(I.target)], 'x0'
+                # `b` para fora da funcao = chamada de cauda (return f(...))
+                if I.kind == 'br' and not lo_addr <= I.target <= hi_addr:
+                    tgt_name = self.calls.get(hex(I.target), f"sub_{I.target:x}")
+                    I.kind, I.name, I.ret = 'tailcall', tgt_name, 'x0'
                     I.target = None
         self.blocks, by_addr = build_blocks(self.insns)
         collapse_neon(self.blocks, by_addr, loops, self.calls)
@@ -883,7 +994,8 @@ class Skeleton:
     # -- fatia
     def slice(self):
         roots = [I for I in self.insns if I.kind in ('call', 'ret', 'tailcall', 'bcc', 'cbz', 'tbz', 'dup', 'store',
-                                                     'pseudo', 'mrs_tls')]
+                                                     'stp_store', 'stack_store', 'pseudo', 'mrs_tls', 'atomic_load',
+                                                     'atomic_store', 'atomic_store_simple', 'clrex', 'udf')]
         self.live = set()
         work = list(roots)
         while work:
@@ -958,7 +1070,7 @@ class Skeleton:
         I = self.by_idx[d[0]]
         if I.kind == 'pseudo':
             return d[1] in I.accs
-        if I.kind in ('call', 'load', 'dup', 'mrs_tls'):
+        if I.kind in ('call', 'load', 'dup', 'mrs_tls', 'atomic_load', 'ldp_load', 'lane_insert', 'lane_extract'):
             return False
         for u in I.uses:
             w = self.use_web[(I.idx, u)]
@@ -968,6 +1080,9 @@ class Skeleton:
 
     def decide(self):
         for w in self.webs.values():
+            if w.reg == 'nzcv':
+                w.var = False
+                continue
             if len(w.defs) > 1 or any(d[0] < 0 for d in w.defs):
                 w.var = True
                 continue
@@ -992,15 +1107,17 @@ class Skeleton:
             sup = self.support(d)
             for J in self.insns:
                 if I.idx < J.idx < U.idx and J.idx in self.live and J.block is I.block:
-                    if J.kind in ('call', 'store', 'pseudo') or any(
+                    if J.kind in ('call', 'store', 'stp_store', 'stack_store', 'pseudo', 'atomic_store',
+                                  'atomic_store_simple', 'atomic_load', 'clrex', 'udf') or any(
                             id(self.def_web.get((J.idx, r))) in sup for r in J.defs):
                         w.var = True
                         break
         for I in self.insns:
-            if I.kind in ('ldrb_post', 'ldrh_post', 'mrs_tls'):
-                w = self.def_web.get((I.idx, I.defs[0]))
-                if w is not None:
-                    w.var = True
+            if I.kind in ('ldrb_post', 'ldrh_post', 'mrs_tls', 'atomic_load', 'atomic_store', 'ldp_load', 'lane_insert'):
+                for d_reg in I.defs:
+                    w = self.def_web.get((I.idx, d_reg))
+                    if w is not None:
+                        w.var = True
         self.coalesce()
         self.name_webs()
 
@@ -1134,6 +1251,15 @@ class Skeleton:
         if (any(d[0] < 0 for d in w.defs) or any(I.kind == 'copy' for I in defs)) and self.is_ptr_web(w):
             return 'bptr' if any(I.kind == 'call' and I.name == 'framebufferBegin' for I in defs) else 'void*'
         if w.reg.startswith('v'):
+            if any(getattr(I, 'width', 0) == 128 for I in defs) or any(
+                    getattr(U, 'width', 0) == 128 for U, _ in w.uses):
+                return 'u128'
+            if any(I.kind in ('cvt', 'fbin', 'fconst') for I in defs) or any(
+                    U.kind in ('fbin', 'cvt', 'f2i') for U, _ in w.uses):
+                return 'f64'
+            if any(getattr(I, 'kind', None) in ('lane_insert', 'lane_extract', 'vec', 'bin', 'load') for I in defs) or any(
+                    getattr(U, 'kind', None) in ('lane_insert', 'lane_extract', 'vec', 'bin', 'store', 'stp_store') for U, _ in w.uses):
+                return 'u64'
             return 'f64'
         for d in w.defs:
             if d[0] >= 0:
@@ -1179,7 +1305,10 @@ class Skeleton:
                 w.t = self.web_type(w)
                 w.ctype = CTYPE[w.t]
                 n = w.reg[1:]
-                base = {'u32': 'w', 'u64': 'x', 'void*': 'p', 'f64': 'd', 'bptr': 'b', 'str': 'x'}[w.t] + n
+                if w.reg.startswith('v'):
+                    base = ('q' if w.t == 'u128' else ('s' if w.t == 'u32' else 'd')) + n
+                else:
+                    base = {'u32': 'w', 'u64': 'x', 'void*': 'p', 'f64': 'd', 'bptr': 'b', 'str': 'x', 'u128': 'q'}[w.t] + n
                 w.name, k = base, 2
                 while w.name in used:
                     w.name, k = f"{base}_{k}", k + 1
@@ -1192,6 +1321,10 @@ class Skeleton:
     def use(self, I, r):
         if r == 'zr':
             return X('const', 0)
+        if r == 'nzcv':
+            reach = I.reach.get('nzcv', ())
+            if reach:
+                return self.build(next(iter(reach)))
         w = self.use_web[(I.idx, r)]
         if w.var:
             return X('var', w.name, t=w.t)
@@ -1219,7 +1352,7 @@ class Skeleton:
             return self.memo[d]
         I = self.by_idx[d[0]]
         k = I.kind
-        t = 'u32' if I.width in (8, 16, 32) else 'u64'
+        t = 'u128' if getattr(I, 'width', 0) == 128 else ('u32' if getattr(I, 'width', 0) in (8, 16, 32) else 'u64')
         if k == 'const':
             e = X('const', I.val, t=t)
         elif k == 'movk':
@@ -1460,6 +1593,44 @@ class Skeleton:
             w = self.def_web.get(d)
             dest = w.name if w else d[1]
             e = X('var', dest, t=t)
+        elif k in ('atomic_load', 'ldp_load', 'lane_insert'):
+            w = self.def_web.get(d)
+            dest = w.name if w else d[1]
+            e = X('var', dest, t=t)
+        elif k == 'atomic_store':
+            if d[1] == getattr(I, 'status_reg', None):
+                w = self.def_web.get(d)
+                dest = w.name if w else d[1]
+                e = X('var', dest, t=t)
+            else:
+                e = X('const', 0, t=t)
+        elif k == 'clz':
+            src = self.operand(I, I.srcs[0])
+            fn_name = '__builtin_clz' if I.width == 32 else '__builtin_clzll'
+            e = X('call', fn_name, [src], t=t)
+        elif k == 'rbit':
+            src = self.operand(I, I.srcs[0])
+            fn_name = '__builtin_bitreverse32' if I.width == 32 else '__builtin_bitreverse64'
+            e = X('call', fn_name, [src], t=t)
+        elif k == 'sxtw':
+            src = self.operand(I, I.srcs[0])
+            e = X('cast', 'int64_t', X('cast', 'int32_t', src, t='u32'), t='u64')
+        elif k == 'umaddl':
+            wn, wm, xa = self.operand(I, I.srcs[0]), self.operand(I, I.srcs[1]), self.operand(I, I.srcs[2])
+            cast_n = X('cast', 'uint64_t', wn, t='u64') if wn.const() is None else wn
+            cast_m = X('cast', 'uint64_t', wm, t='u64') if wm.const() is None else wm
+            mul = X('bin', '*', cast_n, cast_m, t='u64')
+            e = X('bin', '+', xa, mul, t='u64')
+        elif k == 'ldrsw':
+            off_expr = self.operand(I, I.off)
+            base_expr = self.use(I, reg(I.base)[0])
+            load_expr = X('load', base_expr, off_expr, 32, t='u32')
+            e = X('cast', 'int64_t', X('cast', 'int32_t', load_expr, t='u32'), t='u64')
+        elif k == 'lane_extract':
+            w = self.use_web.get((I.idx, I.v_reg))
+            v_name = w.name if w else I.v_reg
+            ctype = {8: 'uint8_t', 16: 'uint16_t', 32: 'uint32_t', 64: 'uint64_t'}[I.elem_size]
+            e = X('var', f"((({ctype} *)&{v_name})[{I.lane}])", t=t)
         else:
             e = X('opaque', I.line)
         if e.k == 'opaque':
@@ -1554,7 +1725,7 @@ class Skeleton:
                 self.syms.add(name)
                 out.append(f"{name} = {self.render(self.use(I, I.uses[0]))};")
             elif I.kind == 'store':
-                ctype = {8: 'uint8_t', 16: 'uint16_t', 32: 'uint32_t', 64: 'uint64_t'}.get(I.width, 'uint64_t')
+                ctype = {8: 'uint8_t', 16: 'uint16_t', 32: 'uint32_t', 64: 'uint64_t', 128: 'unsigned __int128'}.get(I.width, 'uint64_t')
                 off_expr = self.operand(I, I.off)
                 if getattr(I, 'off_shift', None):
                     off_expr = X('bin', '<<', off_expr, X('const', I.off_shift), t='u64')
@@ -1563,11 +1734,19 @@ class Skeleton:
                 if base_expr.const() is not None and off_expr.const() is not None:
                     addr_str = self.render(X('const', base_expr.const() + off_expr.const()))
                     out.append(f"*({ctype} *)({addr_str}) = {self.render(self.operand(I, src_op))};")
+                elif off_expr.const() == 0:
+                    out.append(f"*({ctype} *)({self.render(base_expr)}) = {self.render(self.operand(I, src_op))};")
+                elif off_expr.const() is not None and off_expr.const() < 0:
+                    out.append(f"*({ctype} *)((uint8_t *){self.render(base_expr)} - {-off_expr.const()}) = {self.render(self.operand(I, src_op))};")
                 else:
                     out.append(f"*({ctype} *)((uint8_t *){self.render(base_expr)} + "
                                f"{self.render(off_expr)}) = {self.render(self.operand(I, src_op))};")
+                if getattr(I, 'writeback', False):
+                    wb_web = self.def_web.get((I.idx, reg(I.base)[0]))
+                    if wb_web and wb_web.var:
+                        out.append(f"{wb_web.name} = (uint8_t *){self.render(base_expr)} + {self.render(off_expr)};")
             elif I.kind == 'stp_store':
-                ctype = {32: 'uint32_t', 64: 'uint64_t'}.get(I.width, 'uint64_t')
+                ctype = {32: 'uint32_t', 64: 'uint64_t', 128: 'unsigned __int128'}.get(I.width, 'uint64_t')
                 sz = I.width // 8
                 off_expr = self.operand(I, I.off)
                 base_expr = self.use(I, reg(I.base)[0])
@@ -1578,11 +1757,105 @@ class Skeleton:
                     addr1 = self.render(X('const', base_expr.const() + off_expr.const() + sz))
                     out.append(f"*({ctype} *)({addr0}) = {self.render(src0)};")
                     out.append(f"*({ctype} *)({addr1}) = {self.render(src1)};")
+                elif off_expr.const() == 0:
+                    out.append(f"*({ctype} *)((uint8_t *){self.render(base_expr)}) = {self.render(src0)};")
+                    out.append(f"*({ctype} *)((uint8_t *){self.render(base_expr)} + {sz}) = {self.render(src1)};")
+                elif off_expr.const() is not None and off_expr.const() < 0:
+                    out.append(f"*({ctype} *)((uint8_t *){self.render(base_expr)} - {-off_expr.const()}) = {self.render(src0)};")
+                    out.append(f"*({ctype} *)((uint8_t *){self.render(base_expr)} - {-off_expr.const()} + {sz}) = {self.render(src1)};")
                 else:
                     out.append(f"*({ctype} *)((uint8_t *){self.render(base_expr)} + "
                                f"{self.render(off_expr)}) = {self.render(src0)};")
                     out.append(f"*({ctype} *)((uint8_t *){self.render(base_expr)} + "
                                f"{self.render(off_expr)} + {sz}) = {self.render(src1)};")
+                if getattr(I, 'writeback', False):
+                    wb_web = self.def_web.get((I.idx, reg(I.base)[0]))
+                    if wb_web and wb_web.var:
+                        out.append(f"{wb_web.name} = (uint8_t *){self.render(base_expr)} + {self.render(off_expr)};")
+            elif I.kind == 'atomic_load':
+                w = self.def_web.get((I.idx, I.defs[0]))
+                dest_name = w.name if w else I.defs[0]
+                ctype = {8: 'uint8_t', 16: 'uint16_t', 32: 'uint32_t', 64: 'uint64_t'}.get(I.width, 'uint64_t')
+                off_expr = self.operand(I, I.off)
+                base_expr = self.use(I, reg(I.base)[0])
+                if base_expr.const() is not None and off_expr.const() is not None:
+                    addr_str = self.render(X('const', base_expr.const() + off_expr.const()))
+                elif off_expr.const() == 0:
+                    addr_str = f"(uint8_t *){self.render(base_expr)}"
+                elif off_expr.const() is not None and off_expr.const() < 0:
+                    addr_str = f"((uint8_t *){self.render(base_expr)} - {-off_expr.const()})"
+                else:
+                    addr_str = f"((uint8_t *){self.render(base_expr)} + {self.render(off_expr)})"
+                out.append(f"{dest_name} = __atomic_load_n(({ctype} *)({addr_str}), {I.order});")
+            elif I.kind == 'atomic_store':
+                w_status = self.def_web.get((I.idx, I.status_reg))
+                status_name = w_status.name if w_status else I.status_reg
+                ctype = {8: 'uint8_t', 16: 'uint16_t', 32: 'uint32_t', 64: 'uint64_t'}.get(I.width, 'uint64_t')
+                off_expr = self.operand(I, I.off)
+                base_expr = self.use(I, reg(I.base)[0])
+                val_expr = self.render(self.operand(I, I.src))
+                if base_expr.const() is not None and off_expr.const() is not None:
+                    addr_str = self.render(X('const', base_expr.const() + off_expr.const()))
+                elif off_expr.const() == 0:
+                    addr_str = f"(uint8_t *){self.render(base_expr)}"
+                elif off_expr.const() is not None and off_expr.const() < 0:
+                    addr_str = f"((uint8_t *){self.render(base_expr)} - {-off_expr.const()})"
+                else:
+                    addr_str = f"((uint8_t *){self.render(base_expr)} + {self.render(off_expr)})"
+                out.append(f"__atomic_store_n(({ctype} *)({addr_str}), {val_expr}, {I.order});")
+                if w_status and w_status.var:
+                    out.append(f"{status_name} = 0;")
+            elif I.kind == 'atomic_store_simple':
+                ctype = {8: 'uint8_t', 16: 'uint16_t', 32: 'uint32_t', 64: 'uint64_t'}.get(I.width, 'uint64_t')
+                off_expr = self.operand(I, I.off)
+                base_expr = self.use(I, reg(I.base)[0])
+                val_expr = self.render(self.operand(I, I.src))
+                if base_expr.const() is not None and off_expr.const() is not None:
+                    addr_str = self.render(X('const', base_expr.const() + off_expr.const()))
+                elif off_expr.const() == 0:
+                    addr_str = f"(uint8_t *){self.render(base_expr)}"
+                elif off_expr.const() is not None and off_expr.const() < 0:
+                    addr_str = f"((uint8_t *){self.render(base_expr)} - {-off_expr.const()})"
+                else:
+                    addr_str = f"((uint8_t *){self.render(base_expr)} + {self.render(off_expr)})"
+                out.append(f"__atomic_store_n(({ctype} *)({addr_str}), {val_expr}, {I.order});")
+            elif I.kind == 'clrex':
+                out.append("/* clrex */;")
+            elif I.kind == 'udf':
+                out.append("abort();")
+            elif I.kind == 'lane_insert':
+                w = self.def_web.get((I.idx, I.v_reg))
+                dest_name = w.name if w else I.v_reg
+                src_val = self.render(self.operand(I, I.src))
+                ctype = {8: 'uint8_t', 16: 'uint16_t', 32: 'uint32_t'}.get(I.elem_size, 'uint32_t')
+                out.append(f"((({ctype} *)&{dest_name})[{I.lane}]) = {src_val};")
+            elif I.kind == 'ldp_load':
+                w0 = self.def_web.get((I.idx, I.defs[0]))
+                w1 = self.def_web.get((I.idx, I.defs[1]))
+                ctype = {8: 'uint8_t', 16: 'uint16_t', 32: 'uint32_t', 64: 'uint64_t', 128: 'unsigned __int128'}.get(I.width, 'uint64_t')
+                sz = I.width // 8
+                off_expr = self.operand(I, I.off)
+                base_expr = self.use(I, reg(I.base)[0])
+                if base_expr.const() is not None and off_expr.const() is not None:
+                    addr0 = self.render(X('const', base_expr.const() + off_expr.const()))
+                    addr1 = self.render(X('const', base_expr.const() + off_expr.const() + sz))
+                elif off_expr.const() == 0:
+                    addr0 = f"(uint8_t *){self.render(base_expr)}"
+                    addr1 = f"(uint8_t *){self.render(base_expr)} + {sz}"
+                elif off_expr.const() is not None and off_expr.const() < 0:
+                    addr0 = f"((uint8_t *){self.render(base_expr)} - {-off_expr.const()})"
+                    addr1 = f"((uint8_t *){self.render(base_expr)} - {-off_expr.const()} + {sz})"
+                else:
+                    addr0 = f"((uint8_t *){self.render(base_expr)} + {self.render(off_expr)})"
+                    addr1 = f"((uint8_t *){self.render(base_expr)} + {self.render(off_expr)} + {sz})"
+                if w0 and w0.var:
+                    out.append(f"{w0.name} = *({ctype} *)({addr0});")
+                if w1 and w1.var:
+                    out.append(f"{w1.name} = *({ctype} *)({addr1});")
+                if getattr(I, 'writeback', False):
+                    wb_web = self.def_web.get((I.idx, reg(I.base)[0]))
+                    if wb_web and wb_web.var:
+                        out.append(f"{wb_web.name} = (uint8_t *){self.render(base_expr)} + {self.render(off_expr)};")
             elif I.kind == 'stack_store':
                 src_op = getattr(I, 'src', None) or (I.uses[0] if I.uses else 'zr')
                 out.append(f"sp_{I.off_val:#x} = {self.render(self.operand(I, src_op))};")
@@ -1778,10 +2051,18 @@ class Skeleton:
                     lines += ([f"if ({self.cond(c)}) {{"] + ['  ' + s for s in self.emit_tail(tail)] + ['}']
                               if tail and T.idx != self.loop_end(loop[0], loop[1])
                               else [f"if ({self.cond(c)}) break;"])
+                elif self.return_tail(T) and F is not None and self.return_tail(F):
+                    lines.append(f"if ({self.cond(c)}) {{")
+                    lines += ['  ' + s for s in self.emit_tail(self.return_tail(T))]
+                    lines.append("} else {")
+                    lines += ['  ' + s for s in self.emit_tail(self.return_tail(F))]
+                    lines.append("}")
+                    break
                 elif F is not None and self.return_tail(F):
                     lines += [f"if ({self.cond(neg(c))}) {{"] + ['  ' + s for s in self.emit_tail(self.return_tail(F))] + ['}']
-                    i = T.idx
-                    continue
+                    if T.idx > i:
+                        i = T.idx
+                        continue
                 elif self.return_tail(T):
                     lines += [f"if ({self.cond(c)}) {{"] + ['  ' + s for s in self.emit_tail(self.return_tail(T))] + ['}']
                 elif self.ipdom.get(b) is not None:

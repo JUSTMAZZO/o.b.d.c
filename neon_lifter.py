@@ -878,7 +878,9 @@ def main():
             from horizon_rt import nro_tool
         except ImportError:
             import nro_tool
-        data = nro_tool.generate_disasm_json(args.json)
+        elf_candidate = os.path.splitext(args.json)[0] + '.elf'
+        elf_path = elf_candidate if os.path.exists(elf_candidate) else None
+        data = nro_tool.generate_disasm_json(args.json, elf_path=elf_path)
     else:
         with open(args.json, encoding='utf-8') as f:
             data = json.load(f)
