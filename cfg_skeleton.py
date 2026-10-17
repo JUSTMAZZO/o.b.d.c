@@ -126,8 +126,9 @@ def cc_holds(nzcv, cc):
 
 
 class Render:
-    def __init__(self, strings):
+    def __init__(self, strings, fn_by_addr=None):
         self.strings = strings
+        self.fn_by_addr = fn_by_addr or {}
         self.layouts = {}      # buffer -> campos uint32 por elemento (1 = array; n = struct)
         self.ptr_alias = {}    # variavel ponteiro -> buffer tipado com o mesmo valor (copia que domina as leituras)
         self.addr_of = set()   # objetos de pilha tipados (passados como &obj)
@@ -136,14 +137,14 @@ class Render:
         k, a = e.k, e.a
         if k == 'const':
             v = a[0]
+            if v in self.fn_by_addr:
+                return self.fn_by_addr[v]
             if v == 0x12a000:
                 return "DAT_12a000"
             if 0x12a000 < v < 0x12b000:
                 return f"((uint8_t *)DAT_12a000 + {v - 0x12a000})"
             if v == 0x120500:
                 return "DAT_120500"
-            if v == 0x1007c0:
-                return "on_applet"
             if v >= 0x1000 and hex(v) in self.strings:
                 return c_string(self.strings[hex(v)])
             return hex(v) if (hexa or v > 0xFFFFF) and v > 9 else str(v)
@@ -168,6 +169,8 @@ class Render:
             return f"{a[0]}({', '.join(self(x) for x in a[1])})"
         if k == 'bnot':
             return f"(~{self(a[0])})"
+        if k == 'neg':
+            return f"(-{self(a[0])})"
         if k == 'bin':
             op, l, r = a
             if op == 'umulh':   # metade alta do produto de 64x64 bits
@@ -300,17 +303,27 @@ def classify(I, calls, all_insns=None, idx=None):
         I.kind, I.width, I.op, I.shift = 'bin', 64, '>>' if mn == 'ushr' else '<<', None
         I.defs, I.srcs, I.uses = [R(ops[0])], ops[1:3], [R(ops[1])]
     elif mn in ('add', 'sub', 'mul', 'and', 'orr', 'eor', 'lsl', 'lsr', 'asr', 'udiv', 'sdiv', 'subs', 'adds', 'ands',
-                'umulh', 'bic'):
+                'umulh', 'bic', 'bics'):
         I.kind, I.width = 'bin', W(ops[0])
         I.op = {'add': '+', 'adds': '+', 'sub': '-', 'subs': '-', 'mul': '*', 'and': '&', 'ands': '&',
                 'orr': '|', 'eor': '^', 'lsl': '<<', 'lsr': '>>', 'asr': '>>', 'udiv': '/', 'sdiv': '/',
-                'umulh': 'umulh', 'bic': 'bic'}[mn]
-        I.defs = [R(ops[0])] + (['nzcv'] if mn in ('subs', 'adds', 'ands') else [])
+                'umulh': 'umulh', 'bic': 'bic', 'bics': 'bic'}[mn]
+        defs = [R(ops[0])] if R(ops[0]) and R(ops[0]) != 'zr' else []
+        I.defs = defs + (['nzcv'] if mn in ('subs', 'adds', 'ands', 'bics') else [])
         I.srcs = ops[1:3]
         m_sh = re.search(r'(LSL|LSR|ASR|ROR)\s+#?(\w+)', ops[3], re.I) if len(ops) > 3 else None
         I.shift_type = m_sh.group(1).upper() if m_sh else None
         I.shift = m_sh.group(2) if m_sh else None
         I.uses = [R(o) for o in I.srcs if R(o) and R(o) != 'zr']
+    elif mn in ('neg', 'negs'):
+        I.kind, I.width = 'neg', W(ops[0])
+        defs = [R(ops[0])] if R(ops[0]) and R(ops[0]) != 'zr' else []
+        I.defs = defs + (['nzcv'] if mn == 'negs' else [])
+        I.srcs = [ops[1]]
+        m_sh = re.search(r'(LSL|LSR|ASR|ROR)\s+#?(\w+)', ops[2], re.I) if len(ops) > 2 else None
+        I.shift_type = m_sh.group(1).upper() if m_sh else None
+        I.shift = m_sh.group(2) if m_sh else None
+        I.uses = [R(ops[1])] if R(ops[1]) and R(ops[1]) != 'zr' else []
     elif mn == 'mvn':
         I.kind, I.width = 'mvn', W(ops[0])
         I.defs = [R(ops[0])]
@@ -384,7 +397,13 @@ def classify(I, calls, all_insns=None, idx=None):
                 I.uses = [R(ops[0])] if R(ops[0]) and R(ops[0]) != 'zr' else []
             else:
                 I.kind = 'nop'
-        elif R(ops[0]).startswith('x') and mn != 'stp':
+        elif mn == 'stp':
+            I.kind = 'stp_store'
+            I.width = W(ops[0])
+            I.base, I.off = base, off
+            I.srcs = ops[:2]
+            I.uses = [r for r in (R(ops[0]), R(ops[1]), R(base), R(off)) if r and r not in ('sp', 'zr')]
+        elif (R(ops[0]).startswith('x') or R(ops[0]) == 'zr'):
             I.kind = 'store'
             I.width = 8 if mn == 'strb' else (16 if mn == 'strh' else W(ops[0]))
             I.base, I.off = base, off
@@ -416,6 +435,10 @@ def classify(I, calls, all_insns=None, idx=None):
         I.width = W(ops[0])
         I.flag = 'tst' if mn == 'tst' else 'cmp'
         I.uses = [R(o) for o in ops[:2] if R(o) and R(o) != 'zr']
+    elif mn in ('cinc', 'cinv', 'cneg'):
+        I.kind, I.width, I.defs = 'cinc', W(ops[0]), [R(ops[0])]
+        I.srcs, I.cc = [ops[1]], ops[2].lower()
+        I.uses = [R(ops[1])] + ['nzcv']
     elif mn in ('csel', 'csinc', 'csinv', 'csneg'):
         I.kind, I.width, I.defs = 'csel', W(ops[0]), [R(ops[0])]
         I.srcs, I.cc = ops[1:3], ops[3].lower()
@@ -551,7 +574,8 @@ def collapse_neon(blocks, by_addr, loops, calls):
         p = Insn(b.insns[0].idx, b.insns[0].line)
         p.kind, p.loop, p.block = 'pseudo', L, b
         # buffers que o loop realmente le/escreve (o lifter registra em L['arrays'])
-        p.uses = sorted(f'x{k}' for k, v in L['ptr_names'].items() if int(k) >= 19 and v in L['arrays'])
+        p.uses = sorted(f'x{k}' for k, v in L['ptr_names'].items()
+                        if (int(k) >= 19 or v == f'buf_x{k}') and v in L['arrays'])
         accs = {a for a in L['accs']}
         p.defs = sorted(accs | (loop_clobbers(L['body']) - accs))
         p.accs = accs
@@ -719,7 +743,8 @@ def shim_arity(shim_header):
     import os as _os
     if not (shim_header and _os.path.exists(shim_header)):
         return {}
-    src = open(shim_header, encoding='utf-8').read()
+    with open(shim_header, encoding='utf-8') as f:
+        src = f.read()
     out = {}
     for name, params in re.findall(r'SHIM_API\s+[\w\s\*]+?\b(\w+)\s*\(([^)]*)\)', src):
         ps = [q.strip() for q in params.split(',') if q.strip() and q.strip() != 'void']
@@ -757,7 +782,8 @@ class Skeleton:
         self.strings = data.get('strings')
         if self.calls is None or self.strings is None:
             raise SkeletonError("JSON sem 'calls'/'strings': regere com a versao atual do ExtractMain.java")
-        self.R = Render(self.strings)
+        self.fn_by_addr = {int(f['entry_point'], 16): f['name'] for f in data.get('functions', []) if f.get('name') and f.get('entry_point')}
+        self.R = Render(self.strings, self.fn_by_addr)
         self.shim_header = shim_header
         self.warnings = []
 
@@ -1120,7 +1146,7 @@ class Skeleton:
         ptr_names = {}
         for L in self.loops:
             for k, v in L['ptr_names'].items():
-                if int(k) >= 19:
+                if int(k) >= 19 or (v == f'buf_x{k}' and v in L.get('arrays', set())):
                     ptr_names[f'x{k}'] = v
         used = set()
         webs = sorted((w for w in self.webs.values() if w.var and not hasattr(w, 'alias')),
@@ -1243,6 +1269,8 @@ class Skeleton:
                 if w_dest and w_dest.var:
                     dest_val = X('var', w_dest.name, t=w_dest.t)
                     e = X('flags', 'cmp', dest_val, X('const', 0))
+                elif I.op == 'bic':
+                    e = X('flags', 'bic', a, b)
                 else:
                     e = X('flags', 'cmp', a, b)
         elif k == 'mvn':
@@ -1263,6 +1291,24 @@ class Skeleton:
                 elif t == 'u64' and b.t == 'u32' and b.const() is None:
                     b = X('cast', 'uint64_t', b, t='u64')
                 e = X('bnot', b, t=t)
+        elif k == 'neg':
+            b = self.operand(I, I.srcs[0])
+            if getattr(I, 'shift', None):
+                sh_amt = int(I.shift, 0)
+                sh_op = '>>' if getattr(I, 'shift_type', 'LSL') in ('LSR', 'ASR') else '<<'
+                if b.const() is not None:
+                    val = ((b.const() >> sh_amt) if sh_op == '>>' else (b.const() << sh_amt)) & mask(I.width)
+                    b = X('const', val, t=t)
+                else:
+                    b = X('bin', sh_op, b, X('const', sh_amt), t=t)
+            if b.const() is not None:
+                e = X('const', (-b.const()) & mask(I.width), t=t)
+            else:
+                if t == 'u32' and b.t == 'u64' and b.const() is None:
+                    b = X('cast', 'uint32_t', b, t='u32')
+                elif t == 'u64' and b.t == 'u32' and b.const() is None:
+                    b = X('cast', 'uint64_t', b, t='u64')
+                e = X('neg', b, t=t)
         elif k == 'umull':
             a, b = self.operand(I, I.srcs[0]), self.operand(I, I.srcs[1])
             if a.const() is not None and b.const() is not None:
@@ -1327,7 +1373,15 @@ class Skeleton:
                 field = "buttons_cur" if d[1] == I.defs[0] else "buttons_old"
                 e = X('var', f"sp_0xa8.{field}", t='u64')
             else:
-                e = X('opaque', I.line)
+                sz = I.width // 8
+                off = I.off_val if d[1] == I.defs[0] else I.off_val + sz
+                stack_base = max((o for o in self.stack_objs if o <= off), default=None)
+                ctype = 'uint32_t' if sz == 4 else 'uint64_t'
+                if stack_base is not None:
+                    delta = off - stack_base
+                    e = X('var', f"*({ctype} *)((uint8_t *)sp_{stack_base:#x} + {delta})", t=t)
+                else:
+                    e = X('var', f"sp_{off:#x}", t=t)
         elif k == 'call':
             e = X('call', I.name, [self.arg(I, n) for n in range(len(I.args))],
                   t='void*' if I.name in PTR_RETURNING else 'u64')
@@ -1388,6 +1442,20 @@ class Skeleton:
             elif t == 'u32':
                 n, m = [X('cast', 'uint32_t', v, t='u32') if v.t == 'u64' and v.const() is None else v for v in (n, m)]
             e = X('ternary', cond, n, m, t=t)
+        elif k == 'cinc':
+            cond = self.cond_flags(I, I.cc)
+            rn = self.operand(I, I.srcs[0])
+            if I.mn == 'cinc':
+                m = X('const', (rn.const() + 1) & mask(I.width), t=t) if rn.const() is not None else X('bin', '+', rn, X('const', 1), t=t)
+            elif I.mn == 'cneg':
+                m = X('const', (-rn.const()) & mask(I.width), t=t) if rn.const() is not None else X('bin', '-', X('const', 0), rn, t=t)
+            elif I.mn == 'cinv':
+                m = X('const', (~rn.const()) & mask(I.width), t=t) if rn.const() is not None else X('bin', '^', rn, X('const', mask(I.width)), t=t)
+            if t == 'u64':
+                rn, m = [X('cast', 'uint64_t', v, t='u64') if v.t == 'u32' and v.const() is None else v for v in (rn, m)]
+            elif t == 'u32':
+                rn, m = [X('cast', 'uint32_t', v, t='u32') if v.t == 'u64' and v.const() is None else v for v in (rn, m)]
+            e = X('ternary', cond, m, rn, t=t)
         elif k == 'mrs_tls':
             w = self.def_web.get(d)
             dest = w.name if w else d[1]
@@ -1423,6 +1491,14 @@ class Skeleton:
         kind, a, b = f.a
         if kind == 'tst':
             return X('cmp', '==' if cc == 'eq' else '!=', X('bin', '&', a, b), X('const', 0), t='bool')
+        if kind in ('bic', 'bics'):
+            not_b = X('bnot', b, t=b.t)
+            and_expr = X('bin', '&', a, not_b, t=a.t)
+            op = CC_OP.get(cc, '==' if cc == 'eq' else '!=')
+            return X('cmp', op, and_expr, X('const', 0), t='bool')
+        if kind in ('neg', 'negs'):
+            op = CC_OP.get(cc, '==' if cc == 'eq' else '!=')
+            return X('cmp', op, a, X('const', 0), t='bool')
         return X('cmp', CC_OP[cc], a, b, t='bool')
 
     def branch_cond(self, I):
@@ -1490,6 +1566,23 @@ class Skeleton:
                 else:
                     out.append(f"*({ctype} *)((uint8_t *){self.render(base_expr)} + "
                                f"{self.render(off_expr)}) = {self.render(self.operand(I, src_op))};")
+            elif I.kind == 'stp_store':
+                ctype = {32: 'uint32_t', 64: 'uint64_t'}.get(I.width, 'uint64_t')
+                sz = I.width // 8
+                off_expr = self.operand(I, I.off)
+                base_expr = self.use(I, reg(I.base)[0])
+                src0 = self.operand(I, I.srcs[0])
+                src1 = self.operand(I, I.srcs[1])
+                if base_expr.const() is not None and off_expr.const() is not None:
+                    addr0 = self.render(X('const', base_expr.const() + off_expr.const()))
+                    addr1 = self.render(X('const', base_expr.const() + off_expr.const() + sz))
+                    out.append(f"*({ctype} *)({addr0}) = {self.render(src0)};")
+                    out.append(f"*({ctype} *)({addr1}) = {self.render(src1)};")
+                else:
+                    out.append(f"*({ctype} *)((uint8_t *){self.render(base_expr)} + "
+                               f"{self.render(off_expr)}) = {self.render(src0)};")
+                    out.append(f"*({ctype} *)((uint8_t *){self.render(base_expr)} + "
+                               f"{self.render(off_expr)} + {sz}) = {self.render(src1)};")
             elif I.kind == 'stack_store':
                 src_op = getattr(I, 'src', None) or (I.uses[0] if I.uses else 'zr')
                 out.append(f"sp_{I.off_val:#x} = {self.render(self.operand(I, src_op))};")
@@ -1758,7 +1851,8 @@ class Skeleton:
         """Objeto de pilha passado a uma funcao do shim cujo parametro e `T *` (T struct do header) -> T."""
         if not (self.shim_header and os.path.exists(self.shim_header)):
             return {}
-        src = open(self.shim_header, encoding='utf-8').read()
+        with open(self.shim_header, encoding='utf-8') as f:
+            src = f.read()
         structs = set(re.findall(r'typedef\s+struct\s*\w*\s*\{.*?\}\s*(\w+)\s*;', src, re.S)) | \
                   set(re.findall(r'typedef\s+struct\s+(\w+)\s+\1\s*;', src))
         scalar_types = {
@@ -1853,18 +1947,62 @@ class Skeleton:
         return {I.name for I in self.insns if I.kind in ('call', 'tailcall')}
 
 
+def referenced_entrypoints(fn):
+    """Encontra todos os enderecos de funcoes chamadas ou referenciadas (ex: callbacks passados via adr/adrp+add)."""
+    targets = {int(a, 16) for a in fn.get('calls', {})}
+    last_adrp = {}
+    for line in fn.get('assembly', []):
+        parts = line.split(': ', 1)
+        if len(parts) < 2:
+            continue
+        tokens = parts[1].strip().split(None, 1)
+        mn = tokens[0].lower()
+        ops = [o.strip() for o in tokens[1].split(',')] if len(tokens) > 1 else []
+        if mn == 'bl' and ops and ops[0].startswith('0x'):
+            try:
+                targets.add(int(ops[0], 16))
+            except ValueError:
+                pass
+        elif mn == 'adr' and len(ops) >= 2 and ops[1].startswith('0x'):
+            try:
+                targets.add(int(ops[1], 16))
+            except ValueError:
+                pass
+        elif mn == 'adrp' and len(ops) >= 2:
+            reg = ops[0].lower()
+            try:
+                last_adrp[reg] = int(ops[1].lstrip('#'), 16)
+            except ValueError:
+                pass
+        elif mn == 'add' and len(ops) >= 3:
+            dst = ops[0].lower()
+            src = ops[1].lower()
+            if src in last_adrp and ops[2].startswith('#'):
+                try:
+                    targets.add(last_adrp[src] + int(ops[2].lstrip('#'), 0))
+                except ValueError:
+                    pass
+            last_adrp.pop(dst, None)
+        else:
+            if ops:
+                last_adrp.pop(ops[0].lower(), None)
+    return targets
+
+
 def build(fn, data, loops, shim_header='switch_hle_shim.h', extra_fns=()):
     """Unidade de traducao C: includes, structs recuperadas, funcoes auxiliares do programa e o main."""
     sk = Skeleton(fn, data, loops, shim_header)
     shim_fns = set()
     if shim_header and os.path.exists(shim_header):
-        shim_fns = set(re.findall(r'SHIM_API\s+[\w\s\*]+?\b(\w+)\s*\(', open(shim_header, encoding='utf-8').read()))
+        with open(shim_header, encoding='utf-8') as f:
+            shim_fns = set(re.findall(r'SHIM_API\s+[\w\s\*]+?\b(\w+)\s*\(', f.read()))
     # funcoes que o shim ja fornece (ex.: appletMainLoop) nao sao reemitidas
     all_helpers = list(extra_fns)
     existing_helper_names = {f['name'] for f in all_helpers}
+    targets = referenced_entrypoints(fn)
     for f in data.get('functions', []):
         if f is not fn and f['name'] not in existing_helper_names and f['name'] not in shim_fns and f['name'] != '_start_main':
-            if f['name'] in ('out', 'on_applet'):
+            if int(f.get('entry_point', '0'), 16) in targets:
                 all_helpers.append(f)
                 existing_helper_names.add(f['name'])
     helpers = [Skeleton(f, data, [], shim_header) for f in all_helpers if f['name'] not in shim_fns]

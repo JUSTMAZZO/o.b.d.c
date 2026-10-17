@@ -204,6 +204,14 @@ def resolve_preheader(preheader, resolved_data, body, consts=None, prior=None):
     # (ex.: retorno do malloc) e reaproveitado por loops posteriores via copia (mov x9, x19).
     # O nome vem do registrador; o LLM nao renomeia, porque as formulas servem de ancora.
     ptr_names = {str(n): f"buf_x{n}" for n in range(19, 29)}
+    for line in body:
+        _, mn, ops = parse(line)
+        if mn in ('ldr', 'str', 'ldp', 'stp', 'ld1', 'ld2', 'ld3', 'ld4', 'st1', 'st2', 'st3', 'st4'):
+            for op in ops:
+                if op.startswith('['):
+                    base = op.strip('[]').split(',')[0].strip()[1:]
+                    if base.isdigit() and base not in ptr_names:
+                        ptr_names[base] = f"buf_x{base}"
 
     for line in preheader:
         addr, mn, ops = parse(line)
@@ -291,6 +299,12 @@ def resolve_preheader(preheader, resolved_data, body, consts=None, prior=None):
             vec[vname] = {'lanes': lanes, 'width': w}
             sp_q = dict(vec[vname])
             notes.append(f"{line}  =>  {key} => {vname} = {lanes}")
+        elif mn == 'bl':
+            for n in range(1, 19):
+                scal.pop(str(n), None)
+                ptr_names.pop(str(n), None)
+            scal['0'] = 0
+            ptr_names['0'] = 'buf_x0'
         elif mn in ('adrp', 'adr', 'sub', 'str', 'add', 'mul', 'cmp', 'stp', 'ldp',
                     'b.ne', 'tst', 'csinc', 'ushr', 'subs', 'and', 'eor', 'shl',
                     'ld1', 'ld2', 'ld3', 'ld4', 'st1', 'st2', 'st3', 'st4', 'uaddw', 'uaddw2', 'ccmp', 'mrs'):
@@ -897,8 +911,8 @@ def main():
 
     try:
         # funcoes do proprio programa chamadas pelo main e extraidas no JSON (ex.: auxiliares do homebrew)
-        targets = {int(a, 16) for a in fn.get('calls', {})}
-        helpers = [f for f in data['functions'] if f is not fn and (int(f['entry_point'], 16) in targets or f.get('name') in ('out', 'on_applet'))]
+        targets = cfg_skeleton.referenced_entrypoints(fn)
+        helpers = [f for f in data['functions'] if f is not fn and int(f.get('entry_point', '0'), 16) in targets]
         skel = cfg_skeleton.build(fn, data, loops, extra_fns=helpers)
     except cfg_skeleton.SkeletonError as e:
         sys.exit(f"[esqueleto] {e}")

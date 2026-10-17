@@ -50,7 +50,7 @@ PREHEADER_MNEMS = {
     'lsl', 'tst', 'orr', 'ushr', 'msub', 'ldrb', 'mrs', 'mvn', 'ubfiz', 'ldp',
     'movi', 'adr', 'umull', 'dup', 'movk', 'ccmp', 'mul', 'add', 'csinc', 'ldr',
     'adrp', 'mov', 'subs', 'ld2', 'and', 'cmp', 'bic', 'stp', 'sub', 'lsr',
-    'st2', 'str', 'madd', 'eor'
+    'st2', 'str', 'madd', 'eor', 'bl'
 }
 
 
