@@ -406,6 +406,11 @@ def classify(I, calls, all_insns=None, idx=None):
         I.kind, I.ret, I.fixed_args = 'call', R(ops[0]), True
         I.name = 'armGetSystemTickFreq' if ops[1].lower() == 'cntfrq_el0' else 'armGetSystemTick'
         I.defs, I.args, I.convs = [R(ops[0])], [], []
+    elif mn == 'mrs' and len(ops) >= 2 and ops[1].lower() == 'tpidrro_el0':
+        I.kind = 'mrs_tls'
+        I.width = W(ops[0]) or 64
+        I.defs = [R(ops[0])]
+        I.uses = []
     elif mn in ('tst', 'cmp', 'cmn'):
         I.kind, I.defs, I.srcs = 'flags', ['nzcv'], ops[:2]
         I.width = W(ops[0])
@@ -852,7 +857,7 @@ class Skeleton:
     # -- fatia
     def slice(self):
         roots = [I for I in self.insns if I.kind in ('call', 'ret', 'tailcall', 'bcc', 'cbz', 'tbz', 'dup', 'store',
-                                                     'pseudo')]
+                                                     'pseudo', 'mrs_tls')]
         self.live = set()
         work = list(roots)
         while work:
@@ -894,6 +899,17 @@ class Skeleton:
         for w in self.webs.values():
             for d in w.defs:
                 self.def_web[d] = w
+        for I in self.insns:
+            if I.idx not in self.live:
+                continue
+            if I.kind == 'mrs_tls':
+                for r in I.defs:
+                    d = (I.idx, r)
+                    if d not in self.def_web and r != 'nzcv':
+                        w = Web(r)
+                        w.defs.add(d)
+                        self.webs[d] = w
+                        self.def_web[d] = w
 
     def support(self, d, seen=None):
         """Webs lidas (transitivamente, por definicoes unicas) pela expressao da definicao d."""
@@ -916,7 +932,7 @@ class Skeleton:
         I = self.by_idx[d[0]]
         if I.kind == 'pseudo':
             return d[1] in I.accs
-        if I.kind in ('call', 'load', 'dup'):
+        if I.kind in ('call', 'load', 'dup', 'mrs_tls'):
             return False
         for u in I.uses:
             w = self.use_web[(I.idx, u)]
@@ -955,7 +971,7 @@ class Skeleton:
                         w.var = True
                         break
         for I in self.insns:
-            if I.kind in ('ldrb_post', 'ldrh_post'):
+            if I.kind in ('ldrb_post', 'ldrh_post', 'mrs_tls'):
                 w = self.def_web.get((I.idx, I.defs[0]))
                 if w is not None:
                     w.var = True
@@ -1372,6 +1388,10 @@ class Skeleton:
             elif t == 'u32':
                 n, m = [X('cast', 'uint32_t', v, t='u32') if v.t == 'u64' and v.const() is None else v for v in (n, m)]
             e = X('ternary', cond, n, m, t=t)
+        elif k == 'mrs_tls':
+            w = self.def_web.get(d)
+            dest = w.name if w else d[1]
+            e = X('var', dest, t=t)
         else:
             e = X('opaque', I.line)
         if e.k == 'opaque':
@@ -1473,6 +1493,10 @@ class Skeleton:
             elif I.kind == 'stack_store':
                 src_op = getattr(I, 'src', None) or (I.uses[0] if I.uses else 'zr')
                 out.append(f"sp_{I.off_val:#x} = {self.render(self.operand(I, src_op))};")
+            elif I.kind == 'mrs_tls':
+                w = self.def_web.get((I.idx, I.defs[0]))
+                dest_name = w.name if w else I.defs[0]
+                out.append(f"SHIM_MRS_TPIDRRO({dest_name});")
             elif I.idx not in self.merged_copy:
                 for r in I.defs:
                     w = self.def_web.get((I.idx, r))
@@ -1852,10 +1876,12 @@ def build(fn, data, loops, shim_header='switch_hle_shim.h', extra_fns=()):
         inc.append('#include <string.h>')
     if callees & {'clock', 'time'}:
         inc.append('#include <time.h>')
+    has_tls = any(I.kind == 'mrs_tls' for I in sk.insns + [I for h in helpers for I in h.insns])
     if shim_header and os.path.exists(shim_header):
-        shim_src = open(shim_header, encoding='utf-8').read()
+        with open(shim_header, encoding='utf-8') as f:
+            shim_src = f.read()
         shim_fns = set(re.findall(r'SHIM_API\s+[\w\s\*]+?\b(\w+)\s*\(', shim_src))
-        if callees & shim_fns:
+        if (callees & shim_fns) or has_tls:
             inc.append(f'#include "{os.path.basename(shim_header)}"')
     typedefs = []
     for name, nf in sorted(sk.structs.items()):
