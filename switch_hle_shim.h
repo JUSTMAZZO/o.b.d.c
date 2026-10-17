@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <pthread.h>
 
 /* ------------------------------------------------------------------ tipos base */
 typedef uint8_t  u8;
@@ -490,6 +491,7 @@ enum {
     KernelError_InvalidSize = 101,
     KernelError_InvalidAddress = 102,
     KernelError_OutOfMemory = 104,
+    KernelError_OutOfHandles = 105,
     KernelError_InvalidMemoryState = 106,
     KernelError_InvalidMemoryPermissions = 108,
     KernelError_InvalidMemoryRange = 110,
@@ -600,6 +602,303 @@ SHIM_API Result hidInitialize(void) { return 0; }
 SHIM_API void hidExit(void) {}
 SHIM_API Result fsInitialize(void) { return 0; }
 SHIM_API void fsExit(void) {}
+
+/* ------------------------------------------------------------------ IPC (CMIF / HIPC) */
+#define CMIF_IN_HEADER_MAGIC   0x49434653U  /* "SFCI" */
+#define CMIF_OUT_HEADER_MAGIC  0x4F434653U  /* "SFCO" */
+#define SFCI_MAGIC             CMIF_IN_HEADER_MAGIC
+#define SFCO_MAGIC             CMIF_OUT_HEADER_MAGIC
+
+#ifndef SHIM_TLS_IPC_SIZE
+#define SHIM_TLS_IPC_SIZE      0x100
+#endif
+#ifndef SHIM_MAX_HANDLES
+#define SHIM_MAX_HANDLES       64
+#endif
+#ifndef SHIM_HANDLE_BASE
+#define SHIM_HANDLE_BASE       0x200U
+#endif
+
+/*
+ * CMIF (Command/Message Interface Format) do Horizon OS:
+ * Protocolo de mensagens sobre o buffer IPC localizado no inicio da TLS da thread (0x000-0x0FF).
+ */
+typedef struct {
+    union {
+        u32 magic;
+        u32 Magic;
+    };
+    union {
+        u32 version;
+        u32 Version;
+    };
+    union {
+        u32 command_id;
+        u32 CommandId;
+        u32 cmd_id;
+    };
+    union {
+        u32 token;
+        u32 Token;
+    };
+    union {
+        u32 type;
+        u32 Type;
+    };
+    union {
+        u32 raw_size;
+        u32 RawSize;
+    };
+    union {
+        u32 objects;
+        u32 Objects;
+    };
+} CmifInHeader;
+
+typedef struct {
+    union {
+        u32 magic;
+        u32 Magic;
+    };
+    union {
+        u32 version;
+        u32 Version;
+    };
+    union {
+        Result result;
+        Result Result;
+    };
+    union {
+        u32 token;
+        u32 Token;
+    };
+    union {
+        u32 type;
+        u32 Type;
+    };
+    union {
+        u32 raw_size;
+        u32 RawSize;
+    };
+    union {
+        u32 objects;
+        u32 Objects;
+    };
+} CmifOutHeader;
+
+SHIM_API void *shimGetTls(void);
+
+/* Decodifica um cabecalho CMIF de entrada a partir do buffer IPC. Retorna 0 em sucesso, -1 se invalido ou sem SFCI. */
+static inline int cmifParseInHeader(const void *ipc_raw, size_t buf_size, CmifInHeader *out_hdr, size_t *out_offset)
+{
+    if (!ipc_raw || buf_size < 16)
+        return -1;
+    const u32 *words = (const u32 *)ipc_raw;
+    size_t max_words = buf_size / sizeof(u32);
+    if (max_words > 16)
+        max_words = 16;
+    for (size_t i = 0; i < max_words; i++) {
+        if (words[i] == CMIF_IN_HEADER_MAGIC) {
+            if ((i + 4) * sizeof(u32) > buf_size)
+                return -1;
+            if (out_hdr) {
+                memset(out_hdr, 0, sizeof(*out_hdr));
+                out_hdr->magic = words[i];
+                out_hdr->version = words[i + 1];
+                out_hdr->command_id = words[i + 2];
+                out_hdr->token = words[i + 3];
+                if (i >= 2) {
+                    out_hdr->type = words[0] & 0xFFFF;
+                    out_hdr->raw_size = words[1] & 0x3FF;
+                    if (words[1] & (1U << 31)) {
+                        out_hdr->objects = (words[2] >> 8) & 0xF;
+                    }
+                } else {
+                    out_hdr->type = 4;
+                    out_hdr->raw_size = 4;
+                    out_hdr->objects = 0;
+                }
+            }
+            if (out_offset)
+                *out_offset = i * sizeof(u32);
+            return 0;
+        }
+    }
+    return -1;
+}
+
+/* Formata um cabecalho CMIF de saida no buffer IPC. Retorna 0 em sucesso, -1 se erro. */
+static inline int cmifFormatOutHeader(void *ipc_raw, size_t buf_size, size_t offset, const CmifOutHeader *out_hdr)
+{
+    if (!ipc_raw || !out_hdr || offset + 16 > buf_size)
+        return -1;
+    u32 *words = (u32 *)((u8 *)ipc_raw + offset);
+    words[0] = out_hdr->magic ? out_hdr->magic : CMIF_OUT_HEADER_MAGIC;
+    words[1] = out_hdr->version;
+    words[2] = (u32)out_hdr->result;
+    words[3] = out_hdr->token;
+    return 0;
+}
+
+typedef Handle (*ShimIpcAllocFn)(const char *name);
+
+static inline Result shim_cmif_dispatch(const char *srv_name, u32 cmd_id, const u8 *payload_in,
+                                        u8 *payload_out, Handle *out_created_handle,
+                                        ShimIpcAllocFn alloc_fn)
+{
+    Result res = 0;
+    Handle created_handle = INVALID_HANDLE;
+
+    if (strcmp(srv_name, "sm:") == 0) {
+        if (cmd_id == 0) {
+            /* sm: Initialize(pid_placeholder) -> sucesso */
+            res = 0;
+        } else if (cmd_id == 1) {
+            /* sm: GetService(name: 8 bytes) -> aloca novo handle para o servico solicitado */
+            char target[16] = {0};
+            memcpy(target, payload_in, 8);
+            target[8] = '\0';
+
+            if (alloc_fn)
+                created_handle = alloc_fn(target);
+            res = (created_handle != INVALID_HANDLE) ? 0 : KERNELRESULT(OutOfHandles);
+        } else {
+            res = 0;
+        }
+    } else if (strncmp(srv_name, "time", 4) == 0) {
+        if (cmd_id == 0) {
+            u64 now_sec = (u64)time(NULL);
+            memcpy(payload_out, &now_sec, sizeof(now_sec));
+        }
+        res = 0;
+    } else if (strncmp(srv_name, "set", 3) == 0) {
+        if (cmd_id == 0) {
+            u64 lang_code = 0x000053552d6e65ULL;
+            memcpy(payload_out, &lang_code, sizeof(lang_code));
+        }
+        res = 0;
+    } else if (strncmp(srv_name, "applet", 6) == 0) {
+        res = 0;
+    } else {
+        res = 0;
+    }
+
+    if (out_created_handle)
+        *out_created_handle = created_handle;
+    return res;
+}
+
+#if !defined(__linux__)
+typedef struct {
+    int used;
+    char service_name[16];
+} ShimHostObj;
+
+static ShimHostObj g_shim_host_objs[SHIM_MAX_HANDLES];
+static pthread_mutex_t g_shim_host_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static Handle shim_ipc_alloc_session_host(const char *name)
+{
+    pthread_mutex_lock(&g_shim_host_lock);
+    Handle h = INVALID_HANDLE;
+    for (u32 k = 0; k < SHIM_MAX_HANDLES; k++) {
+        if (!g_shim_host_objs[k].used) {
+            memset(&g_shim_host_objs[k], 0, sizeof(g_shim_host_objs[k]));
+            g_shim_host_objs[k].used = 1;
+            if (name) {
+                strncpy(g_shim_host_objs[k].service_name, name, sizeof(g_shim_host_objs[k].service_name) - 1);
+                g_shim_host_objs[k].service_name[sizeof(g_shim_host_objs[k].service_name) - 1] = '\0';
+            }
+            h = SHIM_HANDLE_BASE + k;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_shim_host_lock);
+    return h;
+}
+
+SHIM_API Result svcConnectToNamedPort(Handle *session, const char *name)
+{
+    if (!name || strnlen(name, 12) > 11)
+        return KERNELRESULT(OutOfRange);
+    Handle h = shim_ipc_alloc_session_host(name);
+    if (h == INVALID_HANDLE)
+        return KERNELRESULT(OutOfHandles);
+    *session = h;
+    return 0;
+}
+
+SHIM_API Result svcCloseHandle(Handle handle)
+{
+    u32 k = handle - SHIM_HANDLE_BASE;
+    pthread_mutex_lock(&g_shim_host_lock);
+    if (handle < SHIM_HANDLE_BASE || k >= SHIM_MAX_HANDLES || !g_shim_host_objs[k].used) {
+        pthread_mutex_unlock(&g_shim_host_lock);
+        return KERNELRESULT(InvalidHandle);
+    }
+    g_shim_host_objs[k].used = 0;
+    pthread_mutex_unlock(&g_shim_host_lock);
+    return 0;
+}
+
+SHIM_API Result svcSendSyncRequest(Handle session)
+{
+    u32 k = session - SHIM_HANDLE_BASE;
+    pthread_mutex_lock(&g_shim_host_lock);
+    if (session < SHIM_HANDLE_BASE || k >= SHIM_MAX_HANDLES || !g_shim_host_objs[k].used) {
+        pthread_mutex_unlock(&g_shim_host_lock);
+        return KERNELRESULT(InvalidHandle);
+    }
+    char srv_name[16];
+    strncpy(srv_name, g_shim_host_objs[k].service_name, sizeof(srv_name) - 1);
+    srv_name[sizeof(srv_name) - 1] = '\0';
+    pthread_mutex_unlock(&g_shim_host_lock);
+
+    u8 *ipc_raw = (u8 *)shimGetTls();
+    if (!ipc_raw)
+        return KERNELRESULT(InvalidAddress);
+
+    CmifInHeader in_hdr;
+    size_t sfci_byte_off = 0;
+    if (cmifParseInHeader(ipc_raw, SHIM_TLS_IPC_SIZE, &in_hdr, &sfci_byte_off) != 0) {
+        return 0;
+    }
+
+    size_t sfci_word_idx = sfci_byte_off / sizeof(u32);
+    u32 *ipc_words = (u32 *)ipc_raw;
+    const u8 *payload_in = ipc_raw + sfci_byte_off + 16;
+    u8 *payload_out = ipc_raw + sfci_byte_off + 16;
+    Handle created_handle = INVALID_HANDLE;
+
+    Result res = shim_cmif_dispatch(srv_name, in_hdr.command_id, payload_in, payload_out,
+                                    &created_handle, shim_ipc_alloc_session_host);
+
+    CmifOutHeader out_hdr;
+    memset(&out_hdr, 0, sizeof(out_hdr));
+    out_hdr.magic = CMIF_OUT_HEADER_MAGIC;
+    out_hdr.version = 0;
+    out_hdr.result = res;
+    out_hdr.token = in_hdr.token;
+    cmifFormatOutHeader(ipc_raw, SHIM_TLS_IPC_SIZE, sfci_byte_off, &out_hdr);
+
+    if (created_handle != INVALID_HANDLE) {
+        ipc_words[sfci_word_idx + 4] = created_handle;
+    }
+
+    if (sfci_word_idx > 0) {
+        ipc_words[0] = 0;
+        if (created_handle != INVALID_HANDLE) {
+            ipc_words[1] = 4 | (1U << 31);
+            ipc_words[2] = (1U << 8);
+            ipc_words[3] = created_handle;
+        } else {
+            ipc_words[1] = 4;
+        }
+    }
+
+    return 0;
+}
+#endif
 
 /* ------------------------------------------------------------------ fs: cartao SD sobre um diretorio do host */
 /*
@@ -2146,14 +2445,17 @@ typedef struct Thread {
 } Thread;
 
 enum {
-    KernelError_OutOfHandles = 105,
     KernelError_InvalidPriority = 112,
     KernelError_InvalidCoreId = 113,
     KernelError_TimedOut = 117,
 };
 
+#ifndef SHIM_MAX_HANDLES
 #define SHIM_MAX_HANDLES 64
+#endif
+#ifndef SHIM_HANDLE_BASE
 #define SHIM_HANDLE_BASE 0x200U   /* handles nao nulos e abaixo de HANDLE_WAIT_MASK */
+#endif
 
 typedef struct {
     int used, is_thread, started, signaled, closed, joined;
@@ -2167,6 +2469,7 @@ typedef struct {
     int tmem_fd;                 /* memfd que guarda a origem (-1: sem alias possivel) */
     off_t tmem_off;
     u8 *tmem_map;                /* destino do svcMapTransferMemory (NULL = nao mapeado) */
+    char service_name[16];       /* nome da porta/servico IPC ("sm:", "time", "set", ...) */
 } ShimObj;
 
 static ShimObj g_shim_objs[SHIM_MAX_HANDLES];
@@ -2516,29 +2819,92 @@ SHIM_API Result threadClose(Thread *t)
     return rc;
 }
 
-/* ------------------------------------------------------------------ IPC (dummies do mapeamento) */
-/* svc 0x1F: sessao ficticia na tabela de handles (o nome da porta tem ate 11 caracteres no Horizon). */
+/* ------------------------------------------------------------------ IPC (CMIF / HIPC no Linux) */
+static Handle shim_ipc_alloc_session_linux(const char *name)
+{
+    pthread_mutex_lock(&g_shim_obj_lock);
+    Handle h = shim_alloc_obj(0);
+    if (h != INVALID_HANDLE) {
+        ShimObj *so = shim_obj(h);
+        if (so && name) {
+            strncpy(so->service_name, name, sizeof(so->service_name) - 1);
+            so->service_name[sizeof(so->service_name) - 1] = '\0';
+        }
+    }
+    pthread_mutex_unlock(&g_shim_obj_lock);
+    return h;
+}
+
+/* svc 0x1F: cria sessao na tabela de handles associada a porta/servico nomeado. */
 SHIM_API Result svcConnectToNamedPort(Handle *session, const char *name)
 {
     if (!name || strnlen(name, 12) > 11)
         return KERNELRESULT(OutOfRange);
-    pthread_mutex_lock(&g_shim_obj_lock);
-    Handle h = shim_alloc_obj(0);
-    pthread_mutex_unlock(&g_shim_obj_lock);
+    Handle h = shim_ipc_alloc_session_linux(name);
     if (h == INVALID_HANDLE)
         return KERNELRESULT(OutOfHandles);
     *session = h;
     return 0;
 }
 
-/* svc 0x21: valida a sessao e devolve sucesso; a mensagem no buffer de IPC da TLS nao e processada. */
+/* svc 0x21: despacha mensagem IPC/CMIF atraves do session handle. */
 SHIM_API Result svcSendSyncRequest(Handle session)
 {
     pthread_mutex_lock(&g_shim_obj_lock);
     ShimObj *o = shim_obj(session);
-    int ok = o && !o->is_thread && !o->is_tmem;
+    if (!o || o->is_thread || o->is_tmem) {
+        pthread_mutex_unlock(&g_shim_obj_lock);
+        return KERNELRESULT(InvalidHandle);
+    }
+    char srv_name[16];
+    strncpy(srv_name, o->service_name, sizeof(srv_name) - 1);
+    srv_name[sizeof(srv_name) - 1] = '\0';
     pthread_mutex_unlock(&g_shim_obj_lock);
-    return ok ? 0 : KERNELRESULT(InvalidHandle);
+
+    u8 *ipc_raw = (u8 *)shimGetTls();
+    if (!ipc_raw)
+        return KERNELRESULT(InvalidAddress);
+
+    CmifInHeader in_hdr;
+    size_t sfci_byte_off = 0;
+    if (cmifParseInHeader(ipc_raw, SHIM_TLS_IPC_SIZE, &in_hdr, &sfci_byte_off) != 0) {
+        /* Se nao contem 'SFCI', preserva retrocompatibilidade com chamadas dummy legadas */
+        return 0;
+    }
+
+    size_t sfci_word_idx = sfci_byte_off / sizeof(u32);
+    u32 *ipc_words = (u32 *)ipc_raw;
+    const u8 *payload_in = ipc_raw + sfci_byte_off + 16;
+    u8 *payload_out = ipc_raw + sfci_byte_off + 16;
+    Handle created_handle = INVALID_HANDLE;
+
+    Result res = shim_cmif_dispatch(srv_name, in_hdr.command_id, payload_in, payload_out,
+                                    &created_handle, shim_ipc_alloc_session_linux);
+
+    CmifOutHeader out_hdr;
+    memset(&out_hdr, 0, sizeof(out_hdr));
+    out_hdr.magic = CMIF_OUT_HEADER_MAGIC;
+    out_hdr.version = 0;
+    out_hdr.result = res;
+    out_hdr.token = in_hdr.token;
+    cmifFormatOutHeader(ipc_raw, SHIM_TLS_IPC_SIZE, sfci_byte_off, &out_hdr);
+
+    if (created_handle != INVALID_HANDLE) {
+        ipc_words[sfci_word_idx + 4] = created_handle;
+    }
+
+    if (sfci_word_idx > 0) {
+        ipc_words[0] = 0;
+        if (created_handle != INVALID_HANDLE) {
+            ipc_words[1] = 4 | (1U << 31);
+            ipc_words[2] = (1U << 8);
+            ipc_words[3] = created_handle;
+        } else {
+            ipc_words[1] = 4;
+        }
+    }
+
+    return 0;
 }
 
 /* svc 0x13 / 0x14: memoria compartilhada de um servico (ex.: hid). Dummy: valida alinhamento e nao mapeia. */
@@ -2892,8 +3258,12 @@ SHIM_API u64 armGetSystemTick(void)
  */
 #include <pthread.h>
 
+#ifndef SHIM_TLS_SIZE
 #define SHIM_TLS_SIZE     0x200
+#endif
+#ifndef SHIM_TLS_IPC_SIZE
 #define SHIM_TLS_IPC_SIZE 0x100
+#endif
 #define THREADVARS_MAGIC  0x21545624   /* "!TV$" */
 
 typedef struct {
