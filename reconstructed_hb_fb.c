@@ -20,12 +20,14 @@ static void out(void *a0) {
   return;
 }
 
-static void on_applet(uint64_t a0) {
-  if ((uint32_t)(a0) == 3) {
+static void on_applet(AppletHookType hook, void *param) {
+  (void)param;
+
+  if (hook == 3) {
     *(uint32_t *)(((uint8_t *)DAT_12a000 + 744)) = (*(uint32_t *)(((uint8_t *)DAT_12a000 + 744)) + 1);
     return;
   }
-  if (a0 == 0) {
+  if (hook == 0) {
     *(uint32_t *)(((uint8_t *)DAT_12a000 + 748)) = (*(uint32_t *)(((uint8_t *)DAT_12a000 + 748)) + 1);
     return;
   }
@@ -75,7 +77,6 @@ int main(void) {
   uint64_t x13;
   uint64_t x17;
   uint64_t x20;
-  uint64_t x20_2;
   uint64_t x21;
   uint64_t x22;
   uint64_t x23;
@@ -102,9 +103,13 @@ int main(void) {
       if (w19 != 0) {
         x4 = "INCOERENTE";
       } else {
-        if (sp_0x68 > 0x6553f0ff) {
-          if (sp_0x70.year > 2022) {
-            x4 = ((((x20 - x0_6) + 2) < 5) ? "coerente com time()" : "INCOERENTE");
+        if (sp_0x68 <= 0x6553f0ff) {
+          x4 = "INCOERENTE";
+        } else {
+          if (sp_0x70.year <= 2022) {
+            x4 = "INCOERENTE";
+          } else {
+            x4 = ((((sp_0x68 - x0_6) + 2) < 5) ? "coerente com time()" : "INCOERENTE");
           }
         }
       }
@@ -120,7 +125,7 @@ int main(void) {
   snprintf(sp_0x130, 160, "[+] Relogio (time:u): 0x%x, %s\n", (unsigned int)(w19), x4);
   out(sp_0x130);
   appletLockExit();
-  appletHook(&sp_0x90, (AppletHookFn)on_applet, 0);
+  appletHook(&sp_0x90, on_applet, 0);
   w20 = appletIsAutoPowerDownRequested(&sp_0x63);
   w19_2 = appletGetFocusState();
   snprintf(sp_0x130, 160, "[+] Foco: %d (InFocus = 1), modo: %d, AutoPowerDown: 0x%x / %d\n", (int)(w19_2), (int)(appletGetOperationMode()), (unsigned int)(w20), (int)(sp_0x63));
@@ -141,7 +146,7 @@ int main(void) {
   }
   p19 = 0;
   w21 = 20;
-  x20_2 = 0;
+  x20 = 0;
   x22 = 0;
   w25 = 0;
   w26 = 0;
@@ -216,7 +221,7 @@ int main(void) {
       }
       x22 = (x22 + x23);
       w21 = (w21 + 20);
-      x20_2 = ((x20_2 - x17) + armGetSystemTick());
+      x20 = ((x20 - x17) + armGetSystemTick());
       framebufferEnd(&sp_0xe0);
       if (!appletMainLoop()) break;
     }
@@ -248,7 +253,7 @@ int main(void) {
   snprintf(sp_0x130, 160, "[+] FNV-1a do ultimo frame: 0x%016llx\n", (unsigned long long)(x21));
   out(sp_0x130);
   if (w26 != 0) {
-    d0 = (((double)(int64_t)(((x20_2 * 625) / 12)) / 1000000.0) / (double)(uint64_t)(w26));
+    d0 = (((double)(int64_t)(((x20 * 625) / 12)) / 1000000.0) / (double)(uint64_t)(w26));
     snprintf(sp_0x130, 160, "[+] Tempo de render: %.3f ms/frame\n", d0);
     out(sp_0x130);
     framebufferClose(&sp_0xe0);

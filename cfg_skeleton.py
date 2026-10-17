@@ -143,7 +143,7 @@ class Render:
             if v == 0x120500:
                 return "DAT_120500"
             if v == 0x1007c0:
-                return "(AppletHookFn)on_applet"
+                return "on_applet"
             if v >= 0x1000 and hex(v) in self.strings:
                 return c_string(self.strings[hex(v)])
             return hex(v) if (hexa or v > 0xFFFFF) and v > 9 else str(v)
@@ -227,25 +227,50 @@ class Insn:
         return self.line
 
 
-def is_frame(I):
+def is_frame(I, all_insns=None, idx=None):
     mn, ops = I.mn, I.ops
     if mn in ('sub', 'add') and len(ops) >= 2 and ops[1] == 'sp' and ops[0] in ('sp', 'x29'):
         return True
-    if mn in ('stp', 'ldp', 'str', 'ldr'):
+    if mn in ('stp', 'str'):
         m = next((o for o in ops if o.startswith('[')), None)
         if m and mem(m)[0] == 'sp':
             regs = [reg(o)[0] for o in ops if not o.startswith('[') and not o.startswith('#')]
             return all(r in CALLEE_SAVED for r in regs)
+    if mn in ('ldp', 'ldr'):
+        m = next((o for o in ops if o.startswith('[')), None)
+        if m and mem(m)[0] == 'sp':
+            regs = [reg(o)[0] for o in ops if not o.startswith('[') and not o.startswith('#')]
+            if all(r in CALLEE_SAVED for r in regs):
+                if all_insns is not None and idx is not None:
+                    # So e restauracao de callee-saved se ocorrer no epilogo sem chamadas ou usos posteriores
+                    for j in range(idx + 1, min(len(all_insns), idx + 20)):
+                        nxt = all_insns[j]
+                        if nxt.mn in ('ret', 'b'):
+                            break
+                        if nxt.mn == 'bl':
+                            return False
+                    for j in range(idx + 1, min(len(all_insns), idx + 20)):
+                        nxt = all_insns[j]
+                        used_regs = [reg(o)[0] for o in nxt.ops[1:] if reg(o)[0]]
+                        if nxt.mn in ('str', 'strb', 'strh', 'stp', 'stur'):
+                            used_regs += [reg(nxt.ops[0])[0]]
+                        if any(r in used_regs for r in regs):
+                            return False
+                        if nxt.mn in ('ret', 'b'):
+                            break
+                        if nxt.mn in ('ldr', 'mov', 'movz') and reg(nxt.ops[0])[0] in regs:
+                            break
+                return True
     return False
 
 
-def classify(I, calls):
+def classify(I, calls, all_insns=None, idx=None):
     mn, ops = I.mn, I.ops
     R = lambda o: reg(o)[0]
     W = lambda o: reg(o)[1]
     if mn == 'nop':
         I.kind = 'nop'
-    elif is_frame(I):
+    elif is_frame(I, all_insns, idx):
         I.kind = 'frame'
     elif mn in ('mov', 'movz'):
         d = R(ops[0])
@@ -740,7 +765,7 @@ class Skeleton:
         lo_addr, hi_addr = self.insns[0].addr, self.insns[-1].addr
         is_void = fn.get('decompiled_c', '').lstrip().startswith('void ')
         neon_spans = [(int(L['start'], 16), int(L['end'], 16)) for L in loops]
-        for I in self.insns:
+        for idx, I in enumerate(self.insns):
             inside = any(a <= I.addr <= b for a, b in neon_spans)
             if inside:
                 I.kind = 'neon'
@@ -748,7 +773,7 @@ class Skeleton:
                     I.kind, I.target = 'bcc', int(I.ops[-1], 16)   # so para cortar os blocos
                     I.cc = I.mn[2:]
             else:
-                classify(I, self.calls)
+                classify(I, self.calls, self.insns, idx)
                 if is_void and I.kind == 'ret':
                     I.uses = []
                 # `b` para fora da funcao com alvo conhecido = chamada de cauda (return f(...))
@@ -1100,9 +1125,14 @@ class Skeleton:
                 else:
                     w.ctype = CTYPE['ptr']
             elif any(w is pw for pw in self.params.values()):
-                w.t = 'void*' if id(w) in self.ptr_params else 'u64'
-                w.ctype = CTYPE[w.t]
-                w.name = f"a{w.reg[1:]}"
+                if self.name == 'on_applet' and w.reg in ('x0', 'w0'):
+                    w.t = 'u32'
+                    w.ctype = 'AppletHookType'
+                    w.name = 'hook'
+                else:
+                    w.t = 'void*' if id(w) in self.ptr_params else 'u64'
+                    w.ctype = CTYPE[w.t]
+                    w.name = f"a{w.reg[1:]}"
             else:
                 w.t = self.web_type(w)
                 w.ctype = CTYPE[w.t]
@@ -1551,8 +1581,8 @@ class Skeleton:
                 c_sub = self.branch_cond(t)
                 sub_m = self.ipdom.get(curr)
                 if sub_m is not None and sub_m is not curr:
-                    t_sub_lines = self.emit_path(T_sub, sub_m, visited)
-                    f_sub_lines = self.emit_path(F_sub, sub_m, visited)
+                    t_sub_lines = self.emit_path(T_sub, sub_m, set(visited))
+                    f_sub_lines = self.emit_path(F_sub, sub_m, set(visited))
                     if t_sub_lines and f_sub_lines:
                         lines.append(f"if ({self.cond(c_sub)}) {{")
                         lines += ['  ' + s for s in t_sub_lines]
@@ -1630,8 +1660,8 @@ class Skeleton:
                 elif self.ipdom.get(b) is not None:
                     M = self.ipdom[b]
                     visited = set(self.emitted) | {b}
-                    t_lines = self.emit_path(T, M, visited)
-                    f_lines = self.emit_path(F, M, visited)
+                    t_lines = self.emit_path(T, M, set(visited))
+                    f_lines = self.emit_path(F, M, set(visited))
                     if t_lines and f_lines:
                         lines.append(f"if ({self.cond(c)}) {{")
                         lines += ['  ' + s for s in t_lines]
@@ -1775,6 +1805,9 @@ class Skeleton:
             decls.append("uint64_t checksum;")
         if self.name == 'main':
             sig = "int main(void)"
+        elif self.name == 'on_applet':
+            sig = "static void on_applet(AppletHookType hook, void *param)"
+            decls.insert(0, "(void)param;")
         else:
             ps = ', '.join(f"{w.ctype}{'' if w.ctype.endswith('*') else ' '}{w.name}"
                            for _, w in sorted(self.params.items())) or 'void'
