@@ -229,6 +229,39 @@ class TestNroPipeline(unittest.TestCase):
             self.assertEqual(res.returncode, 0, f"falha em NRO isolado: {res.stderr}\n{res.stdout}")
             self.assertIn("[host] Checksum: 88196450180", res.stdout)
 
+    def test_08_hb_services_isolated_stripped_lifting(self):
+        # Valida a descompilacao e execucao no host do hb_services.nro puro e stripped sem .elf
+        services_nro = os.path.join(os.path.dirname(__file__), 'horizon_rt', 'hb_services', 'hb_services.nro')
+        with tempfile.TemporaryDirectory() as td:
+            isolated_nro = os.path.join(td, 'hb_services.nro')
+            shutil.copy2(services_nro, isolated_nro)
+            out_c = os.path.join(td, 'reconstructed_hb_services.c')
+
+            res = subprocess.run([sys.executable, 'neon_lifter.py', isolated_nro,
+                                  '--emit-c', out_c],
+                                 capture_output=True, text=True)
+            self.assertEqual(res.returncode, 0, f"falha em hb_services puro stripped: {res.stderr}\n{res.stdout}")
+            self.assertIn("[host] Servicos abertos: 4", res.stdout)
+            self.assertIn("[host] Frames: 60", res.stdout)
+            self.assertIn("[host] Botoes pressionados: 2", res.stdout)
+
+    def test_09_hb_threads_isolated_stripped_lifting(self):
+        # Valida a descompilacao e execucao no host do hb_threads.nro puro e stripped sem .elf
+        threads_nro = os.path.join(os.path.dirname(__file__), 'horizon_rt', 'hb_threads', 'hb_threads.nro')
+        with tempfile.TemporaryDirectory() as td:
+            isolated_nro = os.path.join(td, 'hb_threads.nro')
+            shutil.copy2(threads_nro, isolated_nro)
+            out_c = os.path.join(td, 'reconstructed_hb_threads.c')
+
+            res = subprocess.run([sys.executable, 'neon_lifter.py', isolated_nro,
+                                  '--emit-c', out_c],
+                                 capture_output=True, text=True)
+            self.assertEqual(res.returncode, 0, f"falha em hb_threads puro stripped: {res.stderr}\n{res.stdout}")
+            self.assertIn("[host] Frames: 60", res.stdout)
+            self.assertIn("[host] Threads: 4", res.stdout)
+            self.assertIn("[host] Checksum: 88196450180", res.stdout)
+            self.assertIn("[host] Ultima particula: 1734747", res.stdout)
+
 
 if __name__ == '__main__':
     unittest.main()
