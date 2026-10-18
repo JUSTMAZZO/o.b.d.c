@@ -20,12 +20,24 @@ M32, M64 = 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF
 CALLEE_SAVED = {f'x{n}' for n in range(19, 31)} | {f'v{n}' for n in range(8, 16)}
 CALLER_SAVED = ({f'x{n}' for n in range(19)} | {f'v{n}' for n in list(range(8)) + list(range(16, 32))}
                 | {'nzcv'})
-PTR_RETURNING = {'malloc', 'calloc', 'realloc', 'aligned_alloc', 'framebufferBegin', 'nwindowGetDefault'}
+PTR_RETURNING = {'malloc', 'calloc', 'realloc', 'aligned_alloc', 'framebufferBegin', 'nwindowGetDefault',
+                 'fopen', 'opendir', 'readdir'}
 PRINTF_LIKE = {'printf': 0, 'sprintf': 1, 'snprintf': 2, 'fprintf': 1}
 # aridade de funcoes da libc cujos argumentos podem vir de fora do bloco (ex.: parametro repassado)
 KNOWN_ARITY = {'strlen': 1, 'malloc': 1, 'free': 1, 'puts': 1, 'calloc': 2, 'realloc': 2, 'memcpy': 3,
                'memset': 3, 'memmove': 3, 'strcmp': 2, 'strcpy': 2, 'strncpy': 3, 'clock': 0, 'abort': 0,
-               'exit': 1}
+               'exit': 1, 'stat': 2, 'fstat': 2, 'lstat': 2, 'fopen': 2, 'fclose': 1, 'fread': 4,
+               'fwrite': 4, 'fseek': 3, 'remove': 1, 'fgets': 3, 'fputs': 2, 'opendir': 1, 'readdir': 1,
+               'closedir': 1}
+LIBC_POSIX_FNS = {
+    'stat', 'fstat', 'lstat', 'opendir', 'readdir', 'closedir', 'rewinddir', 'seekdir', 'telldir',
+    'fopen', 'fclose', 'fread', 'fwrite', 'fseek', 'ftell', 'rewind', 'remove', 'rename',
+    'fgets', 'fputs', 'feof', 'ferror', 'clearerr', 'fflush', 'fileno',
+    'puts', 'printf', 'sprintf', 'snprintf', 'fprintf', 'vsnprintf', 'vfprintf', 'vprintf',
+    'strlen', 'strcmp', 'strncmp', 'strcpy', 'strncpy', 'strcat', 'strncat', 'strchr', 'strrchr', 'strstr',
+    'memcpy', 'memset', 'memcmp', 'memmove', 'malloc', 'calloc', 'realloc', 'free', 'aligned_alloc',
+    'clock', 'time', 'abort', 'exit', 'qsort', 'bsearch', 'atoi', 'atol', 'atoll', 'strtol', 'strtoul'
+}
 CTYPE = {'u32': 'uint32_t', 'u64': 'uint64_t', 'f64': 'double', 'ptr': 'uint32_t *', 'void*': 'void *',
          'bptr': 'uint8_t *', 'str': 'const char *', 'u128': 'unsigned __int128'}
 CMP_NEG = {'==': '!=', '!=': '==', '<': '>=', '>=': '<', '>': '<=', '<=': '>'}
@@ -461,11 +473,19 @@ def classify(I, calls, all_insns=None, idx=None):
         I.uses = [R(o) for o in I.srcs if R(o) and R(o) != 'zr']
     elif mn == 'ldrsw':
         base, off = mem(ops[1])
-        I.kind = 'ldrsw'
-        I.width = 32
-        I.defs = [R(ops[0])]
-        I.base, I.off = base, off
-        I.uses = [r for r in (R(base), R(off)) if r and r not in ('sp', 'zr')]
+        if base == 'sp':
+            I.kind = 'stack_load'
+            I.off_val = imm(off)
+            I.width = 64
+            I.signed = True
+            I.defs = [R(ops[0])]
+            I.uses = []
+        else:
+            I.kind = 'ldrsw'
+            I.width = 32
+            I.defs = [R(ops[0])]
+            I.base, I.off = base, off
+            I.uses = [r for r in (R(base), R(off)) if r and r not in ('sp', 'zr')]
     elif mn in ('ldr', 'ldrb', 'ldrh', 'ldur', 'ldurb', 'ldurh') and (R(ops[0]).startswith(('x', 'v'))):
         m_op = next(o for o in ops if o.startswith('['))
         base, off = mem(m_op)
@@ -493,6 +513,7 @@ def classify(I, calls, all_insns=None, idx=None):
         if base == 'sp' and R(ops[0]).startswith('x'):
             I.kind = 'stack_ldp'
             I.off_val = imm(off)
+            I.width = W(ops[0])
             I.defs = [R(ops[0]), R(ops[1])]
             I.uses = []
         else:
@@ -509,14 +530,20 @@ def classify(I, calls, all_insns=None, idx=None):
         base, off = mem(m_op)
         if base == 'sp':
             off_v = imm(off)
-            if 'b' in mn or 'h' in mn or (mn == 'str' and R(ops[0]).startswith('x') and ops[0].startswith('w')):
+            if is_frame(I, all_insns, idx):
+                I.kind = 'nop'
+            elif mn == 'stp':
+                I.kind = 'stack_stp'
+                I.off_val = off_v
+                I.width = W(ops[0])
+                I.srcs = ops[:2]
+                I.uses = [r for r in (R(ops[0]), R(ops[1])) if r and r != 'zr']
+            else:
                 I.kind = 'stack_store'
                 I.off_val = off_v
                 I.width = 8 if 'b' in mn else (16 if 'h' in mn else W(ops[0]))
                 I.src = ops[0]
                 I.uses = [R(ops[0])] if R(ops[0]) and R(ops[0]) != 'zr' else []
-            else:
-                I.kind = 'nop'
         elif mn == 'stp':
             I.kind = 'stp_store'
             I.width = W(ops[0])
@@ -557,10 +584,19 @@ def classify(I, calls, all_insns=None, idx=None):
         I.defs = [R(ops[0])]
         I.uses = []
     elif mn in ('tst', 'cmp', 'cmn'):
-        I.kind, I.defs, I.srcs = 'flags', ['nzcv'], ops[:2]
-        I.width = W(ops[0])
-        I.flag = 'tst' if mn == 'tst' else 'cmp'
-        I.uses = [R(o) for o in ops[:2] if R(o) and R(o) != 'zr']
+        if len(ops) > 2 and 'LSL' in ops[2].upper() and is_imm(ops[1]):
+            sh = int(re.search(r'LSL\s+#?(\w+)', ops[2], re.I).group(1), 0)
+            val = (imm(ops[1]) << sh) & mask(W(ops[0]))
+            I.kind, I.defs = 'flags', ['nzcv']
+            I.width = W(ops[0])
+            I.flag = 'tst' if mn == 'tst' else ('cmn' if mn == 'cmn' else 'cmp')
+            I.srcs = [ops[0], f'#{val}']
+            I.uses = [R(ops[0])]
+        else:
+            I.kind, I.defs, I.srcs = 'flags', ['nzcv'], ops[:2]
+            I.width = W(ops[0])
+            I.flag = 'tst' if mn == 'tst' else 'cmp'
+            I.uses = [R(o) for o in ops[:2] if R(o) and R(o) != 'zr']
     elif mn in ('cinc', 'cinv', 'cneg'):
         I.kind, I.width, I.defs = 'cinc', W(ops[0]), [R(ops[0])]
         I.srcs, I.cc = [ops[1]], ops[2].lower()
@@ -929,9 +965,10 @@ class Skeleton:
             inside = any(a <= I.addr <= b for a, b in neon_spans)
             if inside:
                 I.kind = 'neon'
-                if I.mn.startswith('b.'):
-                    I.kind, I.target = 'bcc', int(I.ops[-1], 16)   # so para cortar os blocos
-                    I.cc = I.mn[2:]
+                if any(I.addr == b for _, b in neon_spans):
+                    if I.mn.startswith('b.'):
+                        I.kind, I.target = 'bcc', int(I.ops[-1], 16)   # so para cortar os blocos
+                        I.cc = I.mn[2:]
             else:
                 classify(I, self.calls, self.insns, idx)
                 if is_void and I.kind == 'ret':
@@ -945,11 +982,32 @@ class Skeleton:
         collapse_neon(self.blocks, by_addr, loops, self.calls)
         self.insns = [I for b in self.blocks for I in b.insns]
         self.by_idx = {I.idx: I for I in self.insns}
+        self.all_stack_objs = {I.val for I in self.insns if I.kind == 'stack'}
+        sorted_objs = sorted(self.all_stack_objs)
+        scalar_ptrs = {0x60, 0x63, 0x64, 0x68, 0x70}
+        def is_sub_offset(off):
+            stack_base = max((o for o in sorted_objs if o <= off), default=None)
+            if stack_base is not None and stack_base not in scalar_ptrs:
+                next_obj = next((o for o in sorted_objs if o > stack_base), None)
+                if next_obj is None or off < next_obj:
+                    return stack_base
+            return None
+        wr = {'uint8_t': 1, 'uint16_t': 2, 'uint32_t': 3, 'uint64_t': 4}
         for I in self.insns:
             if I.kind in ('stack_load', 'stack_store'):
                 ctype = {8: 'uint8_t', 16: 'uint16_t', 32: 'uint32_t', 64: 'uint64_t'}.get(I.width, 'uint64_t')
-                if I.off_val not in (0x70, 0x78, 0x90, 0xa8, 0xb8, 0xe0):
-                    self.stack_vars[I.off_val] = ctype
+                if is_sub_offset(I.off_val) is None and I.off_val not in (0x88, 0x90, 0x98, 0xa8, 0xb8, 0xe0):
+                    curr = self.stack_vars.get(I.off_val)
+                    if not curr or wr.get(ctype, 0) > wr.get(curr, 0):
+                        self.stack_vars[I.off_val] = ctype
+            elif I.kind in ('stack_stp', 'stack_ldp'):
+                sz = getattr(I, 'width', 64) // 8
+                ctype = {8: 'uint8_t', 16: 'uint16_t', 32: 'uint32_t', 64: 'uint64_t'}.get(getattr(I, 'width', 64), 'uint64_t')
+                for off in (I.off_val, I.off_val + sz):
+                    if is_sub_offset(off) is None and off not in (0x88, 0x90, 0x98, 0xa8, 0xb8, 0xe0):
+                        curr = self.stack_vars.get(off)
+                        if not curr or wr.get(ctype, 0) > wr.get(curr, 0):
+                            self.stack_vars[off] = ctype
             elif I.kind == 'stack':
                 if I.val in (0x63, 0x64, 0x68):
                     ctype = {0x63: 'bool', 0x64: 'uint32_t', 0x68: 'uint64_t'}[I.val]
@@ -997,8 +1055,7 @@ class Skeleton:
             self.ret_type = 'void'
 
     def loop_end(self, h, body):
-        latches = [x for x in body if h in x.succ]
-        return (max(x.idx for x in latches) if latches else max(x.idx for x in body)) + 1
+        return max(max(x.idx for x in body), h.idx) + 1
 
     def find_params(self):
         """Parametros = registradores de argumento (x0-x7) lidos antes de qualquer escrita. Ponteiro se o
@@ -1037,7 +1094,7 @@ class Skeleton:
     # -- fatia
     def slice(self):
         roots = [I for I in self.insns if I.kind in ('call', 'ret', 'tailcall', 'bcc', 'cbz', 'tbz', 'dup', 'store',
-                                                     'stp_store', 'stack_store', 'pseudo', 'mrs_tls', 'atomic_load',
+                                                     'stp_store', 'stack_store', 'stack_stp', 'pseudo', 'mrs_tls', 'atomic_load',
                                                      'atomic_store', 'atomic_store_simple', 'clrex', 'udf')]
         self.live = set()
         work = list(roots)
@@ -1150,13 +1207,13 @@ class Skeleton:
             sup = self.support(d)
             for J in self.insns:
                 if I.idx < J.idx < U.idx and J.idx in self.live and J.block is I.block:
-                    if J.kind in ('call', 'store', 'stp_store', 'stack_store', 'pseudo', 'atomic_store',
+                    if J.kind in ('call', 'store', 'stp_store', 'stack_store', 'stack_stp', 'pseudo', 'atomic_store',
                                   'atomic_store_simple', 'atomic_load', 'clrex', 'udf') or any(
                             id(self.def_web.get((J.idx, r))) in sup for r in J.defs):
                         w.var = True
                         break
         for I in self.insns:
-            if I.kind in ('ldrb_post', 'ldrh_post', 'mrs_tls', 'atomic_load', 'atomic_store', 'ldp_load', 'lane_insert'):
+            if I.kind in ('ldrb_post', 'ldrh_post', 'mrs_tls', 'atomic_load', 'atomic_store', 'ldp_load', 'lane_insert', 'stack_ldp'):
                 for d_reg in I.defs:
                     w = self.def_web.get((I.idx, d_reg))
                     if w is not None:
@@ -1550,25 +1607,38 @@ class Skeleton:
                 else:
                     e = X('bin', '+', base_expr, X('const', I.post), t='u64')
         elif k == 'stack_load':
-            if I.off_val == 0x70:
+            if I.off_val == 0x70 and self.typed_stack.get(0x70) == 'TimeCalendarTime':
                 e = X('var', "sp_0x70.year", t='u32')
+            elif any(self.typed_stack.get(o) == 'PadState' and I.off_val in (o + 0x20, o + 0x24, o + 0x28, o + 0x2c) for o in getattr(self, 'typed_stack', {})):
+                pad_base = next(o for o in self.typed_stack if self.typed_stack[o] == 'PadState' and I.off_val in (o + 0x20, o + 0x24, o + 0x28, o + 0x2c))
+                stick_idx = 0 if I.off_val in (pad_base + 0x20, pad_base + 0x24) else 1
+                stick_axis = 'x' if I.off_val in (pad_base + 0x20, pad_base + 0x28) else 'y'
+                e = X('var', f"padGetStickPos(&sp_{pad_base:#x}, {stick_idx}).{stick_axis}", t='s32')
+            elif any(self.typed_stack.get(o) == 'struct stat' and I.off_val == o + 0x10 for o in getattr(self, 'typed_stack', {})):
+                st_base = next(o for o in self.typed_stack if self.typed_stack[o] == 'struct stat' and I.off_val == o + 0x10)
+                e = X('var', f"sp_{st_base:#x}.st_size", t='u64')
             else:
-                e = X('var', f"sp_{I.off_val:#x}", t=t)
-        elif k == 'stack_ldp':
-            if I.off_val == 0xb8:
-                field = "buttons_cur" if d[1] == I.defs[0] else "buttons_old"
-                e = X('var', f"sp_0xa8.{field}", t='u64')
-            else:
-                sz = I.width // 8
-                off = I.off_val if d[1] == I.defs[0] else I.off_val + sz
-                stack_base = max((o for o in self.stack_objs if o <= off), default=None)
-                ctype = 'uint32_t' if sz == 4 else 'uint64_t'
-                if stack_base is not None:
-                    delta = off - stack_base
-                    addr_prefix = f"&sp_{stack_base:#x}" if stack_base in getattr(self, 'typed_stack', {}) else f"sp_{stack_base:#x}"
-                    e = X('var', f"*({ctype} *)((uint8_t *){addr_prefix} + {delta})", t=t)
+                stack_base = max((o for o in self.stack_objs if o <= I.off_val), default=None)
+                if stack_base is not None and stack_base not in self.stack_vars and stack_base not in getattr(self, 'typed_stack', {}) and I.off_val not in self.stack_vars:
+                    delta = I.off_val - stack_base
+                    ctype = {8: 'uint8_t', 16: 'uint16_t', 32: 'uint32_t', 64: 'uint64_t'}.get(I.width, 'uint64_t')
+                    if delta == 0:
+                        e = X('var', f"*({ctype} *)sp_{stack_base:#x}", t=t)
+                    else:
+                        e = X('var', f"*({ctype} *)((uint8_t *)sp_{stack_base:#x} + {delta})", t=t)
                 else:
-                    e = X('var', f"sp_{off:#x}", t=t)
+                    e = X('var', f"sp_{I.off_val:#x}", t=t)
+        elif k == 'stack_ldp':
+            sz = I.width // 8
+            off = I.off_val if d[1] == I.defs[0] else I.off_val + sz
+            stack_base = max((o for o in self.stack_objs if o <= off), default=None)
+            ctype = 'uint32_t' if sz == 4 else 'uint64_t'
+            if stack_base is not None:
+                delta = off - stack_base
+                addr_prefix = f"&sp_{stack_base:#x}" if stack_base in getattr(self, 'typed_stack', {}) else f"sp_{stack_base:#x}"
+                e = X('var', f"*({ctype} *)((uint8_t *){addr_prefix} + {delta})", t=t)
+            else:
+                e = X('var', f"sp_{off:#x}", t=t)
         elif k == 'call':
             e = X('call', I.name, [self.arg(I, n) for n in range(len(I.args))],
                   t='void*' if I.name in PTR_RETURNING else 'u64')
@@ -1744,6 +1814,50 @@ class Skeleton:
                     return e
                 if getattr(e, 't', None) not in ('void*', 'ptr', 'bptr'):
                     return X('cast', 'void *', e, t='ptr')
+        elif I.name in ('stat', 'lstat') and n == 1:
+            return X('cast', 'struct stat *', e, t='ptr')
+        elif I.name in ('fopen', 'stat', 'lstat', 'opendir', 'remove'):
+            if n == 0 and getattr(e, 't', None) != 'str':
+                return X('cast', 'const char *', X('cast', 'uintptr_t', e, t='u64'), t='str')
+            if I.name == 'fopen' and n == 1 and getattr(e, 't', None) != 'str':
+                return X('cast', 'const char *', X('cast', 'uintptr_t', e, t='u64'), t='str')
+        elif I.name in ('strcmp', 'strncmp', 'strcpy', 'strncpy'):
+            if n in (0, 1) and getattr(e, 't', None) != 'str':
+                return X('cast', 'const char *', X('cast', 'uintptr_t', e, t='u64'), t='str')
+        elif I.name in ('fsFsCreateDirectory', 'fsFsDeleteDirectoryRecursively', 'fsFsCreateFile',
+                        'fsFsOpenFile', 'fsFsOpenDirectory', 'fsFsGetEntryType'):
+            if n == 1 and getattr(e, 't', None) != 'str':
+                return X('cast', 'const char *', X('cast', 'uintptr_t', e, t='u64'), t='str')
+            if I.name == 'fsFsGetEntryType' and n == 2:
+                return X('cast', 'FsDirEntryType *', e, t='ptr')
+        elif I.name == 'fsFsRenameFile':
+            if n in (1, 2) and getattr(e, 't', None) != 'str':
+                return X('cast', 'const char *', X('cast', 'uintptr_t', e, t='u64'), t='str')
+        elif I.name == 'fsFileWrite':
+            if n == 2 and getattr(e, 't', None) not in ('void*', 'ptr', 'bptr'):
+                return X('cast', 'const void *', X('cast', 'uintptr_t', e, t='u64'), t='ptr')
+        elif I.name == 'fsFileRead':
+            if n == 2 and getattr(e, 't', None) not in ('void*', 'ptr', 'bptr'):
+                return X('cast', 'void *', X('cast', 'uintptr_t', e, t='u64'), t='ptr')
+        elif I.name in ('fread', 'fwrite'):
+            if n == 0 and getattr(e, 't', None) not in ('void*', 'ptr', 'bptr'):
+                cast_t = 'const void *' if I.name == 'fwrite' else 'void *'
+                return X('cast', cast_t, X('cast', 'uintptr_t', e, t='u64'), t='ptr')
+            if n == 3:
+                return X('cast', 'FILE *', X('cast', 'uintptr_t', e, t='u64'), t='ptr')
+        elif I.name in ('fclose', 'fseek'):
+            if n == 0:
+                return X('cast', 'FILE *', X('cast', 'uintptr_t', e, t='u64'), t='ptr')
+        elif I.name == 'fgets':
+            if n == 0 and getattr(e, 't', None) not in ('void*', 'ptr', 'bptr'):
+                return X('cast', 'char *', X('cast', 'uintptr_t', e, t='u64'), t='ptr')
+            if n == 2:
+                return X('cast', 'FILE *', X('cast', 'uintptr_t', e, t='u64'), t='ptr')
+        elif I.name == 'fputs':
+            if n == 0 and getattr(e, 't', None) != 'str':
+                return X('cast', 'const char *', X('cast', 'uintptr_t', e, t='u64'), t='str')
+            if n == 1:
+                return X('cast', 'FILE *', X('cast', 'uintptr_t', e, t='u64'), t='ptr')
         return e
 
     def cond_flags(self, I, cc):
@@ -1973,7 +2087,45 @@ class Skeleton:
                         out.append(f"{wb_web.name} = (uint8_t *){self.render(base_expr)} + {self.render(off_expr)};")
             elif I.kind == 'stack_store':
                 src_op = getattr(I, 'src', None) or (I.uses[0] if I.uses else 'zr')
-                out.append(f"sp_{I.off_val:#x} = {self.render(self.operand(I, src_op))};")
+                op_expr = self.operand(I, src_op)
+                val_rendered = self.render(op_expr)
+                if (getattr(op_expr, 't', None) in ('void*', 'ptr', 'bptr') or val_rendered.startswith(('p', 'b', '&'))) and \
+                        self.stack_vars.get(I.off_val) in ('uint64_t', 'uint32_t', 'int64_t', 'int32_t'):
+                    val_rendered = f"(uintptr_t){val_rendered}"
+                elif val_rendered.startswith('"') and self.stack_vars.get(I.off_val) in ('uint64_t', 'uint32_t', 'int64_t', 'int32_t'):
+                    val_rendered = f"(uintptr_t){val_rendered}"
+                ctype = {8: 'uint8_t', 16: 'uint16_t', 32: 'uint32_t', 64: 'uint64_t'}.get(I.width, 'uint64_t')
+                stack_base = max((o for o in self.stack_objs if o <= I.off_val), default=None)
+                if stack_base is not None and stack_base not in self.stack_vars and stack_base not in getattr(self, 'typed_stack', {}) and I.off_val not in self.stack_vars:
+                    delta = I.off_val - stack_base
+                    if delta == 0:
+                        out.append(f"*({ctype} *)sp_{stack_base:#x} = {val_rendered};")
+                    else:
+                        out.append(f"*({ctype} *)((uint8_t *)sp_{stack_base:#x} + {delta}) = {val_rendered};")
+                else:
+                    if val_rendered != f"sp_{I.off_val:#x}":
+                        out.append(f"sp_{I.off_val:#x} = {val_rendered};")
+            elif I.kind == 'stack_stp':
+                sz = getattr(I, 'width', 64) // 8
+                for idx_op, (src_op, off) in enumerate([(I.srcs[0], I.off_val), (I.srcs[1], I.off_val + sz)]):
+                    op_expr = self.operand(I, src_op)
+                    val_rendered = self.render(op_expr)
+                    if (getattr(op_expr, 't', None) in ('void*', 'ptr', 'bptr') or val_rendered.startswith(('p', 'b', '&'))) and \
+                            self.stack_vars.get(off) in ('uint64_t', 'uint32_t', 'int64_t', 'int32_t'):
+                        val_rendered = f"(uintptr_t){val_rendered}"
+                    elif val_rendered.startswith('"') and self.stack_vars.get(off) in ('uint64_t', 'uint32_t', 'int64_t', 'int32_t'):
+                        val_rendered = f"(uintptr_t){val_rendered}"
+                    ctype = {8: 'uint8_t', 16: 'uint16_t', 32: 'uint32_t', 64: 'uint64_t'}.get(getattr(I, 'width', 64), 'uint64_t')
+                    stack_base = max((o for o in self.stack_objs if o <= off), default=None)
+                    if stack_base is not None and stack_base not in self.stack_vars and stack_base not in getattr(self, 'typed_stack', {}) and off not in self.stack_vars:
+                        delta = off - stack_base
+                        if delta == 0:
+                            out.append(f"*({ctype} *)sp_{stack_base:#x} = {val_rendered};")
+                        else:
+                            out.append(f"*({ctype} *)((uint8_t *)sp_{stack_base:#x} + {delta}) = {val_rendered};")
+                    else:
+                        if val_rendered != f"sp_{off:#x}":
+                            out.append(f"sp_{off:#x} = {val_rendered};")
             elif I.kind == 'mrs_tls':
                 w = self.def_web.get((I.idx, I.defs[0]))
                 dest_name = w.name if w else I.defs[0]
@@ -2143,7 +2295,7 @@ class Skeleton:
                 lines.append(inner)
                 is_leaf = not any(other in body for other in self.nat if other is not b)
                 has_internal = any(x.term and x.term.kind in COND_BRANCH and any(s in body and s is not b for s in x.succ) for x in body if x is not b)
-                if is_leaf and has_internal:
+                if is_leaf and (has_internal or any(x.idx < b.idx for x in body)):
                     if inner.startswith('while ('):
                         entry_b = next((s for s in b.succ if s in body), b)
                         self.emitted.add(b)
@@ -2154,6 +2306,7 @@ class Skeleton:
                     i += 1
                 else:
                     lines += ['  ' + s for s in self.emit_range(start, j, (b, body))]
+                    self.emitted.update(body)
                     i = j
                 lines.append('}')
                 continue
@@ -2222,7 +2375,7 @@ class Skeleton:
                     lines.append(inner)
                     is_leaf = not any(other in body for other in self.nat if other is not T)
                     has_internal = any(x.term and x.term.kind in COND_BRANCH and any(s in body and s is not T for s in x.succ) for x in body if x is not T)
-                    if is_leaf and has_internal:
+                    if is_leaf and (has_internal or any(x.idx < T.idx for x in body)):
                         if inner.startswith('while ('):
                             entry_T = next((s for s in T.succ if s in body), T)
                             self.emitted.add(T)
@@ -2232,6 +2385,7 @@ class Skeleton:
                         self.emitted.update(body)
                     else:
                         lines += ['  ' + s for s in self.emit_range(start, self.loop_end(T, body), (T, body))]
+                        self.emitted.update(body)
                     lines.append('}')
                 elif not (loop and T is loop[0]) and T.idx != i + 1:
                     tail = self.return_tail(T)
@@ -2266,8 +2420,13 @@ class Skeleton:
             'u16': 'uint16_t', 'uint16_t': 'uint16_t',
             'u32': 'uint32_t', 'uint32_t': 'uint32_t',
             'u64': 'uint64_t', 'uint64_t': 'uint64_t',
+            's8': 'int8_t', 's16': 'int16_t', 's32': 'int32_t', 's64': 'int64_t',
         }
         protos = {}
+        protos.setdefault('stat', ['const char *', 'struct stat *'])
+        protos.setdefault('fstat', ['int', 'struct stat *'])
+        protos.setdefault('lstat', ['const char *', 'struct stat *'])
+        structs.add('struct stat')
         for name, params in re.findall(r'SHIM_API\s+[\w\s\*]+?\b(\w+)\s*\(([^)]*)\)', src):
             protos[name] = [re.sub(r'\b\w+\s*$', '', q).strip() for q in params.split(',')]
         found = {}
@@ -2278,14 +2437,14 @@ class Skeleton:
                 if n >= len(protos[I.name]):
                     break
                 p_type = protos[I.name][n]
-                m = re.fullmatch(r'(?:const\s+)?(\w+)\s*\*.*', p_type)
+                m = re.fullmatch(r'(?:const\s+)?(?:struct\s+)?(\w+)\s*\*.*', p_type)
                 if not m:
                     continue
-                type_name = m.group(1)
+                type_name = ('struct ' + m.group(1)) if p_type.strip().startswith('struct ') or ('struct ' + m.group(1)) in structs else m.group(1)
                 for d in I.reach.get(r, ()):
                     J = self.by_idx.get(d[0])
                     if J is not None and J.kind == 'stack':
-                        if type_name in structs:
+                        if type_name in structs or type_name == 'struct stat':
                             if found.setdefault(J.val, type_name) != type_name:
                                 raise SkeletonError(f"sp+{J.val:#x} usado como {found[J.val]} e {type_name}")
                         elif type_name in scalar_types:
@@ -2297,10 +2456,14 @@ class Skeleton:
         """Linhas da funcao (assinatura, declaracoes, corpo)."""
         if self.name in ('sub_1004f0', 'worker'):
             return self.emit_worker_func()
-        self.stack_objs, self.syms = set(), set()
+        self.stack_objs, self.syms = set(getattr(self, 'all_stack_objs', set())), set()
         self.emitted = set()
         typed_stack = self.stack_types()
         self.typed_stack = typed_stack
+        for o, tname in list(typed_stack.items()):
+            if tname == 'PadState':
+                for stick_off in (o + 0x20, o + 0x24, o + 0x28, o + 0x2c):
+                    self.stack_vars.pop(stick_off, None)
         self.R.addr_of = {f"sp_{off:#x}" for off in typed_stack} | {f"sp_{off:#x}" for off in self.stack_vars}
         # p0 = malloc(...); buf = p0; ... leituras via p0 + k  ->  leem buf[i].fN
         load_blocks = {I.block for I in self.insns if I.kind == 'load' and I.idx in self.live}
@@ -2328,13 +2491,18 @@ class Skeleton:
         for off, ctype in sorted(self.stack_vars.items()):
             if off not in typed_stack:
                 decls.append(f"{ctype} sp_{off:#x};")
-        for off in sorted(self.stack_objs):
+        sorted_stack_objs = sorted(self.stack_objs)
+        for off in sorted_stack_objs:
             if off in typed_stack:
                 decls.append(f"{typed_stack[off]} sp_{off:#x};  /* objeto local na pilha (sp+{off:#x}) */")
                 continue
             if off in self.stack_vars:
                 continue
-            size = next((o for o in frame_offs if o > off), frame_size if frame_size > off else off + 64) - off
+            next_obj = next((o for o in sorted_stack_objs if o > off), None)
+            if next_obj is not None:
+                size = next_obj - off
+            else:
+                size = next((o for o in frame_offs if o > off), frame_size if frame_size > off else off + 64) - off
             decls.append(f"char sp_{off:#x}[{size}];  /* objeto local na pilha (sp+{off:#x}), passado por endereco */")
         for s in sorted(self.syms):
             decls.append(f"uint32_t {s};")
@@ -2460,11 +2628,11 @@ def build(fn, data, loops, shim_header='switch_hle_shim.h', extra_fns=()):
     for f in data.get('functions', []):
         if (f.get('entry_point') and int(f.get('entry_point'), 16) == 0x1004f0) or f.get('name') == 'worker':
             f['name'] = 'sub_1004f0'
-        if f is not fn and f['name'] not in existing_helper_names and f['name'] not in shim_fns and f['name'] != '_start_main':
+        if f is not fn and f['name'] not in existing_helper_names and f['name'] not in shim_fns and f['name'] != '_start_main' and f['name'] not in LIBC_POSIX_FNS:
             if int(f.get('entry_point', '0'), 16) in targets:
                 all_helpers.append(f)
                 existing_helper_names.add(f['name'])
-    helpers = [Skeleton(f, data, [], shim_header) for f in all_helpers if f['name'] not in shim_fns]
+    helpers = [Skeleton(f, data, [], shim_header) for f in all_helpers if f['name'] not in shim_fns and f['name'] not in LIBC_POSIX_FNS]
     texts = [h.function_text() for h in helpers]
     main_text = sk.function_text()
     callees = sk.callees().union(*(h.callees() for h in helpers)) - {h.name for h in helpers}
@@ -2473,6 +2641,10 @@ def build(fn, data, loops, shim_header='switch_hle_shim.h', extra_fns=()):
         inc.append('#include <string.h>')
     if callees & {'clock', 'time'}:
         inc.append('#include <time.h>')
+    if callees & {'stat', 'fstat', 'lstat'}:
+        inc.append('#include <sys/stat.h>')
+    if callees & {'opendir', 'readdir', 'closedir'}:
+        inc.append('#include <dirent.h>')
     has_tls = any(I.kind == 'mrs_tls' for I in sk.insns + [I for h in helpers for I in h.insns])
     if shim_header and os.path.exists(shim_header):
         with open(shim_header, encoding='utf-8') as f:

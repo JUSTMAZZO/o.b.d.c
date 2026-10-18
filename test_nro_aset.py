@@ -194,7 +194,7 @@ class TestNroAset(unittest.TestCase):
             cls._temp_dir.cleanup()
             cls._temp_dir = None
         # Limpeza defensiva de artefatos residuais para nunca sujar a arvore do repositorio
-        for artifact in ('hb_assets.nro', 'hb_assets.elf', 'hb_assets.o', 'romfs.img'):
+        for artifact in ('hb_assets.elf', 'hb_assets.o', 'romfs.img'):
             p = os.path.join(cls.hb_assets_dir, artifact)
             if os.path.exists(p):
                 try:

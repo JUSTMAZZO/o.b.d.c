@@ -262,6 +262,40 @@ class TestNroPipeline(unittest.TestCase):
             self.assertIn("[host] Checksum: 88196450180", res.stdout)
             self.assertIn("[host] Ultima particula: 1734747", res.stdout)
 
+    def test_10_hb_assets_lifting_with_romfs(self):
+        # Valida a descompilacao e execucao no host de hb_assets.nro com extracao automatica de RomFS
+        assets_nro = os.path.join(os.path.dirname(__file__), 'horizon_rt', 'hb_assets', 'hb_assets.nro')
+        if not os.path.exists(assets_nro):
+            self.skipTest("hb_assets.nro nao encontrado")
+        with tempfile.TemporaryDirectory() as td:
+            out_c = os.path.join(td, 'reconstructed_hb_assets.c')
+            env = os.environ.copy()
+            env['OBDC_ROMFS'] = os.path.join(td, 'romfs')
+            res = subprocess.run([sys.executable, 'neon_lifter.py', assets_nro,
+                                  '--emit-c', out_c],
+                                 capture_output=True, text=True, env=env)
+            self.assertEqual(res.returncode, 0, f"falha em hb_assets lifting: {res.stderr}\n{res.stdout}")
+            self.assertIn("[host] CRC-32: 0x5d07c479", res.stdout)
+            self.assertIn("[host] FNV-1a: 0x3e52039d8d7f4325", res.stdout)
+            self.assertIn("[host] Bloco: 262144 bytes", res.stdout)
+            self.assertIn("[host] sdmc: / gravar/ler/apagar: ok", res.stdout)
+
+    def test_11_hb_io_lifting(self):
+        # Valida a descompilacao e execucao no host de hb_io.nro
+        io_nro = os.path.join(os.path.dirname(__file__), 'horizon_rt', 'hb_io', 'hb_io.nro')
+        if not os.path.exists(io_nro):
+            self.skipTest("hb_io.nro nao encontrado")
+        with tempfile.TemporaryDirectory() as td:
+            out_c = os.path.join(td, 'reconstructed_hb_io.c')
+            res = subprocess.run([sys.executable, 'neon_lifter.py', io_nro,
+                                  '--emit-c', out_c],
+                                 capture_output=True, text=True)
+            self.assertEqual(res.returncode, 0, f"falha em hb_io lifting: {res.stderr}\n{res.stdout}")
+            self.assertIn("[host] FNV-1a: 0x3cc5e3ccd09fa325", res.stdout)
+            self.assertIn("[host] Arquivos em /obdc_hb_io: 2", res.stdout)
+            self.assertIn("[host] Frames: 60, botoes pressionados: 2", res.stdout)
+            self.assertIn("[host] Limpeza: 0x0, diretorio removido", res.stdout)
+
 
 if __name__ == '__main__':
     unittest.main()
