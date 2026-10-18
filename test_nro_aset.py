@@ -43,11 +43,16 @@ def make_aset(icon_bytes=b'', nacp_bytes=b'', romfs_bytes=b''):
     return bytes(header) + icon_bytes + nacp_bytes + romfs_bytes
 
 
-def make_synthetic_nro_header(size=0x1000):
+def make_synthetic_nro_header(size=0x10000):
     header = bytearray(size)
     header[0x10:0x14] = b'NRO0'
     struct.pack_into('<I', header, 0x14, 0)
     struct.pack_into('<I', header, 0x18, size)
+    # Segments: text, ro, data
+    struct.pack_into('<II', header, 0x20, 0, 0x1000)
+    struct.pack_into('<II', header, 0x28, 0x1000, 0x1000)
+    struct.pack_into('<II', header, 0x30, 0x2000, 0x1000)
+    struct.pack_into('<I', header, 0x38, 0x1000)
     # MOD0 offset em 0x40
     struct.pack_into('<I', header, 0x04, 0x40)
     header[0x40:0x44] = b'MOD0'
@@ -173,66 +178,53 @@ class TestNroAset(unittest.TestCase):
         cls.base_dir = os.path.dirname(os.path.abspath(__file__))
         cls.hb_assets_dir = os.path.join(cls.base_dir, 'horizon_rt', 'hb_assets')
         cls.hb_assets_nro = os.path.join(cls.hb_assets_dir, 'hb_assets.nro')
+        cls._temp_dir = None
 
-        # Se hb_assets.nro nao existir, assegurar geracao automatica
+        # Se hb_assets.nro nao existir no disco, constroi NRO sintetico em tempfile sem devkitPro
         if not os.path.exists(cls.hb_assets_nro):
-            cls._build_hb_assets_nro()
+            cls._temp_dir = tempfile.TemporaryDirectory()
+            cls.hb_assets_nro = os.path.join(cls._temp_dir.name, 'hb_assets.nro')
+            cls._build_synthetic_hb_assets_nro(cls.hb_assets_nro)
 
         cls.assertTrue(os.path.exists(cls.hb_assets_nro), f"hb_assets.nro nao encontrado: {cls.hb_assets_nro}")
 
     @classmethod
-    def _build_hb_assets_nro(cls):
-        # 1. Gera romfs local
-        subprocess.run([sys.executable, os.path.join(cls.hb_assets_dir, 'gen_romfs.py')],
-                       cwd=cls.hb_assets_dir, check=True, capture_output=True)
-
-        build_romfs = r'C:\devkitPro\tools\bin\build_romfs.exe'
-        elf2nro = r'C:\devkitPro\tools\bin\elf2nro.exe'
-        gcc = r'C:\devkitPro\devkitA64\bin\aarch64-none-elf-gcc.exe'
-
-        if os.path.exists(build_romfs) and os.path.exists(elf2nro) and os.path.exists(gcc):
-            env = os.environ.copy()
-            env['DEVKITPRO'] = r'C:\devkitPro'
-            env['PATH'] = r'C:\devkitPro\devkitA64\bin;C:\devkitPro\tools\bin;' + env.get('PATH', '')
-
-            tmp_o = os.path.join(cls.hb_assets_dir, 'hb_assets.o')
-            tmp_elf = os.path.join(cls.hb_assets_dir, 'hb_assets.elf')
-            tmp_romfs = os.path.join(cls.hb_assets_dir, 'romfs.img')
-
+    def tearDownClass(cls):
+        if cls._temp_dir is not None:
+            cls._temp_dir.cleanup()
+            cls._temp_dir = None
+        # Limpeza defensiva de artefatos residuais para nunca sujar a arvore do repositorio
+        for artifact in ('hb_assets.nro', 'hb_assets.elf', 'hb_assets.o', 'romfs.img'):
+            p = os.path.join(cls.hb_assets_dir, artifact)
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+        romfs_dir = os.path.join(cls.hb_assets_dir, 'romfs')
+        if os.path.exists(romfs_dir):
             try:
-                subprocess.run([gcc, '-march=armv8-a+crc+crypto', '-mtune=cortex-a57', '-mtp=soft', '-fPIE',
-                                '-g', '-Wall', '-Wextra', '-O2', '-ffunction-sections', '-D__SWITCH__',
-                                r'-IC:\devkitPro\libnx\include', '-c', 'hb_assets.c', '-o', tmp_o],
-                               cwd=cls.hb_assets_dir, env=env, check=True, capture_output=True)
-                subprocess.run([gcc, r'-specs=C:\devkitPro\libnx\switch.specs', '-g', '-march=armv8-a+crc+crypto',
-                                '-mtune=cortex-a57', '-mtp=soft', '-fPIE', tmp_o,
-                                r'-LC:\devkitPro\libnx\lib', '-lnx', '-o', tmp_elf],
-                               cwd=cls.hb_assets_dir, env=env, check=True, capture_output=True)
-                subprocess.run([build_romfs, os.path.join(cls.hb_assets_dir, 'romfs'), tmp_romfs],
-                               cwd=cls.hb_assets_dir, env=env, check=True, capture_output=True)
-                subprocess.run([elf2nro, tmp_elf, cls.hb_assets_nro, f'--romfs={tmp_romfs}'],
-                               cwd=cls.hb_assets_dir, env=env, check=True, capture_output=True)
-            finally:
-                for tmp in (tmp_o, tmp_elf, tmp_romfs):
-                    if os.path.exists(tmp):
-                        try:
-                            os.remove(tmp)
-                        except OSError:
-                            pass
+                shutil.rmtree(romfs_dir)
+            except OSError:
+                pass
+
+    @classmethod
+    def _build_synthetic_hb_assets_nro(cls, out_path):
+        from horizon_rt.hb_assets import gen_romfs
+        bloco_data = gen_romfs.block()
+        info_data = gen_romfs.INFO
+        romfs_blob = pack_synthetic_romfs({'data/bloco.bin': bloco_data, 'texto/info.txt': info_data})
+        aset_blob = make_aset(nacp_bytes=make_nacp(title="hb_assets"), romfs_bytes=romfs_blob)
+        base_nro_path = os.path.join(cls.base_dir, 'horizon_rt', 'hb_compute', 'hb_compute.nro')
+        if os.path.exists(base_nro_path):
+            with open(base_nro_path, 'rb') as f:
+                raw = f.read()
+            nro_meta = nro_tool.parse_nro(raw)
+            base_nro = raw[:nro_meta['size']]
         else:
-            # Fallback em Python puro construindo o NRO com ASET
-            bloco_data = bytes(((i * 167 + 13) ^ (i >> 9)) & 0xFF for i in range(256 * 1024))
-            info_data = b"o.b.d.c hb_assets: RomFS de teste\n"
-            romfs_blob = pack_synthetic_romfs({'data/bloco.bin': bloco_data, 'texto/info.txt': info_data})
-            aset_blob = make_aset(romfs_bytes=romfs_blob)
-            base_nro_path = os.path.join(cls.base_dir, 'horizon_rt', 'hb_compute', 'hb_compute.nro')
-            if os.path.exists(base_nro_path):
-                with open(base_nro_path, 'rb') as f:
-                    base_nro = f.read()
-            else:
-                base_nro = make_synthetic_nro_header(0x10000)
-            with open(cls.hb_assets_nro, 'wb') as f:
-                f.write(base_nro + aset_blob)
+            base_nro = make_synthetic_nro_header(0x10000)
+        with open(out_path, 'wb') as f:
+            f.write(base_nro + aset_blob)
 
     def test_01_find_aset_section_hb_assets_nro(self):
         """Valida que find_aset_section detecta e valida a secao ASET no hb_assets.nro."""
@@ -279,6 +271,18 @@ class TestNroAset(unittest.TestCase):
             self.assertEqual(len(bloco_data), 262144)
             self.assertEqual(zlib.crc32(bloco_data), 0x5d07c479)
             self.assertEqual(bloco_data[0x10000:0x10004].hex(), '8d34db82')
+
+            # Verifica contrato de set e dict (__hash__ e __eq__ consistentes)
+            extracted_set = set(extracted)
+            self.assertIn('data/bloco.bin', extracted_set)
+            self.assertIn('texto/info.txt', extracted_set)
+            extracted_dict = {f: idx for idx, f in enumerate(extracted)}
+            self.assertIn('data/bloco.bin', extracted_dict)
+            self.assertIn('texto/info.txt', extracted_dict)
+            for f in extracted:
+                self.assertEqual(hash(f), hash(f.rel_path))
+                self.assertEqual(f, f.rel_path)
+                self.assertEqual(f.rel_path, f)
 
             with open(info_path, 'rb') as f:
                 info_data = f.read()
@@ -400,15 +404,29 @@ class TestNroAset(unittest.TestCase):
             escaped_path = os.path.join(td, 'escaped.txt')
             self.assertFalse(os.path.exists(escaped_path), "Seguranca violada: arquivo gravado fora de target_sub")
 
-    def test_09_find_aset_section_false_positive_resilience(self):
-        """Verifica que find_aset_section nao aborta prematuramente ao encontrar assinatura ASET falsa."""
+    def test_09_find_aset_section_strictly_at_nro_size(self):
+        """Valida que find_aset_section restringe a busca estritamente ao offset oficial nro_size."""
         valid_aset = make_aset(romfs_bytes=b"ROMFS_REAL_DATA_12345678")
-        fake_aset_decoy = b'ASET\x00\x00\x00\x00' + b'\xff' * 48  # offsets invalidos
-        blob = b'SOME_ARBITRARY_PREFIX_DATA' + fake_aset_decoy + valid_aset
+        fake_aset_decoy = b'ASET\x00\x00\x00\x00' + b'\xff' * 48
 
-        result = nro_tool.find_aset_section(blob)
-        self.assertIsNotNone(result, "find_aset_section deve encontrar o ASET real mesmo com decoy anterior")
+        # 1. NRO com decoy no meio e ASET real no final (offset oficial nro_size)
+        base_nro = bytearray(make_synthetic_nro_header(0x10000))
+        base_nro[0x1000:0x1000 + len(fake_aset_decoy)] = fake_aset_decoy
+
+        nro_with_aset = bytes(base_nro) + valid_aset
+        result = nro_tool.find_aset_section(nro_with_aset)
+        self.assertIsNotNone(result, "Deve encontrar a secao ASET no offset nro_size")
         self.assertEqual(result['romfs']['data'], b"ROMFS_REAL_DATA_12345678")
+
+        # 2. NRO com decoy no meio mas SEM trailer ASET no fim: nao deve fazer fallback nem achar o decoy
+        nro_without_aset = bytes(base_nro)
+        self.assertIsNone(nro_tool.find_aset_section(nro_without_aset),
+                          "find_aset_section nao deve escanear arbitrariamente o corpo do NRO buscando decoys")
+
+        # 3. Payload ASET isolado (iniciando em 0) e aceito
+        isolated_res = nro_tool.find_aset_section(valid_aset)
+        self.assertIsNotNone(isolated_res)
+        self.assertEqual(isolated_res['romfs']['data'], b"ROMFS_REAL_DATA_12345678")
 
     def test_10_crafted_prefix_collision_path_traversal_blocked(self):
         """Garante que tentativa de path traversal com colisao de prefixo (ex: ../sub_pwn) e estritamente bloqueada."""
@@ -450,6 +468,33 @@ class TestNroAset(unittest.TestCase):
                 self.assertTrue(os.path.exists(os.path.join(td, 'arquivo.txt')))
             finally:
                 os.chdir(orig_cwd)
+
+    def test_13_cli_extract_romfs_raw(self):
+        """Testa o comando CLI com flag --extract-romfs-raw <arquivo.bin>."""
+        with tempfile.TemporaryDirectory() as td:
+            raw_out = os.path.join(td, 'sub', 'partition.bin')
+            res = subprocess.run([sys.executable, '-m', 'horizon_rt.nro_tool', self.hb_assets_nro,
+                                  '--extract-romfs-raw', raw_out],
+                                 capture_output=True, text=True)
+            self.assertEqual(res.returncode, 0, f"nro_tool CLI falhou: {res.stderr}\n{res.stdout}")
+            self.assertIn("[nro_tool] RomFS bruto salvo", res.stdout)
+            self.assertTrue(os.path.isfile(raw_out))
+            with open(self.hb_assets_nro, 'rb') as f:
+                aset = nro_tool.find_aset_section(f.read())
+            with open(raw_out, 'rb') as f:
+                self.assertEqual(f.read(), aset['romfs']['data'])
+
+    def test_14_cli_extract_romfs_dir_ending_with_bin(self):
+        """Garante que --extract-romfs com diretorio terminado em '.bin' extrai arvore e nao arquivo bruto."""
+        with tempfile.TemporaryDirectory() as td:
+            dir_named_bin = os.path.join(td, 'meu_diretorio.bin')
+            res = subprocess.run([sys.executable, '-m', 'horizon_rt.nro_tool', self.hb_assets_nro,
+                                  '--extract-romfs', dir_named_bin],
+                                 capture_output=True, text=True)
+            self.assertEqual(res.returncode, 0, f"nro_tool CLI falhou: {res.stderr}\n{res.stdout}")
+            self.assertTrue(os.path.isdir(dir_named_bin))
+            self.assertTrue(os.path.isfile(os.path.join(dir_named_bin, 'data', 'bloco.bin')))
+            self.assertTrue(os.path.isfile(os.path.join(dir_named_bin, 'texto', 'info.txt')))
 
 
 if __name__ == '__main__':
