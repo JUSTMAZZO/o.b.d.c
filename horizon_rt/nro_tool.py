@@ -123,20 +123,24 @@ class RomfsPath(str):
     """String que casa tanto com o caminho no disco quanto com o caminho relativo normalizado."""
     def __new__(cls, full_path, rel_path):
         obj = super().__new__(cls, full_path)
-        obj.rel_path = rel_path
+        obj.rel_path = rel_path.replace('\\', '/')
         return obj
 
     def __eq__(self, other):
         if not isinstance(other, str):
             return False
         norm_other = other.replace('\\', '/')
+        norm_self = super().replace('\\', '/')
+        rel = getattr(other, 'rel_path', None)
+        if rel is not None:
+            return self.rel_path == rel or norm_self == norm_other
         return (super().__eq__(other) or
                 self.rel_path == other or
-                self.rel_path.replace('\\', '/') == norm_other or
-                super().replace('\\', '/') == norm_other)
+                self.rel_path == norm_other or
+                norm_self == norm_other)
 
     def __hash__(self):
-        return super().__hash__()
+        return hash(self.rel_path)
 
 
 def _is_safe_path(base_dir: str, target_path: str) -> bool:
@@ -215,51 +219,22 @@ def _validate_aset_at(data: bytes, aset_offset: int) -> dict | None:
 
 
 def find_aset_section(data: bytes, nro_size: int | None = None) -> dict | None:
-    """Escaneia e valida a secao Asset Storage (ASET) anexada ao trailer do NRO."""
+    """Valida a secao Asset Storage (ASET) anexada estritamente no fim do NRO (offset nro_size)."""
     if not data or len(data) < 0x38:
         return None
 
     # 1. Se nro_size explicito for fornecido, validar diretamente nesse offset
     if nro_size is not None:
-        cand = _validate_aset_at(data, nro_size)
-        if cand is not None:
-            return cand
+        return _validate_aset_at(data, nro_size)
 
-    # 2. Se for um NRO completo, verificar primeiro no offset especificado no header NRO0 (0x18)
+    # 2. Se for um binario NRO0, o trailer ASET fica estritamente no offset nro_size do cabecalho (0x18)
     if len(data) >= 0x20 and data[0x10:0x14] == b'NRO0':
         header_nro_sz = struct.unpack_from('<I', data, 0x18)[0]
-        cand = _validate_aset_at(data, header_nro_sz)
-        if cand is not None:
-            return cand
+        return _validate_aset_at(data, header_nro_sz)
 
-    # 3. Se comecar diretamente com ASET (payload isolado)
+    # 3. Se comecar diretamente com ASET (payload isolado sem cabecalho NRO)
     if data[:4] == b'ASET':
-        cand = _validate_aset_at(data, 0)
-        if cand is not None:
-            return cand
-
-    # 4. Caso nao encontrado nos locais padrao, escanear procurando por assinatura 'ASET' valida
-    search_start = 0
-    if len(data) >= 0x20 and data[0x10:0x14] == b'NRO0':
-        header_nro_sz = struct.unpack_from('<I', data, 0x18)[0]
-        if header_nro_sz < len(data):
-            search_start = header_nro_sz
-
-    idx = data.find(b'ASET', search_start)
-    while idx != -1:
-        cand = _validate_aset_at(data, idx)
-        if cand is not None:
-            return cand
-        idx = data.find(b'ASET', idx + 1)
-
-    # Se comecou com search_start > 0 e nao achou no trailer, tentar escanear o buffer completo
-    if search_start > 0:
-        idx = data.find(b'ASET', 0)
-        while idx != -1 and idx < search_start:
-            cand = _validate_aset_at(data, idx)
-            if cand is not None:
-                return cand
-            idx = data.find(b'ASET', idx + 1)
+        return _validate_aset_at(data, 0)
 
     return None
 
@@ -1057,7 +1032,8 @@ def main():
     ap.add_argument('--disasm-json', metavar='OUT', help='Gera JSON de extracao compativel com o lifter/cfg_skeleton')
     ap.add_argument('--extract-icon', metavar='OUT', help='Extrai o icone embutido na secao ASET para arquivo OUT')
     ap.add_argument('--extract-nacp', metavar='OUT', help='Extrai os bytes do NACP embutido na secao ASET para OUT')
-    ap.add_argument('--extract-romfs', nargs='?', const='./romfs', default=None, metavar='DIR', help='Extrai a particao RomFS embutida para DIR (padrao: ./romfs)')
+    ap.add_argument('--extract-romfs', nargs='?', const='./romfs', default=None, metavar='DIR', help='Extrai a arvore de arquivos da particao RomFS embutida para DIR (padrao: ./romfs)')
+    ap.add_argument('--extract-romfs-raw', metavar='OUT', help='Salva a imagem bruta da particao RomFS para arquivo OUT')
     ap.add_argument('--extract-aset', metavar='DIR', help='Extrai todos os assets (icone, NACP, RomFS) no diretorio DIR')
     ap.add_argument('--nacp-info', action='store_true', help='Exibe detalhes dos metadados NACP (titulos por idioma)')
     args = ap.parse_args()
@@ -1116,26 +1092,23 @@ def main():
         else:
             ro_data = aset['romfs']['data']
             target = args.extract_romfs
-            if target.lower().endswith('.bin'):
-                target_dir = os.path.dirname(target)
-                if target_dir:
-                    os.makedirs(target_dir, exist_ok=True)
-                with open(target, 'wb') as f:
-                    f.write(ro_data)
-                print(f"[nro_tool] RomFS extraido -> {target} ({len(ro_data)} bytes)")
-            else:
-                extracted = extract_romfs_image(ro_data, target)
-                if extracted:
-                    print(f"[nro_tool] RomFS extraido ({len(extracted)} arquivos) -> {target}/")
-                    for ef in extracted:
-                        print(f"  - {ef}")
-                else:
-                    if not os.path.isdir(target):
-                        with open(target, 'wb') as f:
-                            f.write(ro_data)
-                        print(f"[nro_tool] RomFS extraido -> {target} ({len(ro_data)} bytes)")
-                    else:
-                        print(f"[nro_tool] RomFS particionado extraido em {target}")
+            extracted = extract_romfs_image(ro_data, target)
+            print(f"[nro_tool] RomFS extraido ({len(extracted)} arquivos) -> {target}/")
+            for ef in extracted:
+                print(f"  - {ef}")
+
+    if args.extract_romfs_raw:
+        if not aset['has_aset'] or aset['romfs']['size'] == 0:
+            print("[nro_tool] NRO sem secao ASET/RomFS")
+        else:
+            ro_data = aset['romfs']['data']
+            out_file = args.extract_romfs_raw
+            out_parent = os.path.dirname(out_file)
+            if out_parent:
+                os.makedirs(out_parent, exist_ok=True)
+            with open(out_file, 'wb') as f:
+                f.write(ro_data)
+            print(f"[nro_tool] RomFS bruto salvo -> {out_file} ({len(ro_data)} bytes)")
 
     if args.extract_aset:
         if not aset['has_aset']:

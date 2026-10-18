@@ -144,7 +144,7 @@ class TestNroPipeline(unittest.TestCase):
             subprocess.run([sys.executable, '-m', 'horizon_rt.nro_tool', temp_nro_file,
                             '--extract-icon', icon_out,
                             '--extract-nacp', nacp_out,
-                            '--extract-romfs', romfs_out],
+                            '--extract-romfs-raw', romfs_out],
                            check=True, capture_output=True)
 
             self.assertTrue(os.path.exists(icon_out))
