@@ -119,22 +119,79 @@ def parse_nacp(nacp_bytes):
     }
 
 
-def parse_aset(data, nro_size):
-    """Inspeciona a secao Asset Storage (ASET) anexada ao final do NRO."""
-    if len(data) < nro_size + 0x38:
-        return {'has_aset': False}
-    if data[nro_size:nro_size + 4] != b'ASET':
-        return {'has_aset': False}
+class RomfsPath(str):
+    """String que casa tanto com o caminho no disco quanto com o caminho relativo normalizado."""
+    def __new__(cls, full_path, rel_path):
+        obj = super().__new__(cls, full_path)
+        obj.rel_path = rel_path
+        return obj
 
-    version = u32(data, nro_size + 0x04)
-    icon_offset, icon_size = struct.unpack_from('<QQ', data, nro_size + 0x08)
-    nacp_offset, nacp_size = struct.unpack_from('<QQ', data, nro_size + 0x18)
-    romfs_offset, romfs_size = struct.unpack_from('<QQ', data, nro_size + 0x28)
+    def __eq__(self, other):
+        if not isinstance(other, str):
+            return False
+        norm_other = other.replace('\\', '/')
+        return (super().__eq__(other) or
+                self.rel_path == other or
+                self.rel_path.replace('\\', '/') == norm_other or
+                super().replace('\\', '/') == norm_other)
+
+    def __hash__(self):
+        return super().__hash__()
+
+
+def find_aset_section(data: bytes) -> dict | None:
+    """Escaneia e valida a secao Asset Storage (ASET) anexada ao trailer do NRO."""
+    if not data or len(data) < 0x38:
+        return None
+
+    aset_offset = None
+    # 1. Se for um NRO completo, verificar primeiro no offset especificado no header NRO0 (0x18)
+    if len(data) >= 0x20 and data[0x10:0x14] == b'NRO0':
+        nro_size = struct.unpack_from('<I', data, 0x18)[0]
+        if len(data) >= nro_size + 0x38 and data[nro_size:nro_size + 4] == b'ASET':
+            aset_offset = nro_size
+
+    # 2. Se comecar diretamente com ASET (payload isolado)
+    if aset_offset is None and data[:4] == b'ASET':
+        aset_offset = 0
+
+    # 3. Caso nao encontrado nos locais padrao, escanear procurando pela assinatura 'ASET'
+    if aset_offset is None:
+        search_start = 0
+        if len(data) >= 0x20 and data[0x10:0x14] == b'NRO0':
+            search_start = struct.unpack_from('<I', data, 0x18)[0]
+        idx = data.find(b'ASET', search_start)
+        while idx != -1:
+            if idx + 0x38 <= len(data):
+                v = struct.unpack_from('<I', data, idx + 4)[0]
+                if v in (0, 1):
+                    aset_offset = idx
+                    break
+            idx = data.find(b'ASET', idx + 1)
+
+    if aset_offset is None or aset_offset + 0x38 > len(data):
+        return None
+
+    if data[aset_offset:aset_offset + 4] != b'ASET':
+        return None
+
+    version = struct.unpack_from('<I', data, aset_offset + 0x04)[0]
+    icon_offset, icon_size = struct.unpack_from('<QQ', data, aset_offset + 0x08)
+    nacp_offset, nacp_size = struct.unpack_from('<QQ', data, aset_offset + 0x18)
+    romfs_offset, romfs_size = struct.unpack_from('<QQ', data, aset_offset + 0x28)
+
+    total_len = len(data)
+    if icon_size > 0 and (aset_offset + icon_offset + icon_size > total_len or icon_offset < 0x38):
+        return None
+    if nacp_size > 0 and (aset_offset + nacp_offset + nacp_size > total_len or nacp_offset < 0x38):
+        return None
+    if romfs_size > 0 and (aset_offset + romfs_offset + romfs_size > total_len or romfs_offset < 0x38):
+        return None
 
     icon_data = b''
     icon_type = 'none'
-    if icon_size > 0 and len(data) >= nro_size + icon_offset + icon_size:
-        icon_data = data[nro_size + icon_offset:nro_size + icon_offset + icon_size]
+    if icon_size > 0:
+        icon_data = data[aset_offset + icon_offset: aset_offset + icon_offset + icon_size]
         if icon_data.startswith(b'\xff\xd8\xff'):
             icon_type = 'jpeg'
         elif icon_data.startswith(b'\x89PNG'):
@@ -144,12 +201,17 @@ def parse_aset(data, nro_size):
 
     nacp_info = {'valid': False}
     nacp_data = b''
-    if nacp_size > 0 and len(data) >= nro_size + nacp_offset + nacp_size:
-        nacp_data = data[nro_size + nacp_offset:nro_size + nacp_offset + nacp_size]
+    if nacp_size > 0:
+        nacp_data = data[aset_offset + nacp_offset: aset_offset + nacp_offset + nacp_size]
         nacp_info = parse_nacp(nacp_data)
+
+    romfs_data = b''
+    if romfs_size > 0:
+        romfs_data = data[aset_offset + romfs_offset: aset_offset + romfs_offset + romfs_size]
 
     return {
         'has_aset': True,
+        'offset': aset_offset,
         'version': version,
         'icon': {
             'offset': icon_offset,
@@ -165,9 +227,121 @@ def parse_aset(data, nro_size):
         },
         'romfs': {
             'offset': romfs_offset,
-            'size': romfs_size
+            'size': romfs_size,
+            'data': romfs_data
         }
     }
+
+
+def parse_aset(data, nro_size=None):
+    """Inspeciona a secao Asset Storage (ASET) anexada ao final do NRO."""
+    res = find_aset_section(data)
+    if res is None:
+        return {'has_aset': False}
+    return res
+
+
+def extract_romfs_image(romfs_bytes: bytes, out_dir: str) -> list[str]:
+    """Percorre as tabelas hierarquicas da particao RomFS e extrai arquivos e pastas para out_dir."""
+    if not romfs_bytes or len(romfs_bytes) < 0x50:
+        return []
+
+    header = struct.unpack_from('<10Q', romfs_bytes, 0)
+    (header_size, dir_hash_off, dir_hash_sz, dir_meta_off, dir_meta_sz,
+     file_hash_off, file_hash_sz, file_meta_off, file_meta_sz, data_off) = header
+
+    if header_size < 0x50:
+        return []
+
+    romfs_len = len(romfs_bytes)
+    if (dir_meta_off + dir_meta_sz > romfs_len or
+        file_meta_off + file_meta_sz > romfs_len or
+        data_off > romfs_len):
+        return []
+
+    os.makedirs(out_dir, exist_ok=True)
+    abs_out_dir = os.path.abspath(out_dir)
+
+    extracted_files = []
+    visited_dirs = set()
+    visited_files = set()
+
+    def walk_dir(d_off: int, current_rel_dir: str):
+        if d_off == 0xFFFFFFFF or d_off in visited_dirs:
+            return
+        visited_dirs.add(d_off)
+        if d_off + 24 > dir_meta_sz:
+            return
+
+        base = dir_meta_off + d_off
+        parent_off, sibling_off, child_dir_off, child_file_off, next_hash, name_len = struct.unpack_from('<6I', romfs_bytes, base)
+
+        if name_len > 0 and base + 24 + name_len <= dir_meta_off + dir_meta_sz:
+            raw_name = romfs_bytes[base + 24: base + 24 + name_len]
+            dir_name = raw_name.decode('utf-8', errors='replace')
+        else:
+            dir_name = ""
+
+        if d_off == 0 or not dir_name:
+            rel_dir = current_rel_dir
+        else:
+            rel_dir = os.path.join(current_rel_dir, dir_name) if current_rel_dir else dir_name
+
+        target_disk_dir = os.path.join(out_dir, rel_dir) if rel_dir else out_dir
+        if not os.path.abspath(target_disk_dir).startswith(abs_out_dir):
+            return
+        os.makedirs(target_disk_dir, exist_ok=True)
+
+        # 1. Processar arquivos deste diretorio
+        f_off = child_file_off
+        while f_off != 0xFFFFFFFF and f_off not in visited_files:
+            visited_files.add(f_off)
+            if f_off + 32 > file_meta_sz:
+                break
+            f_base = file_meta_off + f_off
+            f_parent, f_sibling, f_data_off, f_data_sz, f_next_hash, f_name_len = struct.unpack_from('<IIQQII', romfs_bytes, f_base)
+
+            if f_name_len > 0 and f_base + 32 + f_name_len <= file_meta_off + file_meta_sz:
+                raw_fname = romfs_bytes[f_base + 32: f_base + 32 + f_name_len]
+                file_name = raw_fname.decode('utf-8', errors='replace')
+            else:
+                file_name = f"file_{f_off:x}"
+
+            file_rel = os.path.join(rel_dir, file_name) if rel_dir else file_name
+            disk_file_path = os.path.join(out_dir, file_rel)
+
+            if not os.path.abspath(disk_file_path).startswith(abs_out_dir):
+                f_off = f_sibling
+                continue
+
+            actual_start = data_off + f_data_off
+            actual_end = actual_start + f_data_sz
+            if actual_end <= romfs_len:
+                file_content = romfs_bytes[actual_start:actual_end]
+            else:
+                file_content = romfs_bytes[actual_start:]
+
+            os.makedirs(os.path.dirname(disk_file_path), exist_ok=True)
+            with open(disk_file_path, 'wb') as f:
+                f.write(file_content)
+
+            extracted_files.append(RomfsPath(disk_file_path, file_rel.replace('\\', '/')))
+            f_off = f_sibling
+
+        # 2. Processar subdiretorios
+        c_off = child_dir_off
+        visited_child_sibs = set()
+        while c_off != 0xFFFFFFFF and c_off not in visited_child_sibs:
+            visited_child_sibs.add(c_off)
+            if c_off + 24 > dir_meta_sz:
+                break
+            c_base = dir_meta_off + c_off
+            _, c_sibling = struct.unpack_from('<2I', romfs_bytes, c_base)
+            walk_dir(c_off, rel_dir)
+            c_off = c_sibling
+
+    walk_dir(0, "")
+    return extracted_files
 
 
 def parse_nro(data):
@@ -842,7 +1016,7 @@ def main():
     ap.add_argument('--disasm-json', metavar='OUT', help='Gera JSON de extracao compativel com o lifter/cfg_skeleton')
     ap.add_argument('--extract-icon', metavar='OUT', help='Extrai o icone embutido na secao ASET para arquivo OUT')
     ap.add_argument('--extract-nacp', metavar='OUT', help='Extrai os bytes do NACP embutido na secao ASET para OUT')
-    ap.add_argument('--extract-romfs', metavar='OUT', help='Extrai a particao RomFS embutida para OUT')
+    ap.add_argument('--extract-romfs', nargs='?', const='./romfs', default=None, metavar='DIR', help='Extrai a particao RomFS embutida para DIR (padrao: ./romfs)')
     ap.add_argument('--extract-aset', metavar='DIR', help='Extrai todos os assets (icone, NACP, RomFS) no diretorio DIR')
     ap.add_argument('--nacp-info', action='store_true', help='Exibe detalhes dos metadados NACP (titulos por idioma)')
     args = ap.parse_args()
@@ -897,12 +1071,31 @@ def main():
 
     if args.extract_romfs:
         if not aset['has_aset'] or aset['romfs']['size'] == 0:
-            sys.exit("[nro_tool] Erro: arquivo NRO nao possui particao RomFS.")
-        ro_off = nro['size'] + aset['romfs']['offset']
-        ro_data = data[ro_off:ro_off + aset['romfs']['size']]
-        with open(args.extract_romfs, 'wb') as f:
-            f.write(ro_data)
-        print(f"[nro_tool] RomFS extraido -> {args.extract_romfs} ({len(ro_data)} bytes)")
+            print("[nro_tool] NRO sem secao ASET/RomFS")
+        else:
+            ro_off = aset.get('offset', nro['size']) + aset['romfs']['offset']
+            ro_data = data[ro_off:ro_off + aset['romfs']['size']]
+            target = args.extract_romfs
+            if target.lower().endswith('.bin'):
+                target_dir = os.path.dirname(target)
+                if target_dir:
+                    os.makedirs(target_dir, exist_ok=True)
+                with open(target, 'wb') as f:
+                    f.write(ro_data)
+                print(f"[nro_tool] RomFS extraido -> {target} ({len(ro_data)} bytes)")
+            else:
+                extracted = extract_romfs_image(ro_data, target)
+                if extracted:
+                    print(f"[nro_tool] RomFS extraido ({len(extracted)} arquivos) -> {target}/")
+                    for ef in extracted:
+                        print(f"  - {ef}")
+                else:
+                    if not os.path.isdir(target):
+                        with open(target, 'wb') as f:
+                            f.write(ro_data)
+                        print(f"[nro_tool] RomFS extraido -> {target} ({len(ro_data)} bytes)")
+                    else:
+                        print(f"[nro_tool] RomFS particionado extraido em {target}")
 
     if args.extract_aset:
         if not aset['has_aset']:
