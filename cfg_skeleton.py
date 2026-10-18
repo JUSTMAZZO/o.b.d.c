@@ -929,6 +929,96 @@ def frame_bytes(insns):
     return size
 
 
+def find_applet_hook_callbacks(data):
+    """Descobre entrypoints e nomes de funcoes registradas como callbacks em chamadas a appletHook."""
+    cb_eps = set()
+    cb_names = set()
+    fn_by_addr = {int(f['entry_point'], 16): f['name'] for f in data.get('functions', []) if f.get('name') and f.get('entry_point')}
+    for f in data.get('functions', []):
+        calls = f.get('calls', {})
+        hook_targets = {int(addr, 16) for addr, name in calls.items() if name == 'appletHook'}
+        dc = f.get('decompiled_c', '')
+        if 'appletHook' in dc:
+            for m in re.finditer(r'\bappletHook\s*\([^,]+,\s*(?:(?:\([^\)]+\)|&|\*)\s*)*(\w+)', dc):
+                cb_names.add(m.group(1))
+        last_adrp = {}
+        regs = {}
+        for line in f.get('assembly', []):
+            parts = line.split(': ', 1)
+            if len(parts) < 2:
+                continue
+            tokens = parts[1].strip().split(None, 1)
+            mn = tokens[0].lower()
+            ops = [o.strip() for o in tokens[1].split(',')] if len(tokens) > 1 else []
+            if mn == 'bl' and ops:
+                tgt = None
+                if ops[0].startswith('0x'):
+                    try:
+                        tgt = int(ops[0], 16)
+                    except ValueError:
+                        pass
+                is_hook = False
+                if tgt is not None and (tgt in hook_targets or fn_by_addr.get(tgt) == 'appletHook' or calls.get(hex(tgt)) == 'appletHook'):
+                    is_hook = True
+                elif ops[0] == 'appletHook':
+                    is_hook = True
+                if is_hook:
+                    cb = regs.get('x1') or regs.get('w1')
+                    if cb is not None:
+                        cb_eps.add(cb)
+                        if cb in fn_by_addr:
+                            cb_names.add(fn_by_addr[cb])
+                regs.clear()
+                last_adrp.clear()
+            elif mn == 'adrp' and len(ops) >= 2:
+                r = ops[0].lower()
+                try:
+                    last_adrp[r] = int(ops[1].lstrip('#'), 16)
+                except ValueError:
+                    pass
+            elif mn == 'add' and len(ops) >= 3:
+                dst = ops[0].lower()
+                src = ops[1].lower()
+                if src in last_adrp and ops[2].startswith('#'):
+                    try:
+                        regs[dst] = last_adrp[src] + int(ops[2].lstrip('#'), 0)
+                    except ValueError:
+                        pass
+                else:
+                    regs.pop(dst, None)
+                last_adrp.pop(dst, None)
+            elif mn == 'adr' and len(ops) >= 2 and ops[1].startswith('0x'):
+                try:
+                    regs[ops[0].lower()] = int(ops[1], 16)
+                except ValueError:
+                    pass
+            elif mn == 'mov' and len(ops) >= 2:
+                dst = ops[0].lower()
+                src = ops[1].lower()
+                if src in regs:
+                    regs[dst] = regs[src]
+                else:
+                    try:
+                        regs[dst] = int(ops[1].lstrip('#'), 0)
+                    except ValueError:
+                        regs.pop(dst, None)
+            else:
+                if ops:
+                    dst = ops[0].lower()
+                    regs.pop(dst, None)
+                    last_adrp.pop(dst, None)
+    for ep in list(cb_eps):
+        if ep in fn_by_addr:
+            cb_names.add(fn_by_addr[ep])
+    for f in data.get('functions', []):
+        if f.get('name') in cb_names and f.get('entry_point'):
+            try:
+                cb_eps.add(int(f['entry_point'], 16))
+            except ValueError:
+                pass
+    return cb_eps, cb_names
+
+
 # ---------------------------------------------------------------- gerador
 class Web:
     def __init__(self, reg_):
@@ -953,6 +1043,14 @@ class Skeleton:
         if (self.entry_point and int(self.entry_point, 16) == 0x1004f0) or fn.get('name') == 'worker':
             fn['name'] = 'sub_1004f0'
         self.name = fn['name']
+        cb_eps, cb_names = find_applet_hook_callbacks(data)
+        my_ep = None
+        if self.entry_point:
+            try:
+                my_ep = int(self.entry_point, 16)
+            except ValueError:
+                pass
+        self.is_applet_hook = (self.name in cb_names) or (my_ep is not None and my_ep in cb_eps)
         self.tail_emitted = set()
         self.stack_objs, self.syms = set(), set()
         self.emitted = set()
@@ -1393,10 +1491,14 @@ class Skeleton:
                 else:
                     w.ctype = CTYPE['ptr']
             elif any(w is pw for pw in self.params.values()):
-                if self.name == 'on_applet' and w.reg in ('x0', 'w0'):
+                if self.is_applet_hook and w.reg in ('x0', 'w0'):
                     w.t = 'u32'
                     w.ctype = 'AppletHookType'
                     w.name = 'hook'
+                elif self.is_applet_hook and w.reg in ('x1', 'w1'):
+                    w.t = 'void*'
+                    w.ctype = 'void *'
+                    w.name = 'param'
                 else:
                     if id(w) in self.ptr_params:
                         w.t = 'void*'
@@ -1802,6 +1904,33 @@ class Skeleton:
                 if e.const() is not None:
                     return X('cast', 'Mutex *', X('cast', 'uintptr_t', e, t='u64'), t='ptr')
                 return X('cast', 'Mutex *', e, t='ptr')
+        elif I.name == 'appletHook':
+            if n == 0:
+                if e.const() is not None:
+                    return X('cast', 'AppletHookCookie *', X('cast', 'uintptr_t', e, t='u64'), t='ptr')
+                elif getattr(e, 't', None) not in ('ptr', 'void*') and e.k != 'stack':
+                    return X('cast', 'AppletHookCookie *', e, t='ptr')
+            elif n == 1:
+                target_name = None
+                if e.const() is not None:
+                    c = e.const()
+                    for f in self.data.get('functions', []):
+                        ep = f.get('entry_point')
+                        if ep and int(ep, 16) == c:
+                            target_name = f['name']
+                            break
+                    if not target_name and c in self.fn_by_addr:
+                        target_name = self.fn_by_addr[c]
+                elif e.k == 'var':
+                    target_name = e.a[0]
+                if target_name:
+                    return X('var', target_name, t='ptr')
+                return X('cast', 'AppletHookFn', X('cast', 'uintptr_t', e, t='u64'), t='ptr')
+            elif n == 2:
+                if e.const() == 0:
+                    return X('const', 0, t='void*')
+                elif getattr(e, 't', None) not in ('void*', 'ptr', 'bptr'):
+                    return X('cast', 'void *', e, t='ptr')
         elif I.name == 'svcSignalProcessWideKey':
             if n == 0:
                 if e.const() is not None:
@@ -2510,8 +2639,8 @@ class Skeleton:
             decls.append("uint64_t checksum;")
         if self.name == 'main':
             sig = "int main(void)"
-        elif self.name == 'on_applet':
-            sig = "static void on_applet(AppletHookType hook, void *param)"
+        elif self.is_applet_hook:
+            sig = f"static void {self.name}(AppletHookType hook, void *param)"
             decls.insert(0, "(void)param;")
         else:
             ps = ', '.join(f"{w.ctype}{'' if w.ctype.endswith('*') else ' '}{w.name}"
@@ -2625,11 +2754,13 @@ def build(fn, data, loops, shim_header='switch_hle_shim.h', extra_fns=()):
             f['name'] = 'sub_1004f0'
     existing_helper_names = {f['name'] for f in all_helpers}
     targets = referenced_entrypoints(fn)
+    cb_eps, cb_names = find_applet_hook_callbacks(data)
+    targets |= cb_eps
     for f in data.get('functions', []):
         if (f.get('entry_point') and int(f.get('entry_point'), 16) == 0x1004f0) or f.get('name') == 'worker':
             f['name'] = 'sub_1004f0'
         if f is not fn and f['name'] not in existing_helper_names and f['name'] not in shim_fns and f['name'] != '_start_main' and f['name'] not in LIBC_POSIX_FNS:
-            if int(f.get('entry_point', '0'), 16) in targets:
+            if int(f.get('entry_point', '0'), 16) in targets or f['name'] in cb_names:
                 all_helpers.append(f)
                 existing_helper_names.add(f['name'])
     helpers = [Skeleton(f, data, [], shim_header) for f in all_helpers if f['name'] not in shim_fns and f['name'] not in LIBC_POSIX_FNS]

@@ -1914,9 +1914,11 @@ enum { LibnxError_AlreadyMapped = 3, LibnxError_NotFound = 9 };
 typedef struct {
     bool used;
     bool romfs;                   /* somente leitura, sem FsFileSystem */
+    bool is_temp_dir;             /* temporario de extracao de imagem RomFS */
     char name[SHIM_DEV_NAME_MAX];
     FsFileSystem fs;              /* fsdev: o dispositivo e dono do fs (fechado no unmount) */
     char root[SHIM_FS_ROOT_MAX];
+    char temp_dir[SHIM_FS_ROOT_MAX];
 } ShimDevice;
 
 static ShimDevice g_shim_devices[SHIM_MAX_DEVICES];
@@ -1934,7 +1936,7 @@ static ShimDevice *shim_dev_find(const char *name, size_t n)
 }
 
 /* Indice do novo dispositivo ou -1 (errno: EINVAL nome invalido, EEXIST ja montado, ENOMEM tabela cheia). */
-static int shim_dev_add(const char *name, bool romfs, const FsFileSystem *fs, const char *root)
+static int shim_dev_add(const char *name, bool romfs, const FsFileSystem *fs, const char *root, bool is_temp_dir)
 {
     size_t n = name ? strlen(name) : 0;
     if (n == 0 || n >= SHIM_DEV_NAME_MAX || strchr(name, ':') || strchr(name, '/')) {
@@ -1956,10 +1958,13 @@ static int shim_dev_add(const char *name, bool romfs, const FsFileSystem *fs, co
         memset(d, 0, sizeof *d);
         d->used = true;
         d->romfs = romfs;
+        d->is_temp_dir = is_temp_dir;
         memcpy(d->name, name, n + 1);
         if (fs)
             d->fs = *fs;
         memcpy(d->root, root, strlen(root) + 1);
+        if (is_temp_dir)
+            memcpy(d->temp_dir, root, strlen(root) + 1);
     }
     shim_fs_unlock();
     if (slot < 0)
@@ -1975,9 +1980,15 @@ static int shim_dev_remove(const char *name, bool want_romfs)
     ShimDevice *d = n ? shim_dev_find(name, n) : NULL;
     FsFileSystem fs = {0};
     bool close_fs = false;
+    char temp_to_clean[SHIM_FS_ROOT_MAX] = "";
     if (d && d->romfs == want_romfs) {
         fs = d->fs;
         close_fs = !d->romfs;
+        if (d->is_temp_dir && d->temp_dir[0]) {
+            memcpy(temp_to_clean, d->temp_dir, sizeof temp_to_clean);
+            d->is_temp_dir = false;
+            d->temp_dir[0] = '\0';
+        }
         d->used = false;
     } else {
         d = NULL;
@@ -1986,6 +1997,10 @@ static int shim_dev_remove(const char *name, bool want_romfs)
     if (!d) {
         errno = ENOENT;
         return -1;
+    }
+    if (temp_to_clean[0]) {
+        shim_fs_rmtree(temp_to_clean, false);
+        shim_sys_rmdir(temp_to_clean);
     }
     if (close_fs)
         fsFsClose(&fs);
@@ -2068,7 +2083,7 @@ SHIM_API int shimTranslatePath(const char *path, char *host, size_t size, bool *
 SHIM_API int fsdevMountDevice(const char *name, FsFileSystem fs)
 {
     ShimFsMount *m = shim_fs_mount(&fs);
-    int slot = m ? shim_dev_add(name, false, &fs, m->root) : -1;
+    int slot = m ? shim_dev_add(name, false, &fs, m->root, false) : -1;
     if (!m)
         errno = EINVAL;
     if (slot < 0)
@@ -2163,7 +2178,373 @@ SHIM_API Result shimRomfsSetRoot(const char *dir)
     return 0;
 }
 
-/* Num NRO monta a secao RomFS embutida; aqui monta o diretorio de assets do host (somente leitura).
+static inline uint32_t shim_r32(const void *p)
+{
+    uint32_t v;
+    memcpy(&v, p, sizeof(v));
+    return v;
+}
+
+static inline uint64_t shim_r64(const void *p)
+{
+    uint64_t v;
+    memcpy(&v, p, sizeof(v));
+    return v;
+}
+
+static inline int shim_fseek64(FILE *f, int64_t offset, int origin)
+{
+#if defined(_WIN32)
+    return _fseeki64(f, offset, origin);
+#else
+    return fseeko(f, (off_t)offset, origin);
+#endif
+}
+
+static inline int64_t shim_ftell64(FILE *f)
+{
+#if defined(_WIN32)
+    return _ftelli64(f);
+#else
+    return (int64_t)ftello(f);
+#endif
+}
+
+static bool shim_romfs_is_safe_name(const char *name, size_t len)
+{
+    if (len == 0 || len >= 256)
+        return false;
+    if ((len == 1 && name[0] == '.') || (len == 2 && name[0] == '.' && name[1] == '.'))
+        return false;
+    if (name[0] == ' ' || name[len - 1] == ' ')
+        return false;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)name[i];
+        if (c < 0x20 || strchr("\\/:*?<>|\"", c) != NULL)
+            return false;
+    }
+    return true;
+}
+
+static int shim_mkdir_p(const char *path)
+{
+    char tmp[SHIM_FS_HOST_MAX];
+    size_t len = strlen(path);
+    if (len >= sizeof(tmp)) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    memcpy(tmp, path, len + 1);
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/' || *p == '\\') {
+            char c = *p;
+            *p = '\0';
+            if (tmp[0] && !(len > 2 && tmp[1] == ':' && p == tmp + 2)) {
+                shim_sys_mkdir(tmp);
+            }
+            *p = c;
+        }
+    }
+    return (shim_sys_mkdir(tmp) == 0 || errno == EEXIST) ? 0 : -1;
+}
+
+static void shim_get_temp_dir(char *out, size_t out_sz)
+{
+#if defined(_WIN32)
+    const char *t = getenv("TEMP");
+    if (!t || !*t) t = getenv("TMP");
+    if (!t || !*t) t = ".";
+    snprintf(out, out_sz, "%s", t);
+#elif defined(__ANDROID__)
+    const char *t = getenv("TMPDIR");
+    if (!t || !*t) t = "/data/local/tmp";
+    snprintf(out, out_sz, "%s", t);
+#else
+    const char *t = getenv("TMPDIR");
+    if (!t || !*t) t = "/tmp";
+    snprintf(out, out_sz, "%s", t);
+#endif
+}
+
+static void shim_romfs_atexit_cleanup(void)
+{
+    for (int k = 0; k < SHIM_MAX_DEVICES; k++) {
+        if (g_shim_devices[k].used && g_shim_devices[k].is_temp_dir && g_shim_devices[k].temp_dir[0]) {
+            shim_fs_rmtree(g_shim_devices[k].temp_dir, false);
+            shim_sys_rmdir(g_shim_devices[k].temp_dir);
+            g_shim_devices[k].temp_dir[0] = '\0';
+        }
+    }
+}
+
+static Result shim_romfs_extract_dir_tree(const u8 *buf, size_t size,
+                                          const RomfsHeader *hdr,
+                                          uint32_t d_off,
+                                          const char *current_disk_dir,
+                                          int depth)
+{
+    if (d_off == 0xFFFFFFFF)
+        return 0;
+    if (depth > 64)
+        return LIBNXRESULT(BadInput);
+    if ((uint64_t)d_off + 24 > hdr->dir_meta_table_size)
+        return LIBNXRESULT(BadInput);
+
+    uint64_t base = hdr->dir_meta_table_offset + d_off;
+    if (base + 24 > size)
+        return LIBNXRESULT(BadInput);
+
+    uint32_t child_dir_off  = shim_r32(buf + base + 8);
+    uint32_t child_file_off = shim_r32(buf + base + 12);
+    uint32_t name_len       = shim_r32(buf + base + 20);
+
+    if (base + 24 + name_len > hdr->dir_meta_table_offset + hdr->dir_meta_table_size ||
+        base + 24 + name_len > size)
+        return LIBNXRESULT(BadInput);
+
+    char target_dir[SHIM_FS_HOST_MAX];
+    if (d_off == 0 || name_len == 0) {
+        snprintf(target_dir, sizeof target_dir, "%s", current_disk_dir);
+    } else {
+        if (!shim_romfs_is_safe_name((const char *)(buf + base + 24), name_len))
+            return LIBNXRESULT(BadInput);
+        char dname[256];
+        memcpy(dname, buf + base + 24, name_len);
+        dname[name_len] = '\0';
+        if (snprintf(target_dir, sizeof target_dir, "%s/%s", current_disk_dir, dname) >= (int)sizeof target_dir)
+            return FSRESULT(TooLongPath);
+    }
+
+    if (shim_mkdir_p(target_dir) != 0)
+        return LIBNXRESULT(IoError);
+
+    /* Processar arquivos */
+    uint32_t f_off = child_file_off;
+    int flimit = 50000;
+    while (f_off != 0xFFFFFFFF && --flimit > 0) {
+        if ((uint64_t)f_off + 32 > hdr->file_meta_table_size)
+            return LIBNXRESULT(BadInput);
+        uint64_t f_base = hdr->file_meta_table_offset + f_off;
+        if (f_base + 32 > size)
+            return LIBNXRESULT(BadInput);
+
+        uint32_t f_sibling  = shim_r32(buf + f_base + 4);
+        uint64_t f_data_off = shim_r64(buf + f_base + 8);
+        uint64_t f_data_sz  = shim_r64(buf + f_base + 16);
+        uint32_t f_name_len = shim_r32(buf + f_base + 28);
+
+        if (f_base + 32 + f_name_len > hdr->file_meta_table_offset + hdr->file_meta_table_size ||
+            f_base + 32 + f_name_len > size)
+            return LIBNXRESULT(BadInput);
+        if (!shim_romfs_is_safe_name((const char *)(buf + f_base + 32), f_name_len))
+            return LIBNXRESULT(BadInput);
+
+        char fname[256];
+        memcpy(fname, buf + f_base + 32, f_name_len);
+        fname[f_name_len] = '\0';
+
+        char disk_file[SHIM_FS_HOST_MAX];
+        if (snprintf(disk_file, sizeof disk_file, "%s/%s", target_dir, fname) >= (int)sizeof disk_file)
+            return FSRESULT(TooLongPath);
+
+        uint64_t act_start = hdr->data_offset + f_data_off;
+        if (f_data_off > size || act_start > size)
+            return LIBNXRESULT(BadInput);
+        if (f_data_sz > size || act_start + f_data_sz > size || act_start + f_data_sz < act_start)
+            return LIBNXRESULT(BadInput);
+
+        FILE *fp = fopen(disk_file, "wb");
+        if (!fp)
+            return LIBNXRESULT(IoError);
+        if (f_data_sz > 0) {
+            if (fwrite(buf + act_start, 1, (size_t)f_data_sz, fp) != (size_t)f_data_sz) {
+                fclose(fp);
+                return LIBNXRESULT(IoError);
+            }
+        }
+        fclose(fp);
+
+        f_off = f_sibling;
+    }
+    if (flimit <= 0)
+        return LIBNXRESULT(BadInput);
+
+    /* Processar subdiretorios */
+    uint32_t c_off = child_dir_off;
+    int dlimit = 10000;
+    while (c_off != 0xFFFFFFFF && --dlimit > 0) {
+        if ((uint64_t)c_off + 24 > hdr->dir_meta_table_size)
+            return LIBNXRESULT(BadInput);
+        uint64_t c_base = hdr->dir_meta_table_offset + c_off;
+        if (c_base + 24 > size)
+            return LIBNXRESULT(BadInput);
+        uint32_t c_sibling = shim_r32(buf + c_base + 4);
+
+        Result rc = shim_romfs_extract_dir_tree(buf, size, hdr, c_off, target_dir, depth + 1);
+        if (R_FAILED(rc))
+            return rc;
+        c_off = c_sibling;
+    }
+    if (dlimit <= 0)
+        return LIBNXRESULT(BadInput);
+
+    return 0;
+}
+
+SHIM_API Result romfsMountFromMemory(void *buffer, size_t size, const char *name)
+{
+    if (!buffer || size < sizeof(RomfsHeader) || !name || !*name)
+        return LIBNXRESULT(BadInput);
+
+    RomfsHeader hdr;
+    memcpy(&hdr, buffer, sizeof(RomfsHeader));
+    if (hdr.header_size < sizeof(RomfsHeader))
+        return LIBNXRESULT(BadInput);
+    if (hdr.dir_meta_table_offset > size || hdr.dir_meta_table_size > size - hdr.dir_meta_table_offset ||
+        hdr.file_meta_table_offset > size || hdr.file_meta_table_size > size - hdr.file_meta_table_offset ||
+        hdr.data_offset > size)
+        return LIBNXRESULT(BadInput);
+
+    static bool s_atexit_registered = false;
+    if (!s_atexit_registered) {
+        atexit(shim_romfs_atexit_cleanup);
+        s_atexit_registered = true;
+    }
+
+    static unsigned s_romfs_temp_seq = 0;
+    unsigned seq = __atomic_add_fetch(&s_romfs_temp_seq, 1, __ATOMIC_RELAXED);
+    char sys_tmp[SHIM_FS_HOST_MAX];
+    shim_get_temp_dir(sys_tmp, sizeof sys_tmp);
+
+#if defined(_WIN32)
+    unsigned pid = (unsigned)GetCurrentProcessId();
+#else
+    unsigned pid = (unsigned)getpid();
+#endif
+
+    char tmp_root[SHIM_FS_HOST_MAX];
+    snprintf(tmp_root, sizeof tmp_root, "%s/obdc_romfs_%u_%u", sys_tmp, pid, seq);
+#if defined(_WIN32)
+    for (char *p = tmp_root; *p; p++) {
+        if (*p == '/') *p = '\\';
+    }
+#endif
+
+    if (shim_mkdir_p(tmp_root) != 0)
+        return LIBNXRESULT(IoError);
+
+    Result rc = shim_romfs_extract_dir_tree((const u8 *)buffer, size, &hdr, 0, tmp_root, 0);
+    if (R_FAILED(rc)) {
+        shim_fs_rmtree(tmp_root, false);
+        shim_sys_rmdir(tmp_root);
+        return rc;
+    }
+
+    if (shim_dev_add(name, true, NULL, tmp_root, true) < 0) {
+        int err = errno;
+        shim_fs_rmtree(tmp_root, false);
+        shim_sys_rmdir(tmp_root);
+        return err == EEXIST ? LIBNXRESULT(AlreadyMapped) : LIBNXRESULT(BadInput);
+    }
+
+    if (strcmp(name, "romfs") == 0) {
+        s_romfs_mounted = 1;
+        snprintf(s_romfs_base_path, sizeof s_romfs_base_path, "%s", tmp_root);
+    }
+    return 0;
+}
+
+SHIM_API Result romfsMountFromFile(FILE *f, u64 offset, const char *name)
+{
+    if (!f || !name || !*name)
+        return LIBNXRESULT(BadInput);
+
+    if (shim_fseek64(f, (int64_t)offset, SEEK_SET) != 0)
+        return LIBNXRESULT(IoError);
+
+    u8 nro_head[0x40];
+    size_t nr = fread(nro_head, 1, sizeof(nro_head), f);
+    if (nr >= 0x40 && memcmp(nro_head + 0x10, "NRO0", 4) == 0) {
+        uint32_t nro_size = shim_r32(nro_head + 0x18);
+        if (shim_fseek64(f, (int64_t)(offset + nro_size), SEEK_SET) == 0) {
+            u8 aset_head[0x38];
+            if (fread(aset_head, 1, sizeof(aset_head), f) == sizeof(aset_head) &&
+                memcmp(aset_head, "ASET", 4) == 0) {
+                uint64_t romfs_off = shim_r64(aset_head + 0x28);
+                uint64_t romfs_sz  = shim_r64(aset_head + 0x30);
+                if (romfs_sz > 0 && romfs_sz <= SIZE_MAX) {
+                    offset = offset + nro_size + romfs_off;
+                    if (shim_fseek64(f, (int64_t)offset, SEEK_SET) != 0)
+                        return LIBNXRESULT(IoError);
+                    void *buf = malloc((size_t)romfs_sz);
+                    if (!buf)
+                        return LIBNXRESULT(OutOfMemory);
+                    if (fread(buf, 1, (size_t)romfs_sz, f) != (size_t)romfs_sz) {
+                        free(buf);
+                        return LIBNXRESULT(IoError);
+                    }
+                    Result rc = romfsMountFromMemory(buf, (size_t)romfs_sz, name);
+                    free(buf);
+                    return rc;
+                }
+            }
+        }
+        return LIBNXRESULT(NotFound);
+    }
+
+    if (shim_fseek64(f, 0, SEEK_END) != 0)
+        return LIBNXRESULT(IoError);
+    int64_t fend = shim_ftell64(f);
+    if (fend < 0 || (uint64_t)fend < offset + sizeof(RomfsHeader))
+        return LIBNXRESULT(BadInput);
+
+    uint64_t total_sz = (uint64_t)(fend - (int64_t)offset);
+    if (total_sz > SIZE_MAX)
+        return LIBNXRESULT(OutOfMemory);
+    if (shim_fseek64(f, (int64_t)offset, SEEK_SET) != 0)
+        return LIBNXRESULT(IoError);
+
+    void *buf = malloc((size_t)total_sz);
+    if (!buf)
+        return LIBNXRESULT(OutOfMemory);
+    if (fread(buf, 1, (size_t)total_sz, f) != (size_t)total_sz) {
+        free(buf);
+        return LIBNXRESULT(IoError);
+    }
+    Result rc = romfsMountFromMemory(buf, (size_t)total_sz, name);
+    free(buf);
+    return rc;
+}
+
+SHIM_API Result romfsMountFromFd(int fd, u64 offset, const char *name)
+{
+    if (fd < 0 || !name || !*name)
+        return LIBNXRESULT(BadInput);
+#if defined(_WIN32)
+    int dup_fd = _dup(fd);
+    if (dup_fd < 0)
+        return LIBNXRESULT(IoError);
+    FILE *f = _fdopen(dup_fd, "rb");
+#else
+    int dup_fd = dup(fd);
+    if (dup_fd < 0)
+        return LIBNXRESULT(IoError);
+    FILE *f = fdopen(dup_fd, "rb");
+#endif
+    if (!f) {
+#if defined(_WIN32)
+        _close(dup_fd);
+#else
+        close(dup_fd);
+#endif
+        return LIBNXRESULT(IoError);
+    }
+    Result rc = romfsMountFromFile(f, offset, name);
+    fclose(f);
+    return rc;
+}
+
+/* Num NRO monta a secao RomFS embutida; aqui monta o diretorio de assets do host ou imagem RomFS (somente leitura).
  * Raiz inexistente -> LibnxError_NotFound; nome ja montado -> LibnxError_AlreadyMapped. */
 SHIM_API Result romfsMountSelf(const char *name)
 {
@@ -2171,18 +2552,46 @@ SHIM_API Result romfsMountSelf(const char *name)
     Result rc = shim_fs_resolve_root(g_shim_romfs_root, "OBDC_ROMFS", OBDC_ROMFS_ROOT, root);
     if (R_FAILED(rc))
         return rc;
-    if (shim_fs_kind(root, true) != FsDirEntryType_Dir)
-        return LIBNXRESULT(NotFound);
-    if (shim_dev_add(name, true, NULL, root) < 0)
-        return errno == EEXIST ? LIBNXRESULT(AlreadyMapped) : LIBNXRESULT(BadInput);
-    if (name && strcmp(name, "romfs") == 0) {
-        s_romfs_mounted = 1;
-        snprintf(s_romfs_base_path, sizeof s_romfs_base_path, "%s", root);
+
+    int kind = shim_fs_kind(root, true);
+    if (kind == FsDirEntryType_Dir) {
+        if (shim_dev_add(name, true, NULL, root, false) < 0)
+            return errno == EEXIST ? LIBNXRESULT(AlreadyMapped) : LIBNXRESULT(BadInput);
+        if (name && strcmp(name, "romfs") == 0) {
+            s_romfs_mounted = 1;
+            snprintf(s_romfs_base_path, sizeof s_romfs_base_path, "%s", root);
+        }
+        return 0;
+    } else if (kind == FsDirEntryType_File) {
+        FILE *f = fopen(root, "rb");
+        if (!f)
+            return LIBNXRESULT(NotFound);
+        Result mrc = romfsMountFromFile(f, 0, name);
+        fclose(f);
+        return mrc;
+    } else {
+        if (strcmp(root, OBDC_ROMFS_ROOT) == 0) {
+            char bin_path[SHIM_FS_HOST_MAX];
+            snprintf(bin_path, sizeof bin_path, "%s.bin", root);
+            if (shim_fs_kind(bin_path, true) == FsDirEntryType_File) {
+                FILE *f = fopen(bin_path, "rb");
+                if (f) {
+                    Result mrc = romfsMountFromFile(f, 0, name);
+                    fclose(f);
+                    return mrc;
+                }
+            }
+        }
     }
-    return 0;
+    return LIBNXRESULT(NotFound);
 }
 
 SHIM_API Result romfsMount(const char *name)
+{
+    return romfsMountSelf(name);
+}
+
+SHIM_API Result romfsMountFromCurrentProcess(const char *name)
 {
     return romfsMountSelf(name);
 }

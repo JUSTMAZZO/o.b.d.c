@@ -79,6 +79,60 @@ class TestStrictCAndBss(unittest.TestCase):
                                  capture_output=True, text=True)
             self.assertEqual(res.returncode, 0, f"Falha ao compilar {c_file} com NDK Clang:\n{res.stderr}")
 
+    def test_generic_applethook_callback_inference(self):
+        """Valida que o callback de appletHook tem assinatura e tipo inferidos genericamente, sem checar on_applet."""
+        import json
+        with open('ghidra_extraction_hb_fb.json', 'r', encoding='utf-8') as f:
+            d = json.load(f)
+        for fn in d['functions']:
+            if fn['name'] == 'on_applet':
+                fn['name'] = 'custom_hook_cb'
+        main_fn = next(fn for fn in d['functions'] if fn['name'] == 'main')
+        text = cfg_skeleton.build(main_fn, d, [])
+        self.assertIn('static void custom_hook_cb(AppletHookType hook, void *param)', text)
+        self.assertIn('(void)param;', text)
+        self.assertIn('appletHook(&sp_0x90, custom_hook_cb, 0);', text)
+
+    def test_generic_applethook_decompiled_c_casts_and_ampersand(self):
+        """Garante inferência de callbacks com operador & e typecasts em decompiled_c."""
+        import json
+        with open('ghidra_extraction_hb_fb.json', 'r', encoding='utf-8') as f:
+            d = json.load(f)
+        for fn in d['functions']:
+            if fn['name'] == 'on_applet':
+                fn['name'] = 'hook_cb_casted'
+        main_fn = next(fn for fn in d['functions'] if fn['name'] == 'main')
+        main_fn['decompiled_c'] = main_fn['decompiled_c'].replace('on_applet', '(AppletHookFn)&hook_cb_casted')
+        text = cfg_skeleton.build(main_fn, d, [])
+        self.assertIn('static void hook_cb_casted(AppletHookType hook, void *param)', text)
+        self.assertIn('(void)param;', text)
+
+    def test_generic_applethook_assembly_register_mov(self):
+        """Garante inferência de callbacks quando o endereço é movido via registradores (ex: mov x1, x19)."""
+        d = {
+            'functions': [
+                {
+                    'name': 'main',
+                    'entry_point': '0x100000',
+                    'assembly': [
+                        '00100004: adrp x19,0x100000',
+                        '00100008: add x19,x19,#0x500',
+                        '0010000c: mov x1, x19',
+                        '00100010: bl appletHook'
+                    ]
+                },
+                {
+                    'name': 'reg_cb',
+                    'entry_point': '0x100500',
+                    'assembly': ['00100500: ret']
+                }
+            ]
+        }
+        cb_eps, cb_names = cfg_skeleton.find_applet_hook_callbacks(d)
+        self.assertIn(0x100500, cb_eps)
+        self.assertIn('reg_cb', cb_names)
+
 if __name__ == '__main__':
     unittest.main()
+
 
