@@ -75,7 +75,7 @@ class TestStrictCAndBss(unittest.TestCase):
             self.skipTest("NDK Clang nao encontrado neste ambiente")
 
         for c_file in ('reconstructed_hb_threads.c', 'reconstructed_hb_services.c'):
-            res = subprocess.run([ndk_clang, '-O3', '-Wall', '-Wextra', '-Werror', '-I', '.', '-c', c_file],
+            res = subprocess.run([ndk_clang, '-O3', '-Wall', '-Wextra', '-Werror', '-I', '.', '-c', '-o', 'nul', c_file],
                                  capture_output=True, text=True)
             self.assertEqual(res.returncode, 0, f"Falha ao compilar {c_file} com NDK Clang:\n{res.stderr}")
 
