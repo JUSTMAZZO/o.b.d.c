@@ -169,6 +169,12 @@ int run_file_read(void) {
     fclose(f);
 
     shimRomfsSetRoot(tmp_dir);
+
+    /* Antes de romfsInit: deve falhar com ENODEV */
+    errno = 0;
+    FILE *early_f = hle_fopen("romfs:/dummy.txt", "r");
+    if (early_f != NULL || errno != ENODEV) return 20;
+
     if (romfsInit() != 0) return 2;
 
     /* Leitura via hle_fopen */
@@ -189,6 +195,12 @@ int run_file_read(void) {
     if (af != NULL || errno != EROFS) return 6;
 
     romfsExit();
+
+    /* Depois de romfsExit: deve falhar com ENODEV */
+    errno = 0;
+    FILE *late_f = hle_fopen("romfs:/dummy.txt", "r");
+    if (late_f != NULL || errno != ENODEV) return 21;
+
     shimRomfsSetRoot(NULL);
     remove(file_path);
     rmdir(tmp_dir);
@@ -214,11 +226,25 @@ int run_traversal(void) {
     res = hle_resolve_vfs_path("romfs:/sub/../../escaped", out, sizeof out);
     if (res != NULL || errno != EACCES) return 3;
 
-    /* 4. hle_fopen com traversal */
+    /* 4. hle_fopen com traversal (montado para testar EACCES e nao ENODEV) */
+    const char *tmp_dir = "obdc_test_tmp_romfs_trav";
+    test_mkdir(tmp_dir);
+    shimRomfsSetRoot(tmp_dir);
+    if (romfsInit() != 0) {
+        rmdir(tmp_dir);
+        return 40;
+    }
+
     errno = 0;
     FILE *f = hle_fopen("romfs:/../../etc/passwd", "r");
-    if (f != NULL || errno != EACCES) return 4;
+    if (f != NULL || errno != EACCES) {
+        romfsExit();
+        rmdir(tmp_dir);
+        return 4;
+    }
 
+    romfsExit();
+    rmdir(tmp_dir);
     shimRomfsSetRoot(NULL);
     return 0;
 }

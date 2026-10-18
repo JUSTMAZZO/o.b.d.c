@@ -1882,16 +1882,12 @@ SHIM_API void fsDirClose(FsDir *d)
  * Diferenca: a libnx resolve caminhos relativos a partir de "sdmc:/" (chdir do __appInit); o shim os deixa
  * relativos ao diretorio atual do host.
  */
-#ifndef OBDC_SDCARD
-#define OBDC_SDCARD "/data/local/tmp/sdcard"
+#ifndef OBDC_SDCARD_PATH
+#define OBDC_SDCARD_PATH "/data/local/tmp/sdcard"
 #endif
 
 #ifndef OBDC_ROMFS_ROOT
-#if defined(__ANDROID__)
-#define OBDC_ROMFS_ROOT OBDC_SDCARD "/romfs"
-#else
 #define OBDC_ROMFS_ROOT "./romfs"
-#endif
 #endif
 
 typedef struct {
@@ -2205,10 +2201,13 @@ SHIM_API Result romfsInit(void)
     Result rc = romfsMountSelf("romfs");
     if (R_FAILED(rc))
         return rc;
-    char msg[SHIM_FS_ROOT_MAX + 64];
-    int len = snprintf(msg, sizeof msg, "[HLE:FS] romfsInit montado em: %s\n", s_romfs_base_path);
-    if (len > 0)
-        svcOutputDebugString(msg, (u64)len);
+    const char *hle_log = getenv("OBDC_HLE_LOG");
+    if (hle_log && (strcmp(hle_log, "1") == 0 || strcmp(hle_log, "true") == 0)) {
+        char msg[SHIM_FS_ROOT_MAX + 64];
+        int len = snprintf(msg, sizeof msg, "[HLE:FS] romfsInit montado em: %s\n", s_romfs_base_path);
+        if (len > 0)
+            svcOutputDebugString(msg, (u64)len);
+    }
     return 0;
 }
 
@@ -2242,9 +2241,12 @@ SHIM_API const char *hle_resolve_vfs_path(const char *path, char *out_buf, size_
                     base = env;
                 } else {
 #if defined(__ANDROID__)
-                    base = OBDC_SDCARD "/romfs";
+                    if (shim_fs_kind(OBDC_SDCARD_PATH "/romfs", true) == FsDirEntryType_Dir)
+                        base = OBDC_SDCARD_PATH "/romfs";
+                    else
+                        base = OBDC_ROMFS_ROOT;
 #else
-                    base = "./romfs";
+                    base = OBDC_ROMFS_ROOT;
 #endif
                 }
             }
@@ -2335,6 +2337,10 @@ SHIM_API FILE *hle_fopen(const char *path, const char *mode)
         return NULL;
     }
     if (strncmp(path, "romfs:", 6) == 0) {
+        if (!s_romfs_mounted) {
+            errno = ENODEV;
+            return NULL;
+        }
         char resolved[SHIM_FS_HOST_MAX];
         if (!hle_resolve_vfs_path(path, resolved, sizeof resolved))
             return NULL;
