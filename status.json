@@ -64,7 +64,7 @@
       "file": "neon_lifter.py",
       "status": "in_progress",
       "progress": 98,
-      "summary": "Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG, com laços escalares deixados ao estruturador, 9 instruções escalares (umull, madd, msub, bic, mvn, ubfiz, ubfx, ldrb, ldrh), objetos locais da pilha passados por endereço e if/else dentro de laços (hb_fb.elf reconstruído); str q com base + índice, bics/cinc/cinv/cneg/neg, atômicos exclusivos e loads/stores de 128 bits, worker de threads com BSS do guest, auxiliares descobertos dinamicamente (hb_threads.nro e hb_services.nro reconstruídos, com e sem .elf); 36 testes unitários (com test_romfs_vfs)",
+      "summary": "Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG, com laços escalares deixados ao estruturador, 9 instruções escalares (umull, madd, msub, bic, mvn, ubfiz, ubfx, ldrb, ldrh), objetos locais da pilha passados por endereço e if/else dentro de laços (hb_fb.elf reconstruído); str q com base + índice, bics/cinc/cinv/cneg/neg, atômicos exclusivos e loads/stores de 128 bits, worker de threads com BSS do guest, auxiliares descobertos dinamicamente (hb_threads.nro e hb_services.nro reconstruídos, com e sem .elf); 48 testes unitários (com test_romfs_vfs e test_nro_aset)",
       "next": "Tirar do cfg_skeleton.py a assinatura escrita pelo nome da função on_applet (inferir o tipo do callback pelo appletHook); rodar o check_baseline.sh antes de toda mudança; um homebrew real com mrs tpidrro_el0 no código reconstruído; depois switch, ld3/ld4 com binário real"
     },
     {
@@ -96,8 +96,8 @@
       "file": "horizon_rt/ (nro_tool.py, probe/)",
       "status": "done",
       "progress": 100,
-      "summary": "Leitor de NRO (NRO0, MOD0, segmentos, .dynamic, relocations, ASET com ícone/NACP/RomFS) com inventário de svc/mrs conferido contra o ELF em 3 homebrews (hb_compute: 21 sítios, hb_threads: 36, hb_services: 110); pipeline direto NRO stripped puro desacoplado do ELF: limites de função por Branch Target Closure sem constantes fixas, inferência automática de chamadas e SVCs; test_nro_pipeline 7/7",
-      "next": "Homebrews empacotados (NSO/PFS0) próprios ou de código aberto; fixtures versionadas (NRO pequeno de teste) para o test_nro_pipeline.py rodar em clone limpo"
+      "summary": "Leitor de NRO (NRO0, MOD0, segmentos, .dynamic, relocations, ASET com ícone/NACP/RomFS) com inventário de svc/mrs conferido contra o ELF em 3 homebrews (hb_compute: 21 sítios, hb_threads: 36, hb_services: 110); pipeline direto NRO stripped puro desacoplado do ELF: limites de função por Branch Target Closure sem constantes fixas, inferência automática de chamadas e SVCs; extração da árvore RomFS da seção ASET (nro_tool --extract-romfs); test_nro_pipeline 9/9, test_nro_aset 12/12",
+      "next": "Revisão do extrator ASET (fix/nro-aset-review-cleanup): test_nro_aset sem caminhos fixos C:\\devkitPro e sem deixar hb_assets.nro/romfs/ no repositório, RomfsPath com __eq__ e __hash__ coerentes, ASET aceita só depois dos segmentos, --extract-romfs documentado; homebrews empacotados (NSO/PFS0) próprios ou de código aberto; fixtures versionadas (NRO pequeno de teste) para o test_nro_pipeline.py rodar em clone limpo"
     }
   ],
   "roadmap": [
@@ -289,8 +289,12 @@
       "phase": 4,
       "title": "Subsistema de Áudio, Threads e Vulkan Mobile",
       "status": "in_progress",
-      "progress": 17,
+      "progress": 29,
       "items": [
+        {
+          "name": "Extração automática do RomFS embutido no NRO: nro_tool --extract-romfs localiza a seção ASET no trailer, percorre as tabelas do RomfsHeader e recria a árvore em ./romfs com proteção contra \"..\" e caminhos absolutos (8d87c88/df706d0); conferida byte a byte com gen_romfs.py e lida pelo hb_assets no A56 (15/15); test_nro_aset 12/12",
+          "done": true
+        },
         {
           "name": "RomFS virtual (VFS) sobre diretório do host: romfsInit/romfsExit/romfsMountSelf/romfsMount/romfsUnmount, romfs:/ resolvido com proteção contra \"..\" (EACCES) e somente leitura (EROFS), hle_resolve_vfs_path/hle_fopen com ENODEV sem montagem, log opcional OBDC_HLE_LOG=1 (608f66c/f8ac70d); test_romfs_vfs 9/9, svc_shim_test 219/219 no A56, -Werror sem avisos no NDK r28 e no host",
           "done": true
@@ -999,7 +1003,8 @@
         "expected": {
           "Servicos abertos": "4",
           "Frames": "60",
-          "Botoes pressionados": "2"
+          "Botoes pressionados": "2",
+          "Resultado (abertos / frames / botões)": "4 / 60 / 2"
         },
         "neon_median_s": null,
         "scalar_median_s": null,
@@ -1151,12 +1156,24 @@
             "median_s": 0.001109,
             "min_s": 0.000812,
             "result": "0x5d07c479"
+          },
+          {
+            "binary": "hb_assets_oracle lendo o RomFS extraído do hb_assets.nro (nro_tool --extract-romfs; taskset cpu7)",
+            "runs": 15,
+            "median_s": null,
+            "min_s": null,
+            "result": "0x5d07c479"
           }
         ],
         "validation": [
           {
             "check": "Referência Python (gen_romfs.py: zlib.crc32 e FNV-1a do bloco)",
             "value": "0x5d07c479 / 0x3e52039d8d7f4325 / 8d34db82",
+            "ok": true
+          },
+          {
+            "check": "RomFS extraído do hb_assets.nro (seção ASET, df706d0) = saída do gen_romfs.py, byte a byte; hb_assets no A56 lendo o extraído (15×, taskset 80)",
+            "value": "data/bloco.bin + texto/info.txt idênticos; 0x5d07c479 / 0x3e52039d8d7f4325 / 8d34db82, 15/15",
             "ok": true
           },
           {

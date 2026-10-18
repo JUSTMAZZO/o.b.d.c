@@ -5,9 +5,9 @@
 
 ### Recompilação estática AArch64 → AArch64: binários de Nintendo Switch rodando nativamente no Android
 
-![Endgame](https://img.shields.io/badge/Endgame-79%25-orange?style=for-the-badge) ![Fase atual](https://img.shields.io/badge/Fase%20atual-4%20%E2%80%93%20Em%20andamento-yellow?style=for-the-badge) ![ISA](https://img.shields.io/badge/ISA-AArch64%20%E2%86%92%20AArch64-informational?style=for-the-badge&logo=arm&logoColor=white) ![Alvo](https://img.shields.io/badge/Alvo-Galaxy%20A56%20%C2%B7%20Exynos%201580-1428A0?style=for-the-badge&logo=samsung&logoColor=white)
+![Endgame](https://img.shields.io/badge/Endgame-82%25-orange?style=for-the-badge) ![Fase atual](https://img.shields.io/badge/Fase%20atual-4%20%E2%80%93%20Em%20andamento-yellow?style=for-the-badge) ![ISA](https://img.shields.io/badge/ISA-AArch64%20%E2%86%92%20AArch64-informational?style=for-the-badge&logo=arm&logoColor=white) ![Alvo](https://img.shields.io/badge/Alvo-Galaxy%20A56%20%C2%B7%20Exynos%201580-1428A0?style=for-the-badge&logo=samsung&logoColor=white)
 
-![Validação](https://img.shields.io/badge/Valida%C3%A7%C3%A3o-81%2F82%20OK-yellow?style=for-the-badge) ![Benchmarks](https://img.shields.io/badge/Benchmarks-10%20no%20A56-teal?style=for-the-badge&logo=android&logoColor=white) ![Instruções](https://img.shields.io/badge/Instru%C3%A7%C3%B5es-25%20suportadas-blueviolet?style=for-the-badge) ![LLM](https://img.shields.io/badge/LLM-qwen2.5--coder%207b-black?style=for-the-badge&logo=ollama&logoColor=white) ![Atualizado](https://img.shields.io/badge/Atualizado-2026--10--16-lightgrey?style=for-the-badge) [![Licença](https://img.shields.io/badge/Licen%C3%A7a-MIT-green?style=for-the-badge)](LICENSE)
+![Validação](https://img.shields.io/badge/Valida%C3%A7%C3%A3o-82%2F83%20OK-yellow?style=for-the-badge) ![Benchmarks](https://img.shields.io/badge/Benchmarks-10%20no%20A56-teal?style=for-the-badge&logo=android&logoColor=white) ![Instruções](https://img.shields.io/badge/Instru%C3%A7%C3%B5es-25%20suportadas-blueviolet?style=for-the-badge) ![LLM](https://img.shields.io/badge/LLM-qwen2.5--coder%207b-black?style=for-the-badge&logo=ollama&logoColor=white) ![Atualizado](https://img.shields.io/badge/Atualizado-2026--10--16-lightgrey?style=for-the-badge) [![Licença](https://img.shields.io/badge/Licen%C3%A7a-MIT-green?style=for-the-badge)](LICENSE)
 
 </div>
 
@@ -30,18 +30,18 @@ Switch ELF/NSO ──► Ghidra (ASM + CFG + .rodata) ──► Lifter simbólic
 Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── shim ABI/svc ◄──┘
 ```
 
-## 📈 Progresso até o Endgame: `████████████████░░░░ 79%`
+## 📈 Progresso até o Endgame: `████████████████░░░░ 82%`
 
 ## 🧩 Módulos atuais
 
 | Módulo | Status | Progresso | O que faz hoje | Próximo |
 |---|---|---|---|---|
 | **Ghidra Extractor**<br>`ExtractMain.java` | ✅ Concluído | `████████░░ 80%` | C descompilado + ASM AArch64 + .rodata + isolamento de loops + nomes dos alvos de bl e strings carregadas (formatos de printf) + ponteiros de função referenciados por endereço (callbacks como o hook do applet, função criada no Ghidra se faltar) | Tipos de ponteiro/structs, objetos locais da pilha passados por endereço |
-| **NEON Symbolic Lifter**<br>`neon_lifter.py` | 🟡 Em andamento | `██████████ 98%` | Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG, com laços escalares deixados ao estruturador, 9 instruções escalares (umull, madd, msub, bic, mvn, ubfiz, ubfx, ldrb, ldrh), objetos locais da pilha passados por endereço e if/else dentro de laços (hb_fb.elf reconstruído); str q com base + índice, bics/cinc/cinv/cneg/neg, atômicos exclusivos e loads/stores de 128 bits, worker de threads com BSS do guest, auxiliares descobertos dinamicamente (hb_threads.nro e hb_services.nro reconstruídos, com e sem .elf); 36 testes unitários (com test_romfs_vfs) | Tirar do cfg_skeleton.py a assinatura escrita pelo nome da função on_applet (inferir o tipo do callback pelo appletHook); rodar o check_baseline.sh antes de toda mudança; um homebrew real com mrs tpidrro_el0 no código reconstruído; depois switch, ld3/ld4 com binário real |
+| **NEON Symbolic Lifter**<br>`neon_lifter.py` | 🟡 Em andamento | `██████████ 98%` | Elevação simbólica NEON e escalar sem código por binário (Clang do NDK e GCC do devkitA64): memória contígua e array of structs, [base, índice], pós-incremento, loops por ponteiro, estado de saída dos loops anteriores; esqueleto do main e das funções auxiliares gerado do CFG, com laços escalares deixados ao estruturador, 9 instruções escalares (umull, madd, msub, bic, mvn, ubfiz, ubfx, ldrb, ldrh), objetos locais da pilha passados por endereço e if/else dentro de laços (hb_fb.elf reconstruído); str q com base + índice, bics/cinc/cinv/cneg/neg, atômicos exclusivos e loads/stores de 128 bits, worker de threads com BSS do guest, auxiliares descobertos dinamicamente (hb_threads.nro e hb_services.nro reconstruídos, com e sem .elf); 48 testes unitários (com test_romfs_vfs e test_nro_aset) | Tirar do cfg_skeleton.py a assinatura escrita pelo nome da função on_applet (inferir o tipo do callback pelo appletHook); rodar o check_baseline.sh antes de toda mudança; um homebrew real com mrs tpidrro_el0 no código reconstruído; depois switch, ld3/ld4 com binário real |
 | **Local LLM Qwen 2.5 7B**<br>`qwen2.5-coder:7b (Ollama, CUDA parcial)` | 🟡 Em andamento | `████████░░ 80%` | Gera C a partir do resumo do lifter + esqueleto do CFG; checagem de estrutura e gate no host antes do ADB, com 1 nova tentativa guiada. Se o Qwen esgota as tentativas (ou o Ollama falha), o pipeline usa o C de referência determinístico e registra o motivo em <saida>.pipeline.json | Fazer o Qwen respeitar for (;;) com break do GCC e renomear variáveis de registrador |
 | **Android AArch64 Runner**<br>`Galaxy A56 via ADB` | 🟡 Em andamento | `████░░░░░░ 45%` | push + chmod + execução em /data/local/tmp, medições intercaladas (15×) | Script único de round-trip (compilar → push → rodar → comparar), afinidade de núcleo (taskset) |
 | **Switch HLE Shim**<br>`switch_hle_shim.h` | 🟡 Em andamento | `██████████ 95%` | Primitivas libnx, 29 SVCs do kernel (24 implementados sobre Bionic/POSIX e 5 de IPC/memória compartilhada como dummies), RomFS virtual sobre diretório do host (romfs:/ com EACCES para ".." e EROFS, hle_resolve_vfs_path/hle_fopen com ENODEV sem montagem, log opcional OBDC_HLE_LOG=1), IPC CMIF (9c818ca): svcConnectToNamedPort/svcSendSyncRequest leem a mensagem SFCI no buffer da TLS (shimGetTls, direta ou dentro de HIPC em +0x10) e respondem SFCO para sm: (Initialize, GetService com handle novo), time (cmd 0: timestamp), set (cmd 0: en-US) e stubs; TLS do Horizon (shimGetTls, ThreadVars), transfer memory completa (svcCreateTransferMemory/svcMapTransferMemory/svcUnmapTransferMemory e tmemCreate/Map/Unmap/Close: origem protegida com a permissão pedida, alias real por memfd), API Thread/Mutex/RMutex/CondVar, time:u (timeGetCurrentTime sobre CLOCK_REALTIME, microssegundos, steady clock, calendário local), ciclo de vida do applet (hooks, foco, modo de operação, pedido de saída com appletLockExit, fila de mensagens entregue no appletMainLoop), framebuffer linear simulado (framebufferCreate/MakeLinear/Begin/End, RGBA8888/RGBX/BGRA/565/4444, checksum FNV-1a e PPM da tela), fs de alto nível (fsOpenSdCardFileSystem + fsFs/fsFile/fsDir sobre um diretório do host, portátil Bionic/Windows, caminhos normalizados contra ".."), dispositivos do stdio (fsdevMountSdmc/MountDevice/TranslatePath e romfsInit/MountSelf somente leitura, com fopen/opendir/stat/... roteados para sdmc:/ e romfs:/) e entrada desacoplada (roteiro por quadro + buffer ao vivo com seqlock, botões e analógicos, PadState compacta inalterada), com os tipos e resultados da libnx 2.10.0 | Leitura de imagem RomFS (RomfsHeader já definido, ainda sem uso; hoje o RomFS é um diretório do host); CMIF fiel por serviço: time:u cmd 0 devolve a sessão ISystemClock (hoje o timestamp vem direto), comandos de hid e fsp-srv, e erro para comando desconhecido (hoje o stub devolve sucesso); atualizar 0x1F/0x21 no svc_table.json; padRepeater e caminhos relativos a partir de sdmc:/ |
-| **Horizon Static Analysis**<br>`horizon_rt/ (nro_tool.py, probe/)` | ✅ Concluído | `██████████ 100%` | Leitor de NRO (NRO0, MOD0, segmentos, .dynamic, relocations, ASET com ícone/NACP/RomFS) com inventário de svc/mrs conferido contra o ELF em 3 homebrews (hb_compute: 21 sítios, hb_threads: 36, hb_services: 110); pipeline direto NRO stripped puro desacoplado do ELF: limites de função por Branch Target Closure sem constantes fixas, inferência automática de chamadas e SVCs; test_nro_pipeline 7/7 | Homebrews empacotados (NSO/PFS0) próprios ou de código aberto; fixtures versionadas (NRO pequeno de teste) para o test_nro_pipeline.py rodar em clone limpo |
+| **Horizon Static Analysis**<br>`horizon_rt/ (nro_tool.py, probe/)` | ✅ Concluído | `██████████ 100%` | Leitor de NRO (NRO0, MOD0, segmentos, .dynamic, relocations, ASET com ícone/NACP/RomFS) com inventário de svc/mrs conferido contra o ELF em 3 homebrews (hb_compute: 21 sítios, hb_threads: 36, hb_services: 110); pipeline direto NRO stripped puro desacoplado do ELF: limites de função por Branch Target Closure sem constantes fixas, inferência automática de chamadas e SVCs; extração da árvore RomFS da seção ASET (nro_tool --extract-romfs); test_nro_pipeline 9/9, test_nro_aset 12/12 | Revisão do extrator ASET (fix/nro-aset-review-cleanup): test_nro_aset sem caminhos fixos C:\devkitPro e sem deixar hb_assets.nro/romfs/ no repositório, RomfsPath com __eq__ e __hash__ coerentes, ASET aceita só depois dos segmentos, --extract-romfs documentado; homebrews empacotados (NSO/PFS0) próprios ou de código aberto; fixtures versionadas (NRO pequeno de teste) para o test_nro_pipeline.py rodar em clone limpo |
 
 ## 🗺️ Roadmap de subsistemas
 
@@ -50,7 +50,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | **1** | Lifter NEON Aritmético | ✅ Concluído | `██████████ 100%` |
 | **2** | Memória, Arrays e Ponteiros | ✅ Concluído | `██████████ 100%` |
 | **3** | Loader ELF e Tradução de ABI / Syscalls | ✅ Concluído | `██████████ 100%` |
-| **4** | Subsistema de Áudio, Threads e Vulkan Mobile | 🟡 Em andamento | `██░░░░░░░░ 17%` |
+| **4** | Subsistema de Áudio, Threads e Vulkan Mobile | 🟡 Em andamento | `███░░░░░░░ 29%` |
 
 <details>
 <summary><b>Fase 1 — Lifter NEON Aritmético</b> (5/5)</summary>
@@ -111,8 +111,9 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 </details>
 
 <details open>
-<summary><b>Fase 4 — Subsistema de Áudio, Threads e Vulkan Mobile</b> (1/6)</summary>
+<summary><b>Fase 4 — Subsistema de Áudio, Threads e Vulkan Mobile</b> (2/7)</summary>
 
+- [x] Extração automática do RomFS embutido no NRO: nro_tool --extract-romfs localiza a seção ASET no trailer, percorre as tabelas do RomfsHeader e recria a árvore em ./romfs com proteção contra ".." e caminhos absolutos (8d87c88/df706d0); conferida byte a byte com gen_romfs.py e lida pelo hb_assets no A56 (15/15); test_nro_aset 12/12
 - [x] RomFS virtual (VFS) sobre diretório do host: romfsInit/romfsExit/romfsMountSelf/romfsMount/romfsUnmount, romfs:/ resolvido com proteção contra ".." (EACCES) e somente leitura (EROFS), hle_resolve_vfs_path/hle_fopen com ENODEV sem montagem, log opcional OBDC_HLE_LOG=1 (608f66c/f8ac70d); test_romfs_vfs 9/9, svc_shim_test 219/219 no A56, -Werror sem avisos no NDK r28 e no host
 - [ ] Threads e sincronização Horizon → pthread
 - [ ] Áudio (audren/audout) → AAudio
@@ -132,7 +133,7 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | **`switch_aos_bench`**<br>Homebrew libnx: 100.000 partículas como array of structs {x, vx} × 60 frames | ld2 / st2 (com e sem pós-incremento), dup, add, and, eor, ushr, sub, uaddw/uaddw2 + epílogo escalar | Checksum: `88196450180`<br>Última partícula: `1734747` | 0.0074 s | — | — | 📱 `reconstructed_aos.c` |
 | **`hb_compute`**<br>Homebrew mínimo libnx (sem serviços): 100.000 partículas × 60 frames, saída por svcOutputDebugString | ELF do devkitA64 (GCC 16.1.0): str/ldr q [base, índice], dup, eor, and, ushr, loop escalar ldr w pós-incremento, mrs cntpct_el0, ccmp, umulh | Checksum: `88196450180`<br>Última partícula: `1734747` | 0.0043 s | — | — | 📱 `reconstructed_hb_compute.c` |
 | **`hb_threads`**<br>Homebrew libnx multi-thread: 4 threads × 25.000 partículas × 60 frames, Mutex + CondVar + sleep | threadCreate/Start/WaitForExit/Close, mutexLock/Unlock, condvarWait/WakeAll, svcSleepThread (oráculo pelo shim) | Checksum: `88196450180`<br>Última partícula: `1734747`<br>Threads: `4` | 0.0061 s | — | — | 📱 `reconstructed_hb_threads.c` |
-| **`hb_services`**<br>Homebrew libnx com serviços: sm, applet, hid e fs abertos e fechados, 60 frames de padUpdate | smInitialize, appletInitialize, hidInitialize, fsInitialize, padUpdate, appletMainLoop (IPC dummy no shim) | Servicos abertos: `4`<br>Frames: `60`<br>Botoes pressionados: `2` | — | — | — | 📱 `reconstructed_hb_services.c` |
+| **`hb_services`**<br>Homebrew libnx com serviços: sm, applet, hid e fs abertos e fechados, 60 frames de padUpdate | smInitialize, appletInitialize, hidInitialize, fsInitialize, padUpdate, appletMainLoop (IPC dummy no shim) | Servicos abertos: `4`<br>Frames: `60`<br>Botoes pressionados: `2`<br>Resultado (abertos / frames / botões): `4 / 60 / 2` | — | — | — | 📱 `reconstructed_hb_services.c` |
 | **`hb_io`**<br>Homebrew libnx com cartão SD e analógicos: 1 MiB escrito e lido pelo fs + 60 frames de pad | fsOpenSdCardFileSystem, fsFsCreateDirectory/CreateFile/OpenFile/RenameFile/OpenDirectory/DeleteDirectoryRecursively, fsFileWrite (Append)/Read/GetSize/Flush, fsDirGetEntryCount, padUpdate, padGetStickPos | FNV-1a (1 MiB): `0x3cc5e3ccd09fa325`<br>Frames: `60`<br>Botoes pressionados: `2`<br>Analógicos (Σ lx / ly / rx): `-46080 / 514560 / 655340` | — | — | — | 🎮 `hb_io_oracle` |
 | **`hb_assets`**<br>Homebrew libnx com RomFS: 256 KiB de assets lidos por romfs:/ (stdio) com CRC-32, gravação em sdmc:/ | romfsInit, fsdevMountSdmc, fopen/fread/fseek/fgets/stat/opendir/remove com romfs:/ e sdmc:/, romfsExit, fsdevUnmountAll | CRC-32: `0x5d07c479`<br>FNV-1a: `0x3e52039d8d7f4325`<br>Bytes em 0x10000: `8d34db82`<br>Entradas em romfs:/: `2`<br>Acessos recusados no romfs: `2/2` | — | — | — | 🎮 `hb_assets_oracle` |
 | **`hb_fb`**<br>Homebrew libnx com framebuffer linear: 60 frames 1280x720 RGBA8888 por software + relógio + ciclo de vida do applet | timeInitialize/timeGetCurrentTime/timeToCalendarTimeWithMyRule, appletLockExit/appletHook/appletGetFocusState/appletIsAutoPowerDownRequested, framebufferCreate/MakeLinear/Begin/End/Close, appletMainLoop até o pedido de saída | Frames: `60`<br>Soma ponderada (60 frames): `0x1b5c804513888ea0`<br>FNV-1a do último frame: `0x2a45a5f1c5fad331`<br>Saída: `pedido do sistema (OnExitRequest x1)` | 0.0028 s | — | — | 📱 `reconstructed_hb_fb.c` |
@@ -351,9 +352,9 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 
 | Binário | Execuções | Mediana | Mínimo | Resultado |
 |---|:---:|---:|---:|---|
-| C reconstruído do hb_services.nro stripped (sem .elf; NDK r28, taskset 80) | 15 | — | — | `4 / 60 / 2` ❌ |
-| C reconstruído do hb_services.nro com o .elf ao lado (NDK r28, taskset 80) | 15 | — | — | `4 / 60 / 2` ❌ |
-| hb_services_oracle (taskset cpu7) | 1 | — | — | `4 / 60 / 2` ❌ |
+| C reconstruído do hb_services.nro stripped (sem .elf; NDK r28, taskset 80) | 15 | — | — | `4 / 60 / 2` ✅ |
+| C reconstruído do hb_services.nro com o .elf ao lado (NDK r28, taskset 80) | 15 | — | — | `4 / 60 / 2` ✅ |
+| hb_services_oracle (taskset cpu7) | 1 | — | — | `4 / 60 / 2` ✅ |
 
 **Validação**
 
@@ -396,12 +397,14 @@ Galaxy A56 (Bionic ELF) ◄── ADB round-trip ◄── NDK Clang ◄── s
 | Binário | Execuções | Mediana | Mínimo | Resultado |
 |---|:---:|---:|---:|---|
 | hb_assets_oracle (taskset cpu7, romfs em /data/local/tmp/romfs) | 15 | 0.0011 s | 0.0008 s | `0x5d07c479` ✅ |
+| hb_assets_oracle lendo o RomFS extraído do hb_assets.nro (nro_tool --extract-romfs; taskset cpu7) | 15 | — | — | `0x5d07c479` ✅ |
 
 **Validação**
 
 | Verificação | Valor | |
 |---|---|:---:|
 | Referência Python (gen_romfs.py: zlib.crc32 e FNV-1a do bloco) | `0x5d07c479 / 0x3e52039d8d7f4325 / 8d34db82` | ✅ |
+| RomFS extraído do hb_assets.nro (seção ASET, df706d0) = saída do gen_romfs.py, byte a byte; hb_assets no A56 lendo o extraído (15×, taskset 80) | `data/bloco.bin + texto/info.txt idênticos; 0x5d07c479 / 0x3e52039d8d7f4325 / 8d34db82, 15/15` | ✅ |
 | Oráculo no host (llvm-mingw) e no A56 (15×, taskset 80): saída idêntica | `0x5d07c479 / 2 entradas / 2/2 recusados / sdmc ok` | ✅ |
 | hb_assets.nro (RomFS embutido): sítios do nro_tool.py conferidos contra o hb_assets.elf | `89 (18 svc), OK` | ✅ |
 | svc_shim_test: romfs:/, sdmc:/, fsdev e stdio roteado no host (llvm-mingw) | `99/99` | ✅ |
