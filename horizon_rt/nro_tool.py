@@ -533,7 +533,7 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
     ro_off = seg['ro']['offset']
     ro_sz = seg['ro']['size']
     ro_data = nro['image'][ro_off:ro_off + ro_sz]
-    for m in re.finditer(rb'[\x20-\x7e\n\r\t]{3,}\x00', ro_data):
+    for m in re.finditer(rb'[\x20-\x7e\n\r\t]{1,}\x00', ro_data):
         addr_hex = hex(base + ro_off + m.start())
         s = m.group(0)[:-1].decode('utf-8', errors='replace')
         strings[addr_hex] = s
@@ -594,6 +594,30 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
             item = (addr, mnem, rest, fmt_line)
             insns.append(item)
             insn_by_addr[addr] = item
+
+    adrp_tracker = {}
+    for addr, mnem, rest, line in insns:
+        if mnem == 'adrp':
+            m = re.match(r'([wx]\d+),\s*0x([0-9a-fA-F]+)', rest)
+            if m:
+                adrp_tracker[m.group(1).lower().replace('w', 'x')] = int(m.group(2), 16)
+        elif mnem == 'add':
+            m = re.match(r'([wx]\d+),\s*([wx]\d+),\s*#(0x[0-9a-fA-F]+|\d+)', rest)
+            if m:
+                dst = m.group(1).lower().replace('w', 'x')
+                src = m.group(2).lower().replace('w', 'x')
+                if src in adrp_tracker:
+                    off = int(m.group(3), 0)
+                    ptr = adrp_tracker[src] + off
+                    if hex(ptr) not in strings and (base + ro_off <= ptr < base + ro_off + ro_sz):
+                        if ro_data[ptr - (base + ro_off)] == 0:
+                            strings[hex(ptr)] = ""
+                if dst != src:
+                    adrp_tracker.pop(dst, None)
+        else:
+            m_wr = re.match(r'([wx]\d+)', rest)
+            if m_wr:
+                adrp_tracker.pop(m_wr.group(1).lower().replace('w', 'x'), None)
 
     # 4. Inferencia de simbolos e pontos de entrada conhecidos para binarios stripped
     known_entries = set(bl_targets)
@@ -720,7 +744,59 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
             known_entries.add(s_addr)
 
         last_bl = None
+        global_reg_val = {}
+        global_reg_str = {}
         for i, (addr, mnem, rest, line) in enumerate(main_ins):
+            toks = [o.strip() for o in rest.split(',')] if rest else []
+            if mnem == 'adrp' and len(toks) >= 2:
+                try:
+                    global_reg_val[toks[0].lower()] = int(toks[1].lstrip('#'), 16)
+                    global_reg_str.pop(toks[0].lower(), None)
+                except ValueError:
+                    pass
+            elif mnem == 'add' and len(toks) >= 3:
+                dst, src = toks[0].lower(), toks[1].lower()
+                if src in global_reg_val and toks[2].startswith('#'):
+                    try:
+                        off = int(toks[2].lstrip('#'), 0)
+                        ptr = global_reg_val[src] + off
+                        global_reg_val[dst] = ptr
+                        if hex(ptr) in strings:
+                            global_reg_str[dst] = strings[hex(ptr)]
+                        else:
+                            global_reg_str.pop(dst, None)
+                    except ValueError:
+                        pass
+                else:
+                    global_reg_val.pop(dst, None)
+                    global_reg_str.pop(dst, None)
+            elif mnem == 'mov' and len(toks) >= 2:
+                dst = toks[0].lower()
+                if toks[1].startswith('#'):
+                    try:
+                        global_reg_val[dst] = int(toks[1].lstrip('#'), 0)
+                        global_reg_str.pop(dst, None)
+                    except ValueError:
+                        pass
+                elif toks[1].lower() in global_reg_str:
+                    global_reg_str[dst] = global_reg_str[toks[1].lower()]
+                    global_reg_val[dst] = global_reg_val.get(toks[1].lower())
+                elif toks[1].lower() in global_reg_val:
+                    global_reg_val[dst] = global_reg_val[toks[1].lower()]
+                    global_reg_str.pop(dst, None)
+                else:
+                    global_reg_val.pop(dst, None)
+                    global_reg_str.pop(dst, None)
+            elif mnem == 'movk' and len(toks) >= 2:
+                dst = toks[0].lower()
+                if dst in global_reg_val and toks[1].startswith('#'):
+                    try:
+                        imm = int(toks[1].lstrip('#'), 0)
+                        sh = int(toks[2].split('#')[1], 0) if len(toks) >= 3 and 'LSL' in toks[2] else 0
+                        global_reg_val[dst] |= (imm << sh)
+                    except ValueError:
+                        pass
+
             if mnem != 'bl':
                 continue
             try:
@@ -728,56 +804,10 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
             except ValueError:
                 continue
 
-            start_bb = i
-            while start_bb > 0:
-                prev_m = main_ins[start_bb - 1][1]
-                if prev_m in ('bl', 'b', 'ret', 'br') or prev_m.startswith('b.') or prev_m in ('cbz', 'cbnz', 'tbz', 'tbnz'):
-                    break
-                start_bb -= 1
-
-            window = main_ins[start_bb:i]
-            reg_val = {}
-            reg_str = {}
-            for w_addr, w_mn, w_ops, _ in window:
-                toks = [o.strip() for o in w_ops.split(',')] if w_ops else []
-                if w_mn == 'adrp':
-                    try:
-                        reg_val[toks[0].lower()] = int(toks[1].lstrip('#'), 16)
-                    except ValueError:
-                        pass
-                elif w_mn == 'add' and len(toks) >= 3:
-                    dst, src = toks[0].lower(), toks[1].lower()
-                    if src in reg_val and toks[2].startswith('#'):
-                        try:
-                            off = int(toks[2].lstrip('#'), 0)
-                            ptr = reg_val[src] + off
-                            reg_val[dst] = ptr
-                            if hex(ptr) in strings:
-                                reg_str[dst] = strings[hex(ptr)]
-                        except ValueError:
-                            pass
-                elif w_mn == 'mov':
-                    dst = toks[0].lower()
-                    if toks[1].startswith('#'):
-                        try:
-                            reg_val[dst] = int(toks[1].lstrip('#'), 0)
-                        except ValueError:
-                            pass
-                    elif toks[1].lower() in reg_str:
-                        reg_str[dst] = reg_str[toks[1].lower()]
-                    elif toks[1].lower() in reg_val:
-                        reg_val[dst] = reg_val[toks[1].lower()]
-                elif w_mn == 'movk':
-                    dst = toks[0].lower()
-                    if dst in reg_val and len(toks) >= 2 and toks[1].startswith('#'):
-                        try:
-                            imm = int(toks[1].lstrip('#'), 0)
-                            sh = int(toks[2].split('#')[1], 0) if len(toks) >= 3 and 'LSL' in toks[2] else 0
-                            reg_val[dst] |= (imm << sh)
-                        except ValueError:
-                            pass
-
+            reg_val = dict(global_reg_val)
+            reg_str = dict(global_reg_str)
             s0 = reg_str.get('x0', '')
+            s1 = reg_str.get('x1', '')
             s2 = reg_str.get('x2', '')
             w0 = reg_val.get('w0', reg_val.get('x0'))
             w1 = reg_val.get('w1', reg_val.get('x1'))
@@ -787,10 +817,39 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
             if s0.startswith('[+] ') and s0.endswith('\n') and 'out' not in syms_by_name:
                 register_sym(tgt, 'out', 0x20)
 
-            if s0 in ('smInitialize', 'appletInitialize', 'hidInitialize', 'fsInitialize'):
+            if s0 in ('smInitialize', 'appletInitialize', 'hidInitialize', 'fsInitialize', 'fsdevMountSdmc', 'romfsInit'):
                 register_sym(tgt, 'open_service', 0x40)
                 if last_bl:
                     register_sym(last_bl, s0, 0x100)
+
+            if s0 == 'romfs:/' and 'opendir' not in syms_by_name:
+                register_sym(tgt, 'opendir', 0x40)
+
+            if s0 == 'romfs':
+                if 'romfsInit' in syms_by_name and tgt != syms_by_name['romfsInit'][0]:
+                    register_sym(tgt, 'romfsUnmount', 0x40)
+
+            if s1 in ('rb', 'r', 'wb', 'w', 'a', 'r+', 'w+') and ('romfs:/' in s0 or 'sdmc:/' in s0):
+                register_sym(tgt, 'fopen', 0x40)
+
+            if s0 in ('.', '..') or s1 in ('.', '..'):
+                register_sym(tgt, 'strcmp', 0x40)
+
+            if ('romfs:' in s0 or 'sdmc:' in s0) and s1 not in ('rb', 'r', 'wb', 'w', 'a', 'r+', 'w+') and not s0.startswith('[') and ' ' not in s0:
+                if 'stat' not in syms_by_name and s0 != 'romfs:/':
+                    register_sym(tgt, 'stat', 0x40)
+                elif 'stat' in syms_by_name and tgt != syms_by_name['stat'][0] and s0.startswith('sdmc:') and 'remove' not in syms_by_name:
+                    register_sym(tgt, 'remove', 0x40)
+
+            w2 = reg_val.get('w2', reg_val.get('x2'))
+            if w1 == 1 and (w2 == 4096 or w2 == 4) and 'fread' not in syms_by_name:
+                register_sym(tgt, 'fread', 0x40)
+
+            if (w1 == 65536 or w1 == 0x10000) and 'fseek' not in syms_by_name:
+                register_sym(tgt, 'fseek', 0x40)
+
+            if (w1 == 64 or w1 == 16) and 'fgets' not in syms_by_name:
+                register_sym(tgt, 'fgets', 0x40)
 
             if (w1 == 0x1f or w1 == 31) and w0 == 1:
                 register_sym(tgt, 'padConfigureInput', 0x40)
@@ -813,6 +872,58 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
                     register_sym(w_worker, 'sub_1004f0', 0x200)
 
             last_bl = tgt
+            for r_idx in range(19):
+                global_reg_val.pop(f'x{r_idx}', None)
+                global_reg_val.pop(f'w{r_idx}', None)
+                global_reg_str.pop(f'x{r_idx}', None)
+                global_reg_str.pop(f'w{r_idx}', None)
+
+        if 'opendir' in syms_by_name:
+            od_addr = syms_by_name['opendir'][0]
+            od_idx = next((i for i, ins in enumerate(main_ins) if ins[1] == 'bl' and int(ins[2], 16) == od_addr), None)
+            if od_idx is not None:
+                for j in range(od_idx + 1, min(od_idx + 15, len(main_ins))):
+                    if main_ins[j][1] == 'bl' and int(main_ins[j][2], 16) not in syms:
+                        register_sym(int(main_ins[j][2], 16), 'readdir', 0x40)
+                        break
+                for j in range(od_idx + 1, min(od_idx + 45, len(main_ins))):
+                    if main_ins[j][1] == 'bl' and int(main_ins[j][2], 16) not in syms:
+                        nxt_bl = [main_ins[k] for k in range(j + 1, min(j + 10, len(main_ins))) if main_ins[k][1] == 'bl']
+                        if nxt_bl and syms.get(int(nxt_bl[0][2], 16), ('',))[0] == 'snprintf':
+                            register_sym(int(main_ins[j][2], 16), 'closedir', 0x40)
+                            break
+
+        if 'fseek' in syms_by_name:
+            fs_addr = syms_by_name['fseek'][0]
+            fs_idx = next((i for i, ins in enumerate(main_ins) if ins[1] == 'bl' and int(ins[2], 16) == fs_addr), None)
+            if fs_idx is not None:
+                for j in range(fs_idx + 1, min(fs_idx + 10, len(main_ins))):
+                    if main_ins[j][1] == 'bl' and int(main_ins[j][2], 16) not in syms:
+                        register_sym(int(main_ins[j][2], 16), 'fclose', 0x40)
+                        break
+
+        if 'fopen' in syms_by_name and 'fclose' in syms_by_name:
+            fo_addr = syms_by_name['fopen'][0]
+            fc_addr = syms_by_name['fclose'][0]
+            for i, ins in enumerate(main_ins):
+                if ins[1] == 'bl' and int(ins[2], 16) == fo_addr:
+                    for j in range(i + 1, min(i + 15, len(main_ins))):
+                        if main_ins[j][1] == 'bl':
+                            b_tgt = int(main_ins[j][2], 16)
+                            if b_tgt == fc_addr:
+                                break
+                            if b_tgt not in syms:
+                                register_sym(b_tgt, 'fputs', 0x40)
+                                break
+
+        if 'romfsUnmount' in syms_by_name:
+            ru_addr = syms_by_name['romfsUnmount'][0]
+            ru_idx = next((i for i, ins in enumerate(main_ins) if ins[1] == 'bl' and int(ins[2], 16) == ru_addr), None)
+            if ru_idx is not None:
+                exit_bls = [int(main_ins[j][2], 16) for j in range(ru_idx + 1, min(ru_idx + 10, len(main_ins))) if main_ins[j][1] == 'bl' and int(main_ins[j][2], 16) not in syms]
+                exit_names = ['fsdevUnmountAll', 'fsExit', 'smExit']
+                for b_addr, b_name in zip(exit_bls, exit_names):
+                    register_sym(b_addr, b_name, 0x40)
 
         if 'threadCreate' in syms_by_name:
             tc_addr = syms_by_name['threadCreate'][0]
@@ -993,7 +1104,13 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
         c_name = syms[c_addr][0] if c_addr in syms else f'sub_{c_addr:x}'
         # Funcoes da libc/shim (strlen, malloc, free, svc*, etc.) nao necessitam de extracao de corpo
         if c_name in shim_fns or c_name in ('strlen', 'memcpy', 'memset', 'memmove', 'strcmp', 'strcpy', 'strncpy',
-                      'malloc', 'free', 'calloc', 'realloc', 'snprintf', 'printf', 'puts') or c_name.startswith('svc'):
+                      'malloc', 'free', 'calloc', 'realloc', 'snprintf', 'printf', 'puts',
+                      'fopen', 'fclose', 'fread', 'fseek', 'fgets', 'fputs', 'remove',
+                      'stat', 'opendir', 'readdir', 'closedir',
+                      'romfsInit', 'romfsExit', 'romfsUnmount', 'fsdevMountSdmc', 'fsdevUnmountAll',
+                      'fsInitialize', 'fsExit', 'smInitialize', 'smExit', 'hidInitialize', 'hidExit',
+                      'appletInitialize', 'appletExit', 'padConfigureInput', 'padInitializeWithMask',
+                      'padUpdate', 'appletMainLoop') or c_name.startswith('svc'):
             continue
 
         if base <= c_addr < base + seg['text']['size']:

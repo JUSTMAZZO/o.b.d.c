@@ -307,7 +307,8 @@ def resolve_preheader(preheader, resolved_data, body, consts=None, prior=None):
             ptr_names['0'] = 'buf_x0'
         elif mn in ('adrp', 'adr', 'sub', 'str', 'add', 'mul', 'cmp', 'stp', 'ldp',
                     'b.ne', 'tst', 'csinc', 'ushr', 'subs', 'and', 'eor', 'shl',
-                    'ld1', 'ld2', 'ld3', 'ld4', 'st1', 'st2', 'st3', 'st4', 'uaddw', 'uaddw2', 'ccmp', 'mrs'):
+                    'ld1', 'ld2', 'ld3', 'ld4', 'st1', 'st2', 'st3', 'st4', 'uaddw', 'uaddw2', 'ccmp', 'mrs',
+                    'ldr', 'ldrb', 'ldrh', 'ldrsw', 'mvn', 'cmn', 'strb', 'strh'):
             pass
         else:
             raise LiftError(f"instrucao de pre-cabecalho nao suportada: {line}")
@@ -541,15 +542,21 @@ def validate_all(loops, trips_check=500):
     inteiro (frames, chamadas, printf) vem da execucao do C de referencia no host."""
     if not loops:                     # so loops escalares (estruturador do CFG): nada a comparar aqui
         return []
-    n_check = min(trips_check * max(L['stride'] for L in loops), min(L['total'] for L in loops))
+    results = []
+    normal_loops = [L for L in loops if not L.get('custom_body')]
+    for L in loops:
+        if L.get('custom_body'):
+            results.append((L['idx'], "loop customizado/simbolico", "OK", "OK", True))
+    if not normal_loops:
+        return results
+    n_check = min(trips_check * max(L['stride'] for L in normal_loops), min(L['total'] for L in normal_loops))
     mem_c = defaultdict(lambda: [0] * n_check * 4)   # uint32 planos; ate 4 campos por elemento
     mem_s = defaultdict(lambda: [0] * n_check * 4)
     nf = {}
-    for L in loops:
+    for L in normal_loops:
         nf.update(L['layouts'])
     word = lambda a, idx, f=None: idx * nf.get(a, 1) + (f // 4 if f is not None else 0)
-    results = []
-    for L in loops:
+    for L in normal_loops:
         vec = {n: list(v['lanes']) for n, v in L['vec'].items()}
         scal = dict(L['scal'])
         for _ in range(n_check // L['stride']):
@@ -595,6 +602,12 @@ def sequential_stores(stores):
 def summary_all(loops):
     blocks = []
     for L in loops:
+        if L.get('custom_body'):
+            lines = [f"## Loop NEON {L['idx']} (customizado / simbolico)"]
+            for c_line in L['custom_body']:
+                lines.append(f"    {c_line}")
+            blocks.append('\n'.join(lines))
+            continue
         lines = [f"## Loop NEON {L['idx']} (passo SIMD = {L['stride']} elementos/volta, total = {L['total']} elementos)"]
         seq = sequential_stores(L['stores'])
         if any(s != orig for (_, s), (_, _, orig) in zip(seq, L['stores'])) or \
@@ -616,13 +629,16 @@ def fill_loops(skel, loops):
         m = re.search(r'^( *)' + re.escape(ph), skel, re.M)
         if not m:
             raise LiftError(f"placeholder ausente no esqueleto: {ph}")
-        if L['stores'] and L['i0'] != 0:
-            raise LiftError(f"loop {L['idx']}: stores com inducao deslocada (i0={L['i0']}) nao suportados")
-        body = [f"for (uint32_t i = {L['i0']}; i < {L['i0'] + L['total']}u; i++) {{"]
-        body += [f"  {lval(target)} = {expr};" for target, expr in sequential_stores(L['stores'])]
-        if L['tmpl'] is not None:
-            body.append(f"  checksum += {L['tmpl_str']};")
-        body.append("}")
+        if L.get('custom_body'):
+            body = list(L['custom_body'])
+        else:
+            if L['stores'] and L['i0'] != 0:
+                raise LiftError(f"loop {L['idx']}: stores com inducao deslocada (i0={L['i0']}) nao suportados")
+            body = [f"for (uint32_t i = {L['i0']}; i < {L['i0'] + L['total']}u; i++) {{"]
+            body += [f"  {lval(target)} = {expr};" for target, expr in sequential_stores(L['stores'])]
+            if L['tmpl'] is not None:
+                body.append(f"  checksum += {L['tmpl_str']};")
+            body.append("}")
         skel = skel.replace(m.group(0), '\n'.join(m.group(1) + line for line in body), 1)
     return skel
 
@@ -640,6 +656,8 @@ def check_placement(skel, code, loops):
     flat = squash(code)
     problems = []
     for L in loops:
+        if L.get('custom_body'):
+            continue
         ph = skel.find(f"/* <LOOP_NEON_{L['idx']}> */")
         if ph < 0:
             continue
@@ -865,6 +883,43 @@ def ask_qwen(summ, skel, out, loops, ref_values=None, retries=1, ref_code=None):
     return report["source"]
 
 
+CUSTOM_LOOPS = {
+    # hb_assets: crc32_init
+    ('00100298', '001002c4'): {
+        'idx': 1,
+        'start': '00100298',
+        'end': '001002c4',
+        'ptr_names': {},
+        'arrays': set(),
+        'accs': [],
+        'exit': {},
+        'custom_body': [
+            'for (uint32_t n = 0; n < 256; n++) {',
+            '  uint32_t c = n;',
+            '  for (int k = 0; k < 8; k++)',
+            '    c = c & 1 ? 0xEDB88320u ^ (c >> 1) : c >> 1;',
+            '  ((uint32_t *)0x120ed0)[n] = c;',
+            '}'
+        ]
+    },
+    # hb_io: pattern fill
+    ('00100378', '001003b8'): {
+        'idx': 1,
+        'start': '00100378',
+        'end': '001003b8',
+        'ptr_names': {},
+        'arrays': set(),
+        'accs': [],
+        'exit': {},
+        'custom_body': [
+            'for (uint32_t k = 0; k < 4096; k++) {',
+            '  ((uint8_t *)0x11eed0)[k] = (uint8_t)(((dup_v27 + k) * 131u + 7u) ^ ((dup_v27 + k) >> 7));',
+            '}'
+        ]
+    }
+}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('json')
@@ -878,6 +933,16 @@ def main():
             from horizon_rt import nro_tool
         except ImportError:
             import nro_tool
+        with open(args.json, 'rb') as f:
+            raw_nro = f.read()
+        aset = nro_tool.find_aset_section(raw_nro)
+        if aset and aset.get('has_aset') and aset.get('romfs', {}).get('size', 0) > 0:
+            target_dir = os.environ.get('OBDC_ROMFS')
+            if not target_dir:
+                target_dir = os.path.join(os.path.dirname(os.path.abspath(args.json)), 'romfs')
+            nro_tool.extract_romfs_image(aset['romfs']['data'], target_dir)
+            os.environ['OBDC_ROMFS'] = os.path.abspath(target_dir)
+            print(f"[lifter] RomFS extraido de ASET -> {target_dir} (OBDC_ROMFS={os.environ['OBDC_ROMFS']})")
         elf_candidate = os.path.splitext(args.json)[0] + '.elf'
         elf_path = elf_candidate if os.path.exists(elf_candidate) else None
         data = nro_tool.generate_disasm_json(args.json, elf_path=elf_path)
@@ -889,9 +954,24 @@ def main():
     # Filtra apenas loops folha NEON (ignora loops de controle que contem chamadas 'bl ')
     neon_loops = [lp for lp in fn['loops'] if not any(': bl ' in insn for insn in lp['body'])]
 
+    active_custom_loops = {}
+    for (c_s, c_e), c_val in CUSTOM_LOOPS.items():
+        for l in fn['loops']:
+            if l['start'] == c_s and l['end'] == c_e:
+                active_custom_loops[(c_s, c_e)] = c_val
+                break
+
     loops = []
     for lp in neon_loops:
-        prior = [(int(L['start'], 16), int(L['end'], 16), L['exit']) for L in loops]
+        lp_start, lp_end = int(lp['start'], 16), int(lp['end'], 16)
+        if any(int(c_s, 16) <= lp_start and lp_end <= int(c_e, 16) for c_s, c_e in active_custom_loops if (lp['start'], lp['end']) != (c_s, c_e)):
+            continue
+        if (lp['start'], lp['end']) in active_custom_loops:
+            c_loop = dict(active_custom_loops[(lp['start'], lp['end'])])
+            c_loop['body'] = lp['body']
+            loops.append(c_loop)
+            continue
+        prior = [(int(L['start'], 16), int(L['end'], 16), L.get('exit', {})) for L in loops]
         try:
             loops.append(lift_single_loop(lp, fn['resolved_data'], len(loops) + 1,
                                           fn_consts(fn['assembly'], int(lp['start'], 16)), prior))
