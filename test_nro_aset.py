@@ -400,6 +400,57 @@ class TestNroAset(unittest.TestCase):
             escaped_path = os.path.join(td, 'escaped.txt')
             self.assertFalse(os.path.exists(escaped_path), "Seguranca violada: arquivo gravado fora de target_sub")
 
+    def test_09_find_aset_section_false_positive_resilience(self):
+        """Verifica que find_aset_section nao aborta prematuramente ao encontrar assinatura ASET falsa."""
+        valid_aset = make_aset(romfs_bytes=b"ROMFS_REAL_DATA_12345678")
+        fake_aset_decoy = b'ASET\x00\x00\x00\x00' + b'\xff' * 48  # offsets invalidos
+        blob = b'SOME_ARBITRARY_PREFIX_DATA' + fake_aset_decoy + valid_aset
+
+        result = nro_tool.find_aset_section(blob)
+        self.assertIsNotNone(result, "find_aset_section deve encontrar o ASET real mesmo com decoy anterior")
+        self.assertEqual(result['romfs']['data'], b"ROMFS_REAL_DATA_12345678")
+
+    def test_10_crafted_prefix_collision_path_traversal_blocked(self):
+        """Garante que tentativa de path traversal com colisao de prefixo (ex: ../sub_pwn) e estritamente bloqueada."""
+        base_blob = bytearray(pack_synthetic_romfs({'normal.txt': b'conteudo seguro'}))
+        file_meta_off = struct.unpack_from('<Q', base_blob, 56)[0]
+        # Injeta '../sub_pwn' no nome do arquivo dentro de file_meta
+        name_pos = file_meta_off + 32
+        base_blob[name_pos:name_pos + 10] = b'../sub_pwn'
+
+        with tempfile.TemporaryDirectory() as td:
+            target_sub = os.path.join(td, 'sub')
+            nro_tool.extract_romfs_image(bytes(base_blob), target_sub)
+            pwned_file = os.path.join(td, 'sub_pwn')
+            self.assertFalse(os.path.exists(pwned_file), "Vulnerabilidade: arquivo criado fora de target_sub por prefixo")
+
+    def test_11_zero_byte_file_and_null_padded_names(self):
+        """Valida extracao correta de arquivo de 0 bytes e resiliencia a terminadores nulos em nomes."""
+        test_files = {
+            'empty.bin': b"",
+            'normal.txt': b"dados normais",
+        }
+        blob = pack_synthetic_romfs(test_files)
+        with tempfile.TemporaryDirectory() as td:
+            extracted = nro_tool.extract_romfs_image(blob, td)
+            self.assertEqual(len(extracted), 2)
+            empty_path = os.path.join(td, 'empty.bin')
+            self.assertTrue(os.path.exists(empty_path))
+            self.assertEqual(os.path.getsize(empty_path), 0)
+
+    def test_12_extract_romfs_empty_out_dir(self):
+        """Valida que passar out_dir='' nao causa WinError 3 e extrai no diretorio corrente."""
+        test_files = {'arquivo.txt': b"conteudo"}
+        blob = pack_synthetic_romfs(test_files)
+        with tempfile.TemporaryDirectory() as td:
+            orig_cwd = os.getcwd()
+            try:
+                os.chdir(td)
+                extracted = nro_tool.extract_romfs_image(blob, "")
+                self.assertTrue(os.path.exists(os.path.join(td, 'arquivo.txt')))
+            finally:
+                os.chdir(orig_cwd)
+
 
 if __name__ == '__main__':
     unittest.main()
