@@ -245,6 +245,12 @@ static ShimInputState shim_input_at(u32 frame)
     ShimInputState st = {0};
     for (u32 k = 0; k < n && ev[k].frame <= frame; k++)
         st = ev[k].state;
+    if (!g_shim_input_custom && !shim_input_env_none() && frame >= 1 && frame <= 60) {
+        st.sticks[0].x = (s32)frame * 512 - 16384;
+        st.sticks[0].y = 16384 - (s32)frame * 256;
+        st.sticks[1].x = (frame >= 20 && frame < 40) ? JOYSTICK_MAX : 0;
+        st.sticks[1].y = 0;
+    }
     return st;
 }
 

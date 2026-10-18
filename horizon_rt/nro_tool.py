@@ -68,15 +68,24 @@ def find_default_objdump(custom=None):
     found = shutil.which('aarch64-none-elf-objdump')
     if found:
         return found
-    devkit = r'C:\devkitPro\devkitA64\bin\aarch64-none-elf-objdump.exe'
-    if os.path.exists(devkit):
-        return devkit
+    devkitpro = os.environ.get('DEVKITPRO')
+    if devkitpro:
+        devkit = os.path.join(devkitpro, 'devkitA64', 'bin', 'aarch64-none-elf-objdump.exe')
+        if os.path.exists(devkit):
+            return devkit
+    devkit_default = r'C:\devkitPro\devkitA64\bin\aarch64-none-elf-objdump.exe'
+    if os.path.exists(devkit_default):
+        return devkit_default
     found_llvm = shutil.which('llvm-objdump')
     if found_llvm:
         return found_llvm
-    tools = glob.glob(os.path.join(os.path.dirname(__file__), '..', 'tools', 'llvm-mingw-*', 'bin', 'llvm-objdump.exe'))
-    if tools and os.path.exists(tools[0]):
-        return tools[0]
+    for tools_pat in (
+        os.path.join(os.path.dirname(__file__), '..', '..', 'tools', 'llvm-mingw-*', 'bin', 'llvm-objdump.exe'),
+        os.path.join(os.path.dirname(__file__), '..', 'tools', 'llvm-mingw-*', 'bin', 'llvm-objdump.exe'),
+    ):
+        tools = glob.glob(tools_pat)
+        if tools and os.path.exists(tools[0]):
+            return tools[0]
     return 'aarch64-none-elf-objdump'
 
 
@@ -869,7 +878,7 @@ def generate_disasm_json(nro_path, elf_path=None, objdump=None, base=0x100000):
                 register_sym(tgt, 'threadCreate', 0x40)
                 w_worker = reg_val.get('x1')
                 if w_worker and w_worker in insn_by_addr:
-                    register_sym(w_worker, 'sub_1004f0', 0x200)
+                    register_sym(w_worker, f'sub_{w_worker:x}', 0x200)
 
             last_bl = tgt
             for r_idx in range(19):

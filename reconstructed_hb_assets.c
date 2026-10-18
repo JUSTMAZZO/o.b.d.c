@@ -195,7 +195,7 @@ int main(void) {
     for (;;) {
       p0_4 = readdir(p0_3);
       if (p0_4 == 0) break;
-      p0_5 = ((uint8_t *)p0_4 + 3);
+      p0_5 = ((struct dirent *)p0_4)->d_name;
       sp_0x68 = (uintptr_t)p0_5;
       x0_8 = strcmp((const char *)((uintptr_t)(p0_5)), (const char *)((uintptr_t)(".")));
       if (x0_8 != 0) {

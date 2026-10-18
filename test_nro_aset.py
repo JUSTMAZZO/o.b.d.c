@@ -193,20 +193,6 @@ class TestNroAset(unittest.TestCase):
         if cls._temp_dir is not None:
             cls._temp_dir.cleanup()
             cls._temp_dir = None
-        # Limpeza defensiva de artefatos residuais para nunca sujar a arvore do repositorio
-        for artifact in ('hb_assets.elf', 'hb_assets.o', 'romfs.img'):
-            p = os.path.join(cls.hb_assets_dir, artifact)
-            if os.path.exists(p):
-                try:
-                    os.remove(p)
-                except OSError:
-                    pass
-        romfs_dir = os.path.join(cls.hb_assets_dir, 'romfs')
-        if os.path.exists(romfs_dir):
-            try:
-                shutil.rmtree(romfs_dir)
-            except OSError:
-                pass
 
     @classmethod
     def _build_synthetic_hb_assets_nro(cls, out_path):

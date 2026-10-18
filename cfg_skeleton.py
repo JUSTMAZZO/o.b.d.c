@@ -151,6 +151,7 @@ class Render:
         self.ptr_alias = {}    # variavel ponteiro -> buffer tipado com o mesmo valor (copia que domina as leituras)
         self.addr_of = set()   # objetos de pilha tipados (passados como &obj)
         self.ptr_bss_addrs = set()
+        self.readdir_vars = set()
 
     def __call__(self, e, hexa=False):
         k, a = e.k, e.a
@@ -177,6 +178,11 @@ class Render:
             off = a[1]
             if off > 0x7FFFFFFFFFFFFFFF:
                 off -= (1 << 64)
+            if off in (3, 19) and (
+                (a[0].k == 'var' and a[0].a[0] in getattr(self, 'readdir_vars', ())) or
+                (a[0].k == 'call' and a[0].a[0] == 'readdir')
+            ):
+                return f"((struct dirent *){self(a[0])})->d_name"
             if off < 0:
                 return f"((uint8_t *){self(a[0])} - {-off})"
             return f"((uint8_t *){self(a[0])} + {off})"
@@ -652,6 +658,21 @@ def classify(I, calls, all_insns=None, idx=None):
     elif mn in ('tbz', 'tbnz'):
         I.kind, I.width, I.uses = 'tbz', W(ops[0]), [R(ops[0])]
         I.bit, I.target = imm(ops[1]), int(ops[2], 16)
+    elif mn == 'svc':
+        imm_m = re.search(r'#0x([0-9a-fA-F]+)|#(\d+)', ops[0])
+        imm_val = int(imm_m.group(1), 16) if imm_m and imm_m.group(1) else (int(imm_m.group(2)) if imm_m else imm(ops[0]))
+        name = 'svcOutputDebugString' if imm_val == 0x27 else f'svc_{imm_val:#x}'
+        I.kind, I.name, I.ret = 'call', name, 'x0'
+        I.defs = ['x0'] + sorted(CALLER_SAVED - {'x0'})
+        I.fixed_args = True
+        if imm_val == 0x27:
+            I.args = ['x0', 'x1']
+            I.uses = ['x0', 'x1']
+            I.convs = [None, None]
+        else:
+            I.args = ['x0']
+            I.uses = ['x0']
+            I.convs = [None]
     else:
         raise SkeletonError(f"instrucao nao suportada pelo gerador de esqueleto: {I.line}")
     I.uses = [u for u in I.uses if u and u not in ('zr', 'sp')]
@@ -1733,14 +1754,20 @@ class Skeleton:
         elif k == 'stack_ldp':
             sz = I.width // 8
             off = I.off_val if d[1] == I.defs[0] else I.off_val + sz
-            stack_base = max((o for o in self.stack_objs if o <= off), default=None)
-            ctype = 'uint32_t' if sz == 4 else 'uint64_t'
-            if stack_base is not None:
-                delta = off - stack_base
-                addr_prefix = f"&sp_{stack_base:#x}" if stack_base in getattr(self, 'typed_stack', {}) else f"sp_{stack_base:#x}"
-                e = X('var', f"*({ctype} *)((uint8_t *){addr_prefix} + {delta})", t=t)
+            if sz == 4 and any(self.typed_stack.get(o) == 'PadState' and off in (o + 0x20, o + 0x24, o + 0x28, o + 0x2c) for o in getattr(self, 'typed_stack', {})):
+                pad_base = next(o for o in self.typed_stack if self.typed_stack[o] == 'PadState' and off in (o + 0x20, o + 0x24, o + 0x28, o + 0x2c))
+                stick_idx = 0 if off in (pad_base + 0x20, pad_base + 0x24) else 1
+                stick_axis = 'x' if off in (pad_base + 0x20, pad_base + 0x28) else 'y'
+                e = X('var', f"padGetStickPos(&sp_{pad_base:#x}, {stick_idx}).{stick_axis}", t='s32')
             else:
-                e = X('var', f"sp_{off:#x}", t=t)
+                stack_base = max((o for o in self.stack_objs if o <= off), default=None)
+                ctype = 'uint32_t' if sz == 4 else 'uint64_t'
+                if stack_base is not None:
+                    delta = off - stack_base
+                    addr_prefix = f"&sp_{stack_base:#x}" if stack_base in getattr(self, 'typed_stack', {}) else f"sp_{stack_base:#x}"
+                    e = X('var', f"*({ctype} *)((uint8_t *){addr_prefix} + {delta})", t=t)
+                else:
+                    e = X('var', f"sp_{off:#x}", t=t)
         elif k == 'call':
             e = X('call', I.name, [self.arg(I, n) for n in range(len(I.args))],
                   t='void*' if I.name in PTR_RETURNING else 'u64')
@@ -1882,18 +1909,14 @@ class Skeleton:
                 target_name = None
                 if e.const() is not None:
                     c = e.const()
-                    for f in self.data.get('functions', []):
-                        ep = f.get('entry_point')
-                        if ep and int(ep, 16) == c:
-                            target_name = f['name']
-                            break
-                    if not target_name and c == 0x1004f0:
-                        target_name = 'sub_1004f0'
-                elif e.k == 'var' and e.a[0] in ('worker', 'sub_1004f0'):
-                    target_name = 'sub_1004f0'
+                    target_name = f'sub_{c:x}'
+                elif e.k == 'var':
+                    fn_match = next((f for f in self.data.get('functions', []) if f.get('name') == e.a[0]), None)
+                    if fn_match and fn_match.get('entry_point'):
+                        target_name = f"sub_{int(fn_match['entry_point'], 16):x}"
+                    else:
+                        target_name = e.a[0]
                 if target_name:
-                    if target_name == 'worker':
-                        target_name = 'sub_1004f0'
                     return X('var', target_name, t='ptr')
                 return X('cast', 'ThreadFunc', X('cast', 'uintptr_t', e, t='u64'), t='ptr')
         elif I.name in ('threadStart', 'threadWaitForExit', 'threadClose'):
@@ -1931,6 +1954,11 @@ class Skeleton:
                     return X('const', 0, t='void*')
                 elif getattr(e, 't', None) not in ('void*', 'ptr', 'bptr'):
                     return X('cast', 'void *', e, t='ptr')
+        elif I.name == 'svcOutputDebugString':
+            if n == 0 and getattr(e, 't', None) != 'str':
+                return X('cast', 'const char *', X('cast', 'uintptr_t', e, t='u64'), t='str')
+            if n == 1:
+                return X('cast', 'uint64_t', e, t='u64')
         elif I.name == 'svcSignalProcessWideKey':
             if n == 0:
                 if e.const() is not None:
@@ -2605,6 +2633,23 @@ class Skeleton:
             P = self.use_web.get((C.idx, C.uses[0]))
             if P is not None and P.var and len(P.defs) == 1 and all(C.block in self.dom[b] for b in load_blocks):
                 self.R.ptr_alias[P.name] = w.name
+        self.R.readdir_vars = set()
+        for I in self.insns:
+            if I.kind == 'call' and I.name == 'readdir':
+                w = self.def_web.get((I.idx, 'x0'))
+                if w and w.var:
+                    self.R.readdir_vars.add(w.name)
+        changed = True
+        while changed:
+            changed = False
+            for I in self.insns:
+                if I.kind == 'copy' and I.uses and I.defs:
+                    src_w = self.use_web.get((I.idx, I.uses[0]))
+                    dst_w = self.def_web.get((I.idx, I.defs[0]))
+                    if src_w and src_w.name in self.R.readdir_vars and dst_w and dst_w.var:
+                        if dst_w.name not in self.R.readdir_vars:
+                            self.R.readdir_vars.add(dst_w.name)
+                            changed = True
         body = self.emit_range(0, len(self.blocks), None)
         frame_offs = sorted({imm(mem(next(o for o in I.ops if o.startswith('[')))[1])
                              for I in self.insns if I.kind == 'frame' and any(o.startswith('[sp') for o in I.ops)
