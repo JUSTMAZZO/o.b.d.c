@@ -251,6 +251,7 @@ static ShimInputState shim_input_at(u32 frame)
 SHIM_API void padConfigureInput(u32 max_players, u32 style_set)
 {
     g_shim_max_players = max_players;
+    (void)g_shim_max_players;
     g_shim_style_set = style_set;
 }
 
@@ -1881,9 +1882,33 @@ SHIM_API void fsDirClose(FsDir *d)
  * Diferenca: a libnx resolve caminhos relativos a partir de "sdmc:/" (chdir do __appInit); o shim os deixa
  * relativos ao diretorio atual do host.
  */
+#ifndef OBDC_SDCARD
+#define OBDC_SDCARD "/data/local/tmp/sdcard"
+#endif
+
 #ifndef OBDC_ROMFS_ROOT
+#if defined(__ANDROID__)
+#define OBDC_ROMFS_ROOT OBDC_SDCARD "/romfs"
+#else
 #define OBDC_ROMFS_ROOT "./romfs"
 #endif
+#endif
+
+typedef struct {
+    uint64_t header_size;
+    uint64_t dir_hash_table_offset;
+    uint64_t dir_hash_table_size;
+    uint64_t dir_meta_table_offset;
+    uint64_t dir_meta_table_size;
+    uint64_t file_hash_table_offset;
+    uint64_t file_hash_table_size;
+    uint64_t file_meta_table_offset;
+    uint64_t file_meta_table_size;
+    uint64_t data_offset;
+} RomfsHeader;
+
+static int s_romfs_mounted __attribute__((unused)) = 0;
+static char s_romfs_base_path[512] __attribute__((unused)) = {0};
 
 #define SHIM_DEV_NAME_MAX 32      /* libnx: nome com ate 31 caracteres, sem ":" */
 #define SHIM_MAX_DEVICES  8
@@ -2154,12 +2179,128 @@ SHIM_API Result romfsMountSelf(const char *name)
         return LIBNXRESULT(NotFound);
     if (shim_dev_add(name, true, NULL, root) < 0)
         return errno == EEXIST ? LIBNXRESULT(AlreadyMapped) : LIBNXRESULT(BadInput);
+    if (name && strcmp(name, "romfs") == 0) {
+        s_romfs_mounted = 1;
+        snprintf(s_romfs_base_path, sizeof s_romfs_base_path, "%s", root);
+    }
     return 0;
 }
 
-SHIM_API Result romfsUnmount(const char *name) { return shim_dev_remove(name, true) ? LIBNXRESULT(NotFound) : 0; }
-SHIM_API Result romfsInit(void) { return romfsMountSelf("romfs"); }
-SHIM_API Result romfsExit(void) { return romfsUnmount("romfs"); }
+SHIM_API Result romfsMount(const char *name)
+{
+    return romfsMountSelf(name);
+}
+
+SHIM_API Result romfsUnmount(const char *name)
+{
+    if (name && strcmp(name, "romfs") == 0) {
+        s_romfs_mounted = 0;
+        s_romfs_base_path[0] = '\0';
+    }
+    return shim_dev_remove(name, true) ? LIBNXRESULT(NotFound) : 0;
+}
+
+SHIM_API Result romfsInit(void)
+{
+    Result rc = romfsMountSelf("romfs");
+    if (R_FAILED(rc))
+        return rc;
+    char msg[SHIM_FS_ROOT_MAX + 64];
+    int len = snprintf(msg, sizeof msg, "[HLE:FS] romfsInit montado em: %s\n", s_romfs_base_path);
+    if (len > 0)
+        svcOutputDebugString(msg, (u64)len);
+    return 0;
+}
+
+SHIM_API Result romfsExit(void)
+{
+    return romfsUnmount("romfs");
+}
+
+SHIM_API const char *hle_resolve_vfs_path(const char *path, char *out_buf, size_t out_size)
+{
+    if (!path || !out_buf || out_size == 0) {
+        errno = EFAULT;
+        return NULL;
+    }
+
+    const char *sub = NULL;
+    if (strncmp(path, "romfs:/", 7) == 0) {
+        sub = path + 7;
+    } else if (strncmp(path, "romfs:", 6) == 0) {
+        sub = path + 6;
+    }
+
+    if (sub != NULL) {
+        const char *base = s_romfs_base_path;
+        if (!base[0]) {
+            if (g_shim_romfs_root[0]) {
+                base = g_shim_romfs_root;
+            } else {
+                const char *env = getenv("OBDC_ROMFS");
+                if (env && *env) {
+                    base = env;
+                } else {
+#if defined(__ANDROID__)
+                    base = OBDC_SDCARD "/romfs";
+#else
+                    base = "./romfs";
+#endif
+                }
+            }
+        }
+
+        char clean_base[512];
+        snprintf(clean_base, sizeof clean_base, "%s", base);
+        size_t blen = strlen(clean_base);
+        while (blen > 1 && (clean_base[blen - 1] == '/' || clean_base[blen - 1] == '\\')) {
+            clean_base[blen - 1] = '\0';
+            blen--;
+        }
+
+        while (sub[0] == '/')
+            sub++;
+
+        char tmp_sub[FS_MAX_PATH + 1];
+        if (snprintf(tmp_sub, sizeof tmp_sub, "/%s", sub) >= (int)sizeof tmp_sub) {
+            errno = ENAMETOOLONG;
+            return NULL;
+        }
+
+        char norm_sub[FS_MAX_PATH];
+        Result rc = shim_fs_normalize(tmp_sub, norm_sub);
+        if (R_FAILED(rc)) {
+            errno = (rc == FSRESULT(DirectoryUnobtainable)) ? EACCES : EINVAL;
+            return NULL;
+        }
+
+        int written = snprintf(out_buf, out_size, "%s%s", clean_base, norm_sub);
+        if (written < 0 || (size_t)written >= out_size) {
+            errno = ENAMETOOLONG;
+            return NULL;
+        }
+    } else {
+        int written = snprintf(out_buf, out_size, "%s", path);
+        if (written < 0 || (size_t)written >= out_size) {
+            errno = ENAMETOOLONG;
+            return NULL;
+        }
+    }
+
+#if defined(_WIN32)
+    for (char *p = out_buf; *p; p++) {
+        if (*p == '/')
+            *p = '\\';
+    }
+#else
+    for (char *p = out_buf; *p; p++) {
+        if (*p == '\\')
+            *p = '/';
+    }
+#endif
+
+    return out_buf;
+}
 
 /* ---- wrappers do stdio (alvo das macros do fim do header) */
 static int shim_dev_host(const char *path, char *host, bool for_write)
@@ -2185,6 +2326,27 @@ SHIM_API FILE *shimFopen(const char *path, const char *mode)
         return NULL;
     snprintf(m, sizeof m, "%s%s", mode, strchr(mode, 'b') ? "" : "b");   /* newlib nao traduz CRLF */
     return fopen(host, m);
+}
+
+SHIM_API FILE *hle_fopen(const char *path, const char *mode)
+{
+    if (!path || !mode) {
+        errno = EINVAL;
+        return NULL;
+    }
+    if (strncmp(path, "romfs:", 6) == 0) {
+        char resolved[SHIM_FS_HOST_MAX];
+        if (!hle_resolve_vfs_path(path, resolved, sizeof resolved))
+            return NULL;
+        if (strpbrk(mode, "wa+") != NULL) {
+            errno = EROFS;
+            return NULL;
+        }
+        char m[16];
+        snprintf(m, sizeof m, "%s%s", mode, strchr(mode, 'b') ? "" : "b");
+        return fopen(resolved, m);
+    }
+    return shimFopen(path, mode);
 }
 
 SHIM_API DIR *shimOpendir(const char *path)
